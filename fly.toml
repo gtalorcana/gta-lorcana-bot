@@ -1,0 +1,24 @@
+# fly.toml app configuration file generated for gta-lorcana-bot on 2026-02-26T18:31:14-05:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'gta-lorcana-bot'
+primary_region = 'yyz'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[env]
+  ANNOUNCEMENTS_CHANNEL = 'announcements'
+  DECKLISTS_CHANNEL = 'decklists'
+  RESULTS_CHANNEL = 'results'
+  WELCOME_CHANNEL = 'general'
+
+[processes]
+  app = 'python bot.py'
+
+[[vm]]
+  memory = '256mb'
+  cpus = 1
+  memory_mb = 256

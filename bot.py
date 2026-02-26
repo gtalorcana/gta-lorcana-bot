@@ -139,27 +139,27 @@ async def on_message(message: discord.Message):
     await bot.process_commands(message)
 
 
-@bot.event
-async def on_member_join(member: discord.Member):
-    """Auto-greet new members when they join the server."""
-    channel = get_channel(member.guild, WELCOME_CHANNEL)
-    if not channel:
-        return
-
-    embed = make_embed(
-        title=f"✦ Welcome, {member.display_name}!",
-        description=(
-            f"A new Illumineer has arrived in the GTA Lorcana community! 🌟\n\n"
-            f"**Getting started:**\n"
-            f"• Introduce yourself and tell us your favourite ink!\n"
-            f"• Use `/rank` to pick your player role\n"
-            f"• Check `#announcements` for upcoming events\n"
-            f"• Visit our website for the full schedule\n\n"
-            f"*The Great Illuminary shines brighter with you here.* ✨"
-        )
-    )
-    embed.set_thumbnail(url=member.display_avatar.url)
-    await channel.send(embed=embed)
+# @bot.event
+# async def on_member_join(member: discord.Member):
+#     """Auto-greet new members when they join the server."""
+#     channel = get_channel(member.guild, WELCOME_CHANNEL)
+#     if not channel:
+#         return
+#
+#     embed = make_embed(
+#         title=f"✦ Welcome, {member.display_name}!",
+#         description=(
+#             f"A new Illumineer has arrived in the GTA Lorcana community! 🌟\n\n"
+#             f"**Getting started:**\n"
+#             f"• Introduce yourself and tell us your favourite ink!\n"
+#             f"• Use `/rank` to pick your player role\n"
+#             f"• Check `#announcements` for upcoming events\n"
+#             f"• Visit our website for the full schedule\n\n"
+#             f"*The Great Illuminary shines brighter with you here.* ✨"
+#         )
+#     )
+#     embed.set_thumbnail(url=member.display_avatar.url)
+#     await channel.send(embed=embed)
 
 
 # ═══════════════════════════════════════════════════════════════
