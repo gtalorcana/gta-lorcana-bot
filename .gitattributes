@@ -1,0 +1,9 @@
+# Force LF line endings for all files in this repo
+# This ensures Linux/Docker compatibility on Fly.io
+
+* text=auto eol=lf
+*.py text eol=lf
+*.toml text eol=lf
+*.txt text eol=lf
+*.md text eol=lf
+Dockerfile text eol=lf
