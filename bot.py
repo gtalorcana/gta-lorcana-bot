@@ -4,6 +4,8 @@ GTA Lorcana — Discord Bot
 Features:
   - Auto-syncs #announcements to the website via Cloudflare Worker
   - /schedule        — shows upcoming events
+  - /results         — posts tournament results & syncs to site
+  - /decklist        — members submit decklists to a dedicated channel
   - /rank            — self-assign a player role (Casual / Competitive / Judge)
   - /welcome         — manually welcome a member (admins only)
   - /help            — list all commands
@@ -18,9 +20,12 @@ Environment variables (.env or Wispbyte):
   WORKER_SECRET
   ANNOUNCEMENTS_CHANNEL      (default: announcements)
   RESULTS_REPORTING_CHANNEL  (default: results-reporting)
+  RESULTS_CHANNEL            (default: results)
+  DECKLISTS_CHANNEL          (default: decklists)
   WELCOME_CHANNEL            (default: general)
 """
 
+import asyncio
 import os
 import re
 
@@ -29,6 +34,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
+from datetime import datetime
 
 load_dotenv()
 
@@ -38,8 +44,10 @@ WORKER_URL            = os.getenv("WORKER_URL")
 WORKER_SECRET         = os.getenv("WORKER_SECRET")
 ANNOUNCEMENTS_CHANNEL = os.getenv("ANNOUNCEMENTS_CHANNEL", "announcements")
 RESULTS_REPORTING_CHANNEL = os.getenv("RESULTS_REPORTING_CHANNEL", "results-reporting")
-WELCOME_CHANNEL           = os.getenv("WELCOME_CHANNEL", "general")
-EVENTS_URL_RE         = os.getenv("EVENTS_URL_RE", "https://tcg.ravensburgerplay.com/events/[0-9]*")
+RESULTS_CHANNEL           = os.getenv("RESULTS_CHANNEL", "results")
+DECKLISTS_CHANNEL     = os.getenv("DECKLISTS_CHANNEL", "decklists")
+WELCOME_CHANNEL       = os.getenv("WELCOME_CHANNEL", "general")
+EVENTS_URL_RE         = os.getenv("EVENTS_URL_RE", r'https://tcg.ravensburgerplay.com/events/[0-9]*')
 
 # Roles members can self-assign via /rank
 SELF_ASSIGN_ROLES = ["Casual", "Competitive", "Judge"]
@@ -206,6 +214,7 @@ async def process_results_thread(thread: discord.Thread) -> bool:
             raise ValueError(f"Thread content does not match expected URL format.\nExpected: {EVENTS_URL_RE}\nGot: {text.strip()[:100]}")
 
         # Simulate success for now
+        await asyncio.sleep(5)  # placeholder — remove when real function is added
         return True
 
     except ValueError as e:
@@ -214,29 +223,30 @@ async def process_results_thread(thread: discord.Thread) -> bool:
         raise  # Re-raise HTTP/other errors so caller can handle them
 
 
-@bot.event
-async def on_thread_create(thread: discord.Thread):
-    """Detect new threads in #results-reporting and process them."""
-    # Only handle threads in the results-reporting channel
-    if not thread.parent or thread.parent.name != RESULTS_REPORTING_CHANNEL:
-        return
+async def run_results_reporting_pipeline(thread: discord.Thread, starter_msg: discord.Message, is_retry: bool = False):
+    """Shared processing logic for both on_thread_create and on_message_edit."""
+    retry_prefix = "Still could not" if is_retry else "Could not"
+    retry_suffix = "again " if is_retry else ""
 
-    print(f"  🧵 New results thread: '{thread.name}' in #{RESULTS_REPORTING_CHANNEL}")
-
-    # Join the thread so the bot can send messages in it
-    await thread.join()
-
-    # Give Discord a moment to deliver the starter message
-    import asyncio
-    await asyncio.sleep(1)
+    # Clear any previous result reactions, then add the running indicator.
+    # Each reaction gets its own try/except — if one doesn't exist, the others still run.
+    try:
+        await starter_msg.remove_reaction("✅", thread.guild.me)
+    except Exception:
+        pass
+    try:
+        await starter_msg.remove_reaction("❌", thread.guild.me)
+    except Exception:
+        pass
+    try:
+        await starter_msg.add_reaction("⏳")
+    except Exception:
+        pass
 
     try:
-        success = await process_results_thread(thread)
-        try:
-            starter_msg = await thread.fetch_message(thread.id)
-            await starter_msg.add_reaction("✅")
-        except Exception:
-            pass  # Reaction is nice-to-have, not critical
+        await process_results_thread(thread)
+
+        # Success — send message first, then react
         await thread.send(
             embed=make_embed(
                 title="✅ Results Processed",
@@ -244,45 +254,79 @@ async def on_thread_create(thread: discord.Thread):
                 colour=discord.Colour.green()
             )
         )
-        print(f"  ✓ Results thread processed OK: '{thread.name}'")
+        try:
+            await starter_msg.add_reaction("✅")
+        except Exception:
+            pass
+        print(f"  ✓ Results processed OK: '{thread.name}'")
 
     except ValueError as e:
         await thread.send(
             embed=make_embed(
                 title="⚠️ Validation Error",
-                description=(
-                    f"Could not process your results:\n```{e}```\nPlease edit your message to fix the issue — I'll retry automatically."
-                ),
+                description=f"{retry_prefix} process your results:\n```{e}```\nPlease edit your message {retry_suffix}to fix the issue — I'll retry automatically.",
                 colour=discord.Colour.yellow()
             )
         )
+        try:
+            await starter_msg.add_reaction("❌")
+        except Exception:
+            pass
         print(f"  ⚠ Validation error in '{thread.name}': {e}")
 
     except Exception as e:
         await thread.send(
             embed=make_embed(
                 title="❌ Processing Error",
-                description=(
-                    f"An error occurred while processing your results:\n```{e}```\nPlease edit your message to retry — I'll pick it up automatically."
-                ),
+                description=f"An error occurred while processing your results:\n```{e}```\nPlease edit your message {retry_suffix}to retry — I'll pick it up automatically.",
                 colour=discord.Colour.red()
             )
         )
+        try:
+            await starter_msg.add_reaction("❌")
+        except Exception:
+            pass
         print(f"  ✗ Error processing '{thread.name}': {e}")
+
+    finally:
+        # Always remove running reaction
+        try:
+            await starter_msg.remove_reaction("⏳", thread.guild.me)
+        except Exception:
+            pass
+
+
+@bot.event
+async def on_thread_create(thread: discord.Thread):
+    """Detect new threads in #results-reporting and process them."""
+    if not thread.parent or thread.parent.name != RESULTS_REPORTING_CHANNEL:
+        return
+
+    print(f"  🧵 New results thread: '{thread.name}' in #{RESULTS_REPORTING_CHANNEL}")
+
+    await thread.join()
+
+    await asyncio.sleep(1)  # wait for Discord to register the starter message
+
+    try:
+        starter_msg = await thread.fetch_message(thread.id)
+    except Exception as e:
+        print(f"  ✗ Could not fetch starter message: {e}")
+        return
+
+    await run_results_reporting_pipeline(thread, starter_msg, is_retry=False)
 
 
 @bot.event
 async def on_message_edit(before: discord.Message, after: discord.Message):
     """Re-process a results thread if the user edits the starter message after an error."""
-    # Only care about threads in results-reporting
     if not isinstance(after.channel, discord.Thread):
         return
     if not after.channel.parent or after.channel.parent.name != RESULTS_REPORTING_CHANNEL:
         return
-    # Only re-process if this is the thread starter message (message ID == thread ID)
+    # Only re-process the thread starter message (message ID == thread ID)
     if after.id != after.channel.id:
         return
-    # Ignore bot edits
     if after.author.bot:
         return
 
@@ -296,41 +340,7 @@ async def on_message_edit(before: discord.Message, after: discord.Message):
         )
     )
 
-    try:
-        success = await process_results_thread(after.channel)
-        await after.add_reaction("✅")
-        await after.channel.send(
-            embed=make_embed(
-                title="✅ Results Processed",
-                description="Your results have been successfully processed!",
-                colour=discord.Colour.green()
-            )
-        )
-        print(f"  ✓ Retry succeeded: '{after.channel.name}'")
-
-    except ValueError as e:
-        await after.channel.send(
-            embed=make_embed(
-                title="⚠️ Validation Error",
-                description=(
-                    f"Still could not process your results:\n```{e}```\nPlease edit your message again to retry."
-                ),
-                colour=discord.Colour.yellow()
-            )
-        )
-        print(f"  ⚠ Retry validation error: {e}")
-
-    except Exception as e:
-        await after.channel.send(
-            embed=make_embed(
-                title="❌ Processing Error",
-                description=(
-                    f"Error on retry:\n```{e}```\nPlease edit your message again to retry."
-                ),
-                colour=discord.Colour.red()
-            )
-        )
-        print(f"  ✗ Retry error: {e}")
+    await run_results_reporting_pipeline(after.channel, after, is_retry=True)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -366,6 +376,112 @@ async def schedule(interaction: discord.Interaction):
         inline=False
     )
     await interaction.response.send_message(embed=embed)
+
+
+# ── /results ──────────────────────────────────────────────────
+@tree.command(name="results", description="Post tournament results (organizers only)")
+@app_commands.describe(
+    event_name = "Tournament name (e.g. March Championship)",
+    winner     = "1st place player name",
+    second     = "2nd place player name",
+    third      = "3rd place player name",
+    notes      = "Extra notes, e.g. decklist link (optional)",
+)
+async def results(
+    interaction: discord.Interaction,
+    event_name: str,
+    winner: str,
+    second: str,
+    third: str,
+    notes: str = ""
+):
+    # Restrict to members with event management permission
+    if not interaction.user.guild_permissions.manage_events:
+        await interaction.response.send_message(
+            "⚠️ Only event organizers can post results.", ephemeral=True
+        )
+        return
+
+    date_str = datetime.now().strftime("%B %d, %Y")
+
+    embed = make_embed(
+        title=f"🏆 {event_name} — Results",
+        description=(
+            f"🥇 **1st** — {winner}\n"
+            f"🥈 **2nd** — {second}\n"
+            f"🥉 **3rd** — {third}\n"
+            + (f"\n📝 {notes}" if notes else "")
+        )
+    )
+    embed.set_footer(text=f"GTA Lorcana ✦ {date_str}")
+
+    # Post to #results channel
+    results_ch = get_channel(interaction.guild, RESULTS_CHANNEL)
+    if results_ch:
+        await results_ch.send(embed=embed)
+
+    # Sync a summary to the website via Worker
+    content = f"**{event_name} Results** — 🥇 {winner} · 🥈 {second} · 🥉 {third}"
+    if notes:
+        content += f" | {notes}"
+
+    payload = {
+        "id":           str(int(datetime.now().timestamp())),
+        "content":      content,
+        "timestamp":    datetime.now().isoformat(),
+        "channel_name": "announcements",
+        "author":       {"username": "GTA Lorcana", "bot": False},
+        "embeds":       [],
+        "icon":         "🏆",
+    }
+    synced = await call_worker(payload)
+
+    status = "✅ Results posted"
+    if results_ch:
+        status += f" to `#{RESULTS_CHANNEL}`"
+    status += " and synced to website! 🌐" if synced else " (website sync failed — check Worker logs)."
+
+    await interaction.response.send_message(status, ephemeral=True)
+
+
+# ── /decklist ─────────────────────────────────────────────────
+@tree.command(name="decklist", description="Submit your Lorcana decklist to the community")
+@app_commands.describe(
+    deck_name   = "Your deck's name",
+    ink_colours = "Ink colours used (e.g. Amber/Sapphire)",
+    decklist    = "Paste your card list or a dreamborn.ink / moxfield link",
+    notes       = "Strategy or description (optional)",
+)
+async def decklist(
+    interaction: discord.Interaction,
+    deck_name: str,
+    ink_colours: str,
+    decklist: str,
+    notes: str = ""
+):
+    embed = make_embed(
+        title=f"🎴 {deck_name}",
+        description=(
+            f"**Submitted by:** {interaction.user.display_name}\n"
+            f"**Inks:** {ink_colours}\n\n"
+            f"**Decklist:**\n```\n{decklist[:800]}\n```"
+            + (f"\n**Notes:** {notes}" if notes else "")
+        ),
+        colour=discord.Colour.purple()
+    )
+
+    decklists_ch = get_channel(interaction.guild, DECKLISTS_CHANNEL)
+    if decklists_ch:
+        await decklists_ch.send(embed=embed)
+        await interaction.response.send_message(
+            f"✅ Decklist posted to `#{DECKLISTS_CHANNEL}`! Thanks for sharing 🎴",
+            ephemeral=True
+        )
+    else:
+        await interaction.response.send_message(
+            f"⚠️ Couldn't find `#{DECKLISTS_CHANNEL}` — ask an admin to create it!",
+            ephemeral=True
+        )
 
 
 # ── /rank ─────────────────────────────────────────────────────
@@ -444,6 +560,8 @@ async def help_command(interaction: discord.Interaction):
         description="Here's everything I can do:"
     )
     embed.add_field(name="/schedule",         value="Show upcoming events",                                  inline=False)
+    embed.add_field(name="/results",          value="Post tournament results *(organizers only)*",            inline=False)
+    embed.add_field(name="/decklist",         value="Submit your decklist to the community",                  inline=False)
     embed.add_field(name="/rank",             value="Self-assign Casual / Competitive / Judge role",          inline=False)
     embed.add_field(name="/welcome @member",  value="Manually welcome a member *(admins only)*",              inline=False)
     embed.add_field(name="🔁 Auto-sync",      value=f"Posts in `#{ANNOUNCEMENTS_CHANNEL}` appear on the website automatically", inline=False)
