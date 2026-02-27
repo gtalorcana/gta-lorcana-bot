@@ -1,24 +1,24 @@
-# fly.toml app configuration file generated for gta-lorcana-bot on 2026-02-26T18:31:14-05:00
-#
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
+# fly.toml — GTA Lorcana Discord Bot
+# Generated for Fly.io deployment.
 
-app = 'gta-lorcana-bot'
-primary_region = 'yyz'
+app = "gta-lorcana-bot"
+primary_region = "yyz"
 
 [build]
-  dockerfile = 'Dockerfile'
-
-[env]
-  ANNOUNCEMENTS_CHANNEL = 'announcements'
-  DECKLISTS_CHANNEL = 'decklists'
-  RESULTS_CHANNEL = 'results'
-  WELCOME_CHANNEL = 'general'
+  dockerfile = "Dockerfile"
 
 [processes]
-  app = 'python bot.py'
+  app = "python bot.py"
+
+[env]
+  ANNOUNCEMENTS_CHANNEL = "announcements"
+  RESULTS_CHANNEL       = "results"
+  DECKLISTS_CHANNEL     = "decklists"
+  WELCOME_CHANNEL       = "general"
 
 [[vm]]
-  memory = '256mb'
+  memory = "256mb"
+  cpu_kind = "shared"
   cpus = 1
-  memory_mb = 256
+  auto_stop_machines = false
+  auto_start_machines = false
