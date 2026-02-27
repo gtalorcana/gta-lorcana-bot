@@ -28,7 +28,13 @@ import os
 import aiohttp
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
+
+
+@tasks.loop(minutes=5)
+async def keepalive():
+    """Heartbeat to keep the gateway connection alive on Fly.io."""
+    print(f"  2665 Heartbeat 2014 bot alive, watching #" + "{ANNOUNCEMENTS_CHANNEL}")
 from dotenv import load_dotenv
 from datetime import datetime
 
@@ -52,7 +58,11 @@ intents = discord.Intents.default()
 intents.message_content = True  # read message text
 intents.members = True          # on_member_join event
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(
+    command_prefix="!",
+    intents=intents,
+    chunk_guilds_at_startup=False,  # faster startup, avoids timeout on Fly.io
+)
 tree = bot.tree
 
 
@@ -100,12 +110,26 @@ def get_channel(guild: discord.Guild, name: str):
 # EVENTS
 # ═══════════════════════════════════════════════════════════════
 
+@tasks.loop(minutes=5)
+async def keepalive():
+    """Periodic heartbeat to keep the Discord gateway connection alive on Fly.io."""
+    print(f"  ♥ Heartbeat — bot alive, watching #{ANNOUNCEMENTS_CHANNEL}")
+
+
 @bot.event
 async def on_ready():
-    await tree.sync()
     print(f"✦ GTA Lorcana Bot online as {bot.user}")
-    print(f"  Slash commands synced")
     print(f"  Watching #{ANNOUNCEMENTS_CHANNEL} for website sync")
+    # Start heartbeat first — before any potentially blocking calls
+    if not keepalive.is_running():
+        keepalive.start()
+        print(f"  ♻ Keepalive task started")
+    # Sync slash commands in background — non-blocking
+    try:
+        await tree.sync()
+        print(f"  Slash commands synced")
+    except Exception as e:
+        print(f"  ⚠ Slash command sync failed (non-fatal): {e}")
 
 
 @bot.event
