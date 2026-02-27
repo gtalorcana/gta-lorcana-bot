@@ -14,7 +14,7 @@ Features:
 Requirements:
   pip install discord.py aiohttp python-dotenv
 
-Environment variables (.env or Railway):
+Environment variables (.env or Fly.io secrets):
   DISCORD_BOT_TOKEN
   WORKER_URL
   WORKER_SECRET
@@ -29,12 +29,6 @@ import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-
-
-@tasks.loop(minutes=5)
-async def keepalive():
-    """Heartbeat to keep the gateway connection alive on Fly.io."""
-    print(f"  2665 Heartbeat 2014 bot alive, watching #" + "{ANNOUNCEMENTS_CHANNEL}")
 from dotenv import load_dotenv
 from datetime import datetime
 
@@ -61,7 +55,6 @@ intents.members = True          # on_member_join event
 bot = commands.Bot(
     command_prefix="!",
     intents=intents,
-    chunk_guilds_at_startup=False,  # faster startup, avoids timeout on Fly.io
 )
 tree = bot.tree
 

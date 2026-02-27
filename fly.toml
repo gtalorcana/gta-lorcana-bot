@@ -1,5 +1,4 @@
 # fly.toml — GTA Lorcana Discord Bot
-# Generated for Fly.io deployment.
 
 app = "gta-lorcana-bot"
 primary_region = "yyz"
@@ -16,9 +15,16 @@ primary_region = "yyz"
   DECKLISTS_CHANNEL     = "decklists"
   WELCOME_CHANNEL       = "general"
 
+# Required to prevent Fly.io from auto-stopping the machine
+# even though this is not a web server
+[[services]]
+  internal_port = 8080
+  protocol = "tcp"
+  auto_start_machines = true
+  auto_stop_machines = false
+  min_machines_running = 1
+
 [[vm]]
   memory = "256mb"
   cpu_kind = "shared"
   cpus = 1
-  auto_stop_machines = false
-  auto_start_machines = false
