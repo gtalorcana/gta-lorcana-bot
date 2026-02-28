@@ -219,7 +219,7 @@ async def process_results_reporting_thread(thread: discord.Thread) -> bool:
         # ── YOUR FUNCTION GOES HERE ──────────────────────────
         loop = asyncio.get_running_loop()
         result1 = await loop.run_in_executor(None, append_play_hub_url, text)
-        # result2 = await loop.run_in_executor(None, lambda: get_standings())
+        result2 = await loop.run_in_executor(None, lambda: get_standings())
         # ────────────────────────────────────────────────────
 
         return True
