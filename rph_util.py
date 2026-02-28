@@ -88,6 +88,16 @@ def get_standings():
 
 def append_playhub_url(url):
     gs = GoogleSheetsApi()
+
+    previous_playhub_urls = gs.get_values(
+        SAMPLE_SPREADSHEET_ID,
+        HALF_AUTO_EVENTS_URLS_RANGE_NAME
+    )
+
+    for idx, row in enumerate(previous_playhub_urls['values']):
+        if row[0] == url:
+            raise ValueError(f"Play Hub link is already recorded.\nURL: {url}\nCell: E{idx + 2}")
+
     gs.append_values(
         SAMPLE_SPREADSHEET_ID,
         HALF_AUTO_EVENTS_URLS_RANGE_NAME,
