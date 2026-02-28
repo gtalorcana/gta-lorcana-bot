@@ -1,3 +1,6 @@
+# local copy of gta_locana_utils
+/util/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

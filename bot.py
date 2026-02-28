@@ -36,6 +36,8 @@ from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from datetime import datetime
 
+from rph_util import append_playhub_url, get_standings
+
 load_dotenv()
 
 # ── Config ────────────────────────────────────────────────────
@@ -192,6 +194,12 @@ async def on_message(message: discord.Message):
 # RESULTS REPORTING — Thread Detection
 # ═══════════════════════════════════════════════════════════════
 
+# Tracks thread IDs that have already been processed.
+# Never cleared — so any duplicate on_thread_create for the same thread is
+# always blocked, regardless of which event arrives first.
+_seen_threads: set[int] = set()
+
+
 async def process_results_reporting_thread(thread: discord.Thread) -> bool:
     """
     Fetch the thread starter message and run your results processing function.
@@ -205,16 +213,17 @@ async def process_results_reporting_thread(thread: discord.Thread) -> bool:
 
         print(f"  → Processing results thread: '{thread.name}' — {len(text)} chars")
 
-        # ── YOUR FUNCTION GOES HERE ──────────────────────────
-        # result = await your_results_function(text)
-        # ────────────────────────────────────────────────────
-
-        # Placeholder — replace with your actual function call
         if not re.fullmatch(EVENTS_URL_RE, text.strip()):
             raise ValueError(f"Thread content does not match expected URL format.\nExpected: {EVENTS_URL_RE}\nGot: {text.strip()[:100]}")
 
+        # ── YOUR FUNCTION GOES HERE ──────────────────────────
+        loop = asyncio.get_running_loop()
+        result1 = await loop.run_in_executor(None, append_playhub_url, text)
+        # result2 = await loop.run_in_executor(None, lambda: get_standings())
+        # ────────────────────────────────────────────────────
+
         # Simulate success for now
-        await asyncio.sleep(5)  # placeholder — remove when real function is added
+        # await asyncio.sleep(5)  # placeholder — remove when real function is added
         return True
 
     except ValueError as e:
@@ -302,10 +311,14 @@ async def on_thread_create(thread: discord.Thread):
     if not thread.parent or thread.parent.name != RESULTS_REPORTING_CHANNEL:
         return
 
-    print(f"  🧵 New results thread: '{thread.name}' in #{RESULTS_REPORTING_CHANNEL}")
+    if thread.id in _seen_threads:
+        print(f"  ↩ [on_thread_create] Duplicate ignored for '{thread.name}'")
+        return
+    _seen_threads.add(thread.id)
+
+    print(f"  🧵 [on_thread_create] New results thread: '{thread.name}'")
 
     await thread.join()
-
     await asyncio.sleep(1)  # wait for Discord to register the starter message
 
     try:
@@ -329,8 +342,11 @@ async def on_message_edit(before: discord.Message, after: discord.Message):
         return
     if after.author.bot:
         return
+    if before.content == after.content:
+        return  # URL embed preview or reaction update — not a real user edit
+    # _seen_threads intentionally not checked here — user edits should always retry
 
-    print(f"  ✏️  Results thread edited: '{after.channel.name}' — retrying...")
+    print(f"  ✏️  [on_message_edit] Results thread edited: '{after.channel.name}' — retrying...")
 
     await after.channel.send(
         embed=make_embed(

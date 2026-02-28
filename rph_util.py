@@ -1,0 +1,96 @@
+from datetime import datetime, timezone
+
+from util.google_sheets_api_utils import GoogleSheetsApi
+from util.rph_api_utils import RphApi
+from var.constants import SAMPLE_SPREADSHEET_ID, HALF_AUTO_EVENTS_RANGE_NAME, HALF_AUTO_STANDINGS_RANGE_NAME, \
+    HALF_AUTO_EVENTS_TIMESTAMP_RANGE_NAME, HALF_AUTO_EVENTS_URLS_RANGE_NAME
+
+
+def get_standings():
+    rphApi = RphApi()
+    gs = GoogleSheetsApi()
+    event_rows = []
+    standing_rows = []
+
+    # Write to Standings and Events page
+    user_input_data = gs.get_values(
+        SAMPLE_SPREADSHEET_ID,
+        HALF_AUTO_EVENTS_RANGE_NAME
+    )
+
+    for row in user_input_data['values']:
+        # 40 is the length of "https://tcg.ravensburgerplay.com/events/"
+        event_id = row[4][40:]
+        note = row[5] if 5 < len(row) else None
+
+        for event in rphApi.get_event_by_id(event_id):
+            if len(event['tournament_phases']) > 0:
+                last_tournament_phase = event['tournament_phases'][-1]
+                if len(last_tournament_phase['rounds']) > 0:
+
+                    if note == "Remove Last Round":
+                        last_round_id = last_tournament_phase['rounds'][-2]['id']
+                    else:
+                        # standing['record'] is the same as last round, but removed one point/ correct tiebreakers
+                        last_round_id = last_tournament_phase['rounds'][-1]['id']
+
+                    if note == "Format: Core Constructed":
+                        gameplay_format_name = "Core Constructed"
+                    else:
+                        gameplay_format_name = event['gameplay_format']['name']
+
+                    event_rows.append([
+                        event['start_datetime'][:10],
+                        event['store']['name'],
+                        gameplay_format_name,
+                        event['starting_player_count'],
+                        "https://tcg.ravensburgerplay.com/events/" + str(event['id']),
+                    ])
+
+                    standings = rphApi.get_standings_from_tournament_round_id(str(last_round_id))
+
+                    for standing in standings:
+                        standing_rows.append([
+                            event['start_datetime'][:10],
+                            event['store']['name'],
+                            standing['rank'],
+                            standing['user_event_status']['best_identifier'],
+                            standing['record'],
+                            standing['match_points'],
+                        ])
+
+    gs.update_values(
+        SAMPLE_SPREADSHEET_ID,
+        HALF_AUTO_EVENTS_RANGE_NAME,
+        "USER_ENTERED",
+        event_rows
+    )
+
+    gs.update_values(
+        SAMPLE_SPREADSHEET_ID,
+        HALF_AUTO_STANDINGS_RANGE_NAME,
+        "USER_ENTERED",
+        standing_rows
+    )
+
+    # Timestamp
+    utc_dt = datetime.now(timezone.utc)
+
+    local_dt = utc_dt.astimezone().isoformat()
+
+    gs.update_values(
+        SAMPLE_SPREADSHEET_ID,
+        HALF_AUTO_EVENTS_TIMESTAMP_RANGE_NAME,
+        "USER_ENTERED",
+        [['Last updated', local_dt]]
+    )
+
+
+def append_playhub_url(url):
+    gs = GoogleSheetsApi()
+    gs.append_values(
+        SAMPLE_SPREADSHEET_ID,
+        HALF_AUTO_EVENTS_URLS_RANGE_NAME,
+        "USER_ENTERED",
+        [[None, None, None, None, url]]
+    )
