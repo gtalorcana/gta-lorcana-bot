@@ -192,7 +192,7 @@ async def on_message(message: discord.Message):
 # RESULTS REPORTING — Thread Detection
 # ═══════════════════════════════════════════════════════════════
 
-async def process_results_thread(thread: discord.Thread) -> bool:
+async def process_results_reporting_thread(thread: discord.Thread) -> bool:
     """
     Fetch the thread starter message and run your results processing function.
     Returns True on success, False on validation/HTTP error.
@@ -244,7 +244,7 @@ async def run_results_reporting_pipeline(thread: discord.Thread, starter_msg: di
         pass
 
     try:
-        await process_results_thread(thread)
+        await process_results_reporting_thread(thread)
 
         # Success — send message first, then react
         await thread.send(
@@ -552,6 +552,90 @@ async def welcome(interaction: discord.Interaction, member: discord.Member):
     )
 
 
+# ── /recheck ──────────────────────────────────────────────────
+@tree.command(name="recheck", description=f"Reprocess any unhandled threads in #{RESULTS_REPORTING_CHANNEL} (admins only)")
+async def recheck(interaction: discord.Interaction):
+    """
+    Scans all active threads in the results-reporting forum channel.
+    Any thread that does not already have a ✅ or ❌ reaction from the bot
+    is considered missed and will be reprocessed.
+    """
+    if not interaction.user.guild_permissions.manage_guild:
+        await interaction.response.send_message("⚠️ Admins only.", ephemeral=True)
+        return
+
+    # Find the forum channel
+    forum = discord.utils.get(interaction.guild.forums, name=RESULTS_REPORTING_CHANNEL)
+    if not forum:
+        await interaction.response.send_message(
+            f"⚠️ Could not find forum channel `#{RESULTS_REPORTING_CHANNEL}`.", ephemeral=True
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    # Collect all active (non-archived) threads
+    threads = forum.threads  # already-cached active threads
+    # Also fetch any active threads not yet in cache
+    async for thread in forum.archived_threads(limit=None):
+        if thread not in threads:
+            threads = list(threads) + [thread]
+
+    if not threads:
+        await interaction.followup.send("No threads found in the channel.", ephemeral=True)
+        return
+
+    missed = []
+    for thread in threads:
+        try:
+            starter_msg = await thread.fetch_message(thread.id)
+        except Exception:
+            continue
+
+        bot_reactions = {
+            r.emoji for r in starter_msg.reactions
+            if r.me  # reactions added by this bot
+        }
+        already_handled = "✅" in bot_reactions or "❌" in bot_reactions
+
+        if not already_handled:
+            missed.append((thread, starter_msg))
+
+    if not missed:
+        await interaction.followup.send(
+            embed=make_embed(
+                title="✅ All caught up!",
+                description=f"All {len(threads)} thread(s) in `#{RESULTS_REPORTING_CHANNEL}` have already been processed.",
+                colour=discord.Colour.green()
+            ),
+            ephemeral=True
+        )
+        return
+
+    await interaction.followup.send(
+        embed=make_embed(
+            title="🔄 Rechecking missed threads...",
+            description=f"Found {len(missed)} unprocessed thread(s) out of {len(threads)} total. Processing now...",
+            colour=discord.Colour.blurple()
+        ),
+        ephemeral=True
+    )
+
+    for thread, starter_msg in missed:
+        print(f"  🔄 Rechecking missed thread: '{thread.name}'")
+        await thread.join()
+        await run_results_reporting_pipeline(thread, starter_msg, is_retry=False)
+
+    await interaction.followup.send(
+        embed=make_embed(
+            title="✦ Recheck Complete",
+            description=f"Finished processing {len(missed)} missed thread(s).",
+            colour=discord.Colour.gold()
+        ),
+        ephemeral=True
+    )
+
+
 # ── /help ─────────────────────────────────────────────────────
 @tree.command(name="help", description="Show all GTA Lorcana bot commands")
 async def help_command(interaction: discord.Interaction):
@@ -566,6 +650,7 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="/welcome @member",  value="Manually welcome a member *(admins only)*",              inline=False)
     embed.add_field(name="🔁 Auto-sync",      value=f"Posts in `#{ANNOUNCEMENTS_CHANNEL}` appear on the website automatically", inline=False)
     embed.add_field(name="🧵 Results Threads", value=f"New threads in `#{RESULTS_REPORTING_CHANNEL}` are processed automatically. Edit to retry on error.", inline=False)
+    embed.add_field(name="/recheck",          value=f"Reprocess any missed threads in `#{RESULTS_REPORTING_CHANNEL}` *(admins only)*",     inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
