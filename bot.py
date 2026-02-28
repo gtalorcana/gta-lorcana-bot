@@ -36,7 +36,7 @@ from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from datetime import datetime
 
-from rph_util import append_playhub_url, get_standings
+from rph_util import append_play_hub_url, get_standings
 
 load_dotenv()
 
@@ -218,12 +218,10 @@ async def process_results_reporting_thread(thread: discord.Thread) -> bool:
 
         # ── YOUR FUNCTION GOES HERE ──────────────────────────
         loop = asyncio.get_running_loop()
-        result1 = await loop.run_in_executor(None, append_playhub_url, text)
+        result1 = await loop.run_in_executor(None, append_play_hub_url, text)
         # result2 = await loop.run_in_executor(None, lambda: get_standings())
         # ────────────────────────────────────────────────────
 
-        # Simulate success for now
-        # await asyncio.sleep(5)  # placeholder — remove when real function is added
         return True
 
     except ValueError as e:

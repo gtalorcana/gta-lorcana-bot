@@ -7,7 +7,7 @@ from var.constants import SAMPLE_SPREADSHEET_ID, HALF_AUTO_EVENTS_RANGE_NAME, HA
 
 
 def get_standings():
-    rphApi = RphApi()
+    rph_api = RphApi()
     gs = GoogleSheetsApi()
     event_rows = []
     standing_rows = []
@@ -23,7 +23,7 @@ def get_standings():
         event_id = row[4][40:]
         note = row[5] if 5 < len(row) else None
 
-        for event in rphApi.get_event_by_id(event_id):
+        for event in rph_api.get_event_by_id(event_id):
             if len(event['tournament_phases']) > 0:
                 last_tournament_phase = event['tournament_phases'][-1]
                 if len(last_tournament_phase['rounds']) > 0:
@@ -47,7 +47,7 @@ def get_standings():
                         "https://tcg.ravensburgerplay.com/events/" + str(event['id']),
                     ])
 
-                    standings = rphApi.get_standings_from_tournament_round_id(str(last_round_id))
+                    standings = rph_api.get_standings_from_tournament_round_id(str(last_round_id))
 
                     for standing in standings:
                         standing_rows.append([
@@ -59,6 +59,7 @@ def get_standings():
                             standing['match_points'],
                         ])
 
+    # Update Events Data
     gs.update_values(
         SAMPLE_SPREADSHEET_ID,
         HALF_AUTO_EVENTS_RANGE_NAME,
@@ -66,6 +67,7 @@ def get_standings():
         event_rows
     )
 
+    # Update Standings Data
     gs.update_values(
         SAMPLE_SPREADSHEET_ID,
         HALF_AUTO_STANDINGS_RANGE_NAME,
@@ -86,7 +88,7 @@ def get_standings():
     )
 
 
-def append_playhub_url(url):
+def append_play_hub_url(url):
     gs = GoogleSheetsApi()
 
     previous_playhub_urls = gs.get_values(
