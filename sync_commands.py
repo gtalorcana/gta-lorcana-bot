@@ -17,15 +17,12 @@ DISCORD_GUILD_ID = os.getenv("DISCORD_GUILD_ID")
 if not DISCORD_GUILD_ID:
     raise ValueError("DISCORD_GUILD_ID not set in .env — right-click your server in Discord > Copy Server ID")
 
-# Import the bot from bot.py — all @tree.command decorators run at import time
 from bot import bot, DISCORD_BOT_TOKEN
 
 @bot.event
 async def on_ready():
     guild = discord.Object(id=int(DISCORD_GUILD_ID))
     try:
-        # Copy global commands into the guild-specific tree, then sync
-        bot.tree.copy_global_to(guild=guild)
         synced = await bot.tree.sync(guild=guild)
         print(f"✓ Synced {len(synced)} command(s) to guild {DISCORD_GUILD_ID}")
         for cmd in synced:
