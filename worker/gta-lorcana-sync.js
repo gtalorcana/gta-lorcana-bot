@@ -47,7 +47,7 @@ export default {
     if (payload.author?.bot) {
       return new Response('Ignored (bot)', { status: 200 });
     }
-    if (!payload.content && (!payload.embeds || payload.embeds.length === 0)) {
+    if (!payload.content && (!payload.embeds || payload.embeds.length === 0) && payload.action !== 'delete') {
       return new Response('Ignored (empty)', { status: 200 });
     }
 
@@ -59,9 +59,16 @@ export default {
       }
     }
 
-    // ── Handle delete action ──────────────────────────────────
+    // ── Shared GitHub config ──────────────────────────────
+    const fileUrl = `${GITHUB_API}/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/contents/${env.GITHUB_FILE_PATH}`;
+    const headers = {
+      'Authorization': `Bearer ${env.GITHUB_TOKEN}`,
+      'Accept': 'application/vnd.github+json',
+      'User-Agent': 'GTA-Lorcana-Worker',
+    };
+
+    // ── Handle delete action ──────────────────────────────
     if (payload.action === 'delete') {
-      // Read existing announcements
       let existingAnnouncements = [];
       let fileSha = null;
 
@@ -127,13 +134,6 @@ export default {
     };
 
     // ── Read existing announcements.json from GitHub ──────
-    const fileUrl = `${GITHUB_API}/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/contents/${env.GITHUB_FILE_PATH}`;
-    const headers = {
-      'Authorization': `Bearer ${env.GITHUB_TOKEN}`,
-      'Accept': 'application/vnd.github+json',
-      'User-Agent': 'GTA-Lorcana-Worker',
-    };
-
     let existingAnnouncements = [];
     let fileSha = null;
 
@@ -154,7 +154,7 @@ export default {
     const maxItems = parseInt(env.MAX_ANNOUNCEMENTS || '10', 10);
     const updated = [announcement, ...existingAnnouncements].slice(0, maxItems);
 
-    // ── Write back to GitHub (with retry on 409 conflict) ───────────
+    // ── Write back to GitHub (with retry on 409 conflict) ─
     let writeSuccess = false;
     let retries = 3;
     let currentSha = fileSha;
