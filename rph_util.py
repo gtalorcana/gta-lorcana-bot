@@ -2,8 +2,8 @@ from datetime import datetime, timezone
 
 from util.google_sheets_api_utils import GoogleSheetsApi
 from util.rph_api_utils import RphApi
-from constants import SAMPLE_SPREADSHEET_ID, HALF_AUTO_EVENTS_RANGE_NAME, HALF_AUTO_STANDINGS_RANGE_NAME, \
-    HALF_AUTO_EVENTS_TIMESTAMP_RANGE_NAME, HALF_AUTO_EVENTS_URLS_RANGE_NAME
+from constants import LEAGUE_SPREADSHEET_ID, EVENTS_RANGE_NAME, STANDINGS_RANGE_NAME, \
+    EVENTS_TIMESTAMP_RANGE_NAME, EVENTS_URLS_RANGE_NAME
 
 # ── Singletons ────────────────────────────────────────────────────────────────
 #
@@ -30,14 +30,14 @@ def get_standings():
 
     # Write to Standings and Events page
     user_input_data = _gs.get_values(
-        SAMPLE_SPREADSHEET_ID,
-        HALF_AUTO_EVENTS_RANGE_NAME
+        LEAGUE_SPREADSHEET_ID,
+        EVENTS_RANGE_NAME
     )
 
     for row in user_input_data['values']:
         # 40 is the length of "https://tcg.ravensburgerplay.com/events/"
-        event_id = row[4][40:]
-        note = row[5] if 5 < len(row) else None
+        event_id = row[0][40:]
+        note = row[1] if 1 < len(row) else None
 
         for event in _rph_api.get_event_by_id(event_id):
 
@@ -48,17 +48,18 @@ def get_standings():
 
             # Event should be added no matter what. To not remove the event_id from the original spreadsheet
             event_rows.append([
+                row[0],
+                row[1],
                 event['start_datetime'][:10],
                 event['store']['name'],
                 gameplay_format_name,
                 event['starting_player_count'],
-                "https://tcg.ravensburgerplay.com/events/" + str(event['id']),
             ])
 
             if len(event['tournament_phases']) > 0:
                 last_tournament_phase = event['tournament_phases'][-1]
 
-                if note == "No Top Cut":
+                if note == "No Single Elimination Phase":
                     last_tournament_phase = event['tournament_phases'][-2]
 
                 if len(last_tournament_phase['rounds']) > 0:
@@ -81,16 +82,16 @@ def get_standings():
 
     # Update Events Data
     _gs.update_values(
-        SAMPLE_SPREADSHEET_ID,
-        HALF_AUTO_EVENTS_RANGE_NAME,
+        LEAGUE_SPREADSHEET_ID,
+        EVENTS_RANGE_NAME,
         "USER_ENTERED",
         event_rows
     )
 
     # Update Standings Data
     _gs.update_values(
-        SAMPLE_SPREADSHEET_ID,
-        HALF_AUTO_STANDINGS_RANGE_NAME,
+        LEAGUE_SPREADSHEET_ID,
+        STANDINGS_RANGE_NAME,
         "USER_ENTERED",
         standing_rows
     )
@@ -100,8 +101,8 @@ def get_standings():
     local_dt = utc_dt.astimezone().isoformat()
 
     _gs.update_values(
-        SAMPLE_SPREADSHEET_ID,
-        HALF_AUTO_EVENTS_TIMESTAMP_RANGE_NAME,
+        LEAGUE_SPREADSHEET_ID,
+        EVENTS_TIMESTAMP_RANGE_NAME,
         "USER_ENTERED",
         [['Last updated', local_dt]]
     )
@@ -109,8 +110,8 @@ def get_standings():
 
 def append_play_hub_url(url):
     previous_playhub_urls = _gs.get_values(
-        SAMPLE_SPREADSHEET_ID,
-        HALF_AUTO_EVENTS_URLS_RANGE_NAME
+        LEAGUE_SPREADSHEET_ID,
+        EVENTS_URLS_RANGE_NAME
     )
 
     for idx, row in enumerate(previous_playhub_urls['values']):
@@ -118,8 +119,8 @@ def append_play_hub_url(url):
             raise ValueError(f"Play Hub link is already recorded.\nURL: {url}\nCell: E{idx + 2}")
 
     _gs.append_values(
-        SAMPLE_SPREADSHEET_ID,
-        HALF_AUTO_EVENTS_URLS_RANGE_NAME,
+        LEAGUE_SPREADSHEET_ID,
+        EVENTS_URLS_RANGE_NAME,
         "USER_ENTERED",
-        [[None, None, None, None, url]]
+        [[url]]
     )
