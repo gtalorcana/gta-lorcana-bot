@@ -37,7 +37,8 @@ from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from datetime import datetime, timezone
 
-from rph_util import append_play_hub_url, get_standings
+from rph_util import append_event_data, remove_event_data, get_standings
+
 from constants import (
     ANNOUNCEMENTS_CHANNEL as DEFAULT_ANNOUNCEMENTS_CHANNEL,
     RESULTS_REPORTING_CHANNEL as DEFAULT_RESULTS_REPORTING_CHANNEL,
@@ -218,7 +219,7 @@ async def process_results_reporting_thread(thread: discord.Thread) -> bool:
         raise ValueError(f"Thread content does not match expected URL format.\nExpected: {EVENTS_URL_RE}\nGot: {text.strip()[:100]}")
 
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, append_play_hub_url, text)
+    await loop.run_in_executor(None, append_event_data, text, thread.id)
     await loop.run_in_executor(None, get_standings)
 
     return True
@@ -369,6 +370,41 @@ async def on_message_edit(before: discord.Message, after: discord.Message):
 
     await run_results_reporting_pipeline(after.channel, after, is_retry=True)
 
+@bot.event
+async def on_message_delete(message: discord.Message):
+    """Sync announcement deletion to the website."""
+    if message.author.bot:
+        return
+    if message.channel.name != ANNOUNCEMENTS_CHANNEL:
+        return
+
+    print(f"  🗑 Announcement deleted by {message.author.display_name}: {message.content[:60]}...")
+
+    payload = {
+        "id":           str(message.id),
+        "action":       "delete",
+        "channel_name": message.channel.name,
+    }
+    await post_to_worker(payload)
+
+
+@bot.event
+async def on_thread_delete(thread: discord.Thread):
+    """Remove event data from the sheet when a results thread is deleted."""
+    if not thread.parent or thread.parent.name != RESULTS_REPORTING_CHANNEL:
+        return
+
+    print(f"  🗑 Results thread deleted: '{thread.name}'")
+
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.run_in_executor(None, remove_event_data, thread.id)
+        print(f"  ✓ Event data removed for thread '{thread.name}'")
+    except ValueError as e:
+        # Thread was never successfully processed (e.g. always had ❌) — nothing to remove
+        print(f"  ↩ No event data to remove for thread '{thread.name}': {e}")
+    except Exception as e:
+        print(f"  ✗ Failed to remove event data for thread '{thread.name}': {e}")
 
 # ═══════════════════════════════════════════════════════════════
 # SLASH COMMANDS

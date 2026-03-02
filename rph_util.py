@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
+from sys import exception
 
 from util.google_sheets_api_utils import GoogleSheetsApi
 from util.rph_api_utils import RphApi
 from constants import LEAGUE_SPREADSHEET_ID, EVENTS_RANGE_NAME, STANDINGS_RANGE_NAME, \
-    EVENTS_TIMESTAMP_RANGE_NAME, EVENTS_URLS_RANGE_NAME
+    EVENTS_TIMESTAMP_RANGE_NAME, EVENTS_INPUT_RANGE_NAME, RESULTS_REPORTING_CHANNEL_URL, EVENTS_SHEET_NAME
 
 # ── Singletons ────────────────────────────────────────────────────────────────
 #
@@ -37,7 +38,8 @@ def get_standings():
     for row in user_input_data['values']:
         # 40 is the length of "https://tcg.ravensburgerplay.com/events/"
         event_id = row[0][40:]
-        note = row[1] if 1 < len(row) else None
+        thread_id= row[1] if 1 < len(row) else None
+        note = row[2] if 2 < len(row) else None
 
         for event in _rph_api.get_event_by_id(event_id):
 
@@ -48,7 +50,8 @@ def get_standings():
 
             # Event should be added no matter what. To not remove the event_id from the original spreadsheet
             event_rows.append([
-                row[0],
+                row[0], # RPH Url
+                thread_id, # Discord Thread ID
                 note,
                 event['start_datetime'][:10],
                 event['store']['name'],
@@ -67,7 +70,6 @@ def get_standings():
 
                     if note == "Remove Last Round":
                         last_round_id = last_tournament_phase['rounds'][-2]['id']
-
                     standings = _rph_api.get_standings_from_tournament_round_id(str(last_round_id))
 
                     for standing in standings:
@@ -108,22 +110,47 @@ def get_standings():
     )
 
 
-def append_play_hub_url(url):
+def append_event_data(rph_url, thread_id):
     previous_play_hub_urls = _gs.get_values(
         LEAGUE_SPREADSHEET_ID,
-        EVENTS_URLS_RANGE_NAME
+        EVENTS_INPUT_RANGE_NAME
     )
 
-    for idx, row in enumerate(previous_play_hub_urls['values']):
-        if row[0] == url:
-            raise ValueError(f"Play Hub link is already recorded.\nURL: {url}\nCell: E{idx + 2}")
+    for row in previous_play_hub_urls['values']:
+        if row[0] == rph_url:
+            thread_url = RESULTS_REPORTING_CHANNEL_URL + str(thread_id)
+            raise ValueError(
+                f"Play Hub link is already reported.\n"
+                f"URL: {rph_url}\n"
+                f"Thread: {thread_url}"
+            )
 
     _gs.append_values(
         LEAGUE_SPREADSHEET_ID,
-        EVENTS_URLS_RANGE_NAME,
+        EVENTS_INPUT_RANGE_NAME,
         "USER_ENTERED",
-        [[url]]
+        [[rph_url, str(thread_id)]]
     )
 
-if __name__=="__main__":
-    get_standings()
+def remove_event_data(thread_id):
+    """Clear the row matching thread_id from the events input sheet."""
+    recorded = _gs.get_values(
+        LEAGUE_SPREADSHEET_ID,
+        EVENTS_INPUT_RANGE_NAME
+    )
+
+    for idx, row in enumerate(recorded['values']):
+        if len(row) > 1 and row[1] == str(thread_id):
+            print("found match!")
+            # Rows in the sheet start at row 2 (A2), so sheet row = idx + 2
+            sheet_row = idx + 2
+            clear_range = EVENTS_SHEET_NAME + f"!A{sheet_row}:G{sheet_row}"
+            _gs.update_values(
+                LEAGUE_SPREADSHEET_ID,
+                clear_range,
+                "USER_ENTERED",
+                [[""] * 7]
+            )
+            return
+
+    raise ValueError(f"No event data found for thread ID: {thread_id}")
