@@ -3,7 +3,7 @@ name: Deploy to Fly.io
 on:
   push:
     branches:
-      - fly-io  # only deploy from this branch, not main
+      - main
 
 jobs:
   deploy:
