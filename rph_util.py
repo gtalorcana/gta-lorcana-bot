@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-from sys import exception
 
 from util.google_sheets_api_utils import GoogleSheetsApi
 from util.rph_api_utils import RphApi
