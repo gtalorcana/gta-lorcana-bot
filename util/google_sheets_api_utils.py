@@ -16,7 +16,7 @@ class GoogleSheetsApi:
     def __init__(self):
         self.creds = None
 
-        _dir = os.path.dirname(os.path.abspath(__file__))
+        _dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         _token_path = os.path.join(_dir, "var", "token.json")
         _creds_path = os.path.join(_dir, "var", "credentials.json")
 

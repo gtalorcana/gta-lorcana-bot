@@ -109,12 +109,12 @@ def get_standings():
 
 
 def append_play_hub_url(url):
-    previous_playhub_urls = _gs.get_values(
+    previous_play_hub_urls = _gs.get_values(
         LEAGUE_SPREADSHEET_ID,
         EVENTS_URLS_RANGE_NAME
     )
 
-    for idx, row in enumerate(previous_playhub_urls['values']):
+    for idx, row in enumerate(previous_play_hub_urls['values']):
         if row[0] == url:
             raise ValueError(f"Play Hub link is already recorded.\nURL: {url}\nCell: E{idx + 2}")
 
