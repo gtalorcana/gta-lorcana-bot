@@ -34,7 +34,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
-from datetime import datetime
+from datetime import datetime, timezone
 
 from rph_util import append_play_hub_url, get_standings
 
@@ -568,7 +568,8 @@ async def welcome(interaction: discord.Interaction, member: discord.Member):
 
 # ── /recheck ──────────────────────────────────────────────────
 @tree.command(name="recheck", description=f"Reprocess any unhandled threads in #{RESULTS_REPORTING_CHANNEL} (admins only)")
-async def recheck(interaction: discord.Interaction):
+@app_commands.describe(after="Only recheck threads created on or after this date (YYYY-MM-DD). Leave blank to check all.")
+async def recheck(interaction: discord.Interaction, after: str = ""):
     """
     Scans all active threads in the results-reporting forum channel.
     Any thread that does not already have a ✅ or ❌ reaction from the bot
@@ -577,6 +578,17 @@ async def recheck(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.manage_guild:
         await interaction.response.send_message("⚠️ Admins only.", ephemeral=True)
         return
+
+    # Parse optional date filter
+    after_date = None
+    if after:
+        try:
+            after_date = datetime.strptime(after, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            await interaction.response.send_message(
+                "⚠️ Invalid date format. Use YYYY-MM-DD (e.g. `2025-01-15`).", ephemeral=True
+            )
+            return
 
     # Find the forum channel
     forum = discord.utils.get(interaction.guild.forums, name=RESULTS_REPORTING_CHANNEL)
@@ -595,8 +607,13 @@ async def recheck(interaction: discord.Interaction):
         if thread not in threads:
             threads = list(threads) + [thread]
 
+    # Apply date filter if provided
+    if after_date:
+        threads = [t for t in threads if t.created_at and t.created_at >= after_date]
+
     if not threads:
-        await interaction.followup.send("No threads found in the channel.", ephemeral=True)
+        date_note = f" after {after}" if after_date else ""
+        await interaction.followup.send(f"No threads found{date_note}.", ephemeral=True)
         return
 
     missed = []
