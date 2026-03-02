@@ -49,7 +49,7 @@ def get_standings():
             # Event should be added no matter what. To not remove the event_id from the original spreadsheet
             event_rows.append([
                 row[0],
-                row[1],
+                note,
                 event['start_datetime'][:10],
                 event['store']['name'],
                 gameplay_format_name,
@@ -124,3 +124,6 @@ def append_play_hub_url(url):
         "USER_ENTERED",
         [[url]]
     )
+
+if __name__=="__main__":
+    get_standings()
