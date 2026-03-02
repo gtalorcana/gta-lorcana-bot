@@ -24,6 +24,8 @@ Environment variables (.env or Wispbyte):
   DECKLISTS_CHANNEL          (default: decklists)
   WELCOME_CHANNEL            (default: general)
 """
+# Add this import at the top of bot.py alongside the existing imports
+import tracemalloc
 
 import asyncio
 import os
@@ -70,6 +72,27 @@ tree = bot.tree
 # ═══════════════════════════════════════════════════════════════
 # HELPERS
 # ═══════════════════════════════════════════════════════════════
+
+# ── Add this helper anywhere in the HELPERS section ───────────────────────────
+
+def log_memory(label: str):
+    """Log current and peak memory usage. Call before/after suspected hot spots."""
+    import os
+    try:
+        # RSS = total physical memory used by the process
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS"):
+                    rss_kb = int(line.split()[1])
+                    print(f"  🧠 [{label}] RSS: {rss_kb / 1024:.1f} MB")
+                    break
+    except Exception:
+        pass
+
+    if tracemalloc.is_tracing():
+        current, peak = tracemalloc.get_traced_memory()
+        print(f"  🧠 [{label}] tracemalloc — current: {current / 1024**2:.1f} MB, peak: {peak / 1024**2:.1f} MB")
+
 
 async def call_worker(payload: dict) -> bool:
     """Forward a payload to the Cloudflare Worker. Returns True on success."""
@@ -119,6 +142,7 @@ async def keepalive():
 
 @bot.event
 async def on_ready():
+    tracemalloc.start()          # <-- add this line
     print(f"✦ GTA Lorcana Bot online as {bot.user}")
     print(f"  Watching #{ANNOUNCEMENTS_CHANNEL} for website sync")
     print(f"  Watching #{RESULTS_REPORTING_CHANNEL} for website sync")
@@ -219,7 +243,17 @@ async def process_results_reporting_thread(thread: discord.Thread) -> bool:
         # ── YOUR FUNCTION GOES HERE ──────────────────────────
         loop = asyncio.get_running_loop()
         result1 = await loop.run_in_executor(None, append_play_hub_url, text)
+        log_memory("before get_standings")  # <-- add
         result2 = await loop.run_in_executor(None, lambda: get_standings())
+        log_memory("after get_standings")  # <-- add
+
+        # ── Also add a snapshot call after get_standings() to see the top allocators ──
+
+        snapshot = tracemalloc.take_snapshot()
+        top_stats = snapshot.statistics("lineno")
+        print("  🧠 Top 10 memory allocations:")
+        for stat in top_stats[:10]:
+            print(f"     {stat}")
         # ────────────────────────────────────────────────────
 
         return True
