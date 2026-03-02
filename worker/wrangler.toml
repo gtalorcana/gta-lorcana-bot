@@ -1,0 +1,3 @@
+name = "gta-lorcana-sync"
+main = "gta-lorcana-sync.js"
+compatibility_date = "2025-09-27"
