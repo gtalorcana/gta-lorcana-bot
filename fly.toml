@@ -1,0 +1,20 @@
+app = "gta-lorcana-bot"
+primary_region = "yyz"
+
+[build]
+
+[env]
+  PYTHONUNBUFFERED = "1"
+
+# No HTTP service — this is a Discord bot (outbound WebSocket only)
+# No ports, no health checks needed
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+[machines]
+  # Keep exactly one machine running at all times.
+  # This is the critical setting — without it Fly.io scales to zero
+  # and kills the Discord gateway WebSocket connection.
+  min_machines_running = 1

@@ -24,6 +24,8 @@ Environment variables (.env or Wispbyte):
   DECKLISTS_CHANNEL          (default: decklists)
   WELCOME_CHANNEL            (default: general)
 """
+# Add this import at the top of bot.py alongside the existing imports
+import tracemalloc
 
 import asyncio
 import os
@@ -70,6 +72,27 @@ tree = bot.tree
 # ═══════════════════════════════════════════════════════════════
 # HELPERS
 # ═══════════════════════════════════════════════════════════════
+
+# ── Add this helper anywhere in the HELPERS section ───────────────────────────
+
+def log_memory(label: str):
+    """Log current and peak memory usage. Call before/after suspected hot spots."""
+    import os
+    try:
+        # RSS = total physical memory used by the process
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS"):
+                    rss_kb = int(line.split()[1])
+                    print(f"  🧠 [{label}] RSS: {rss_kb / 1024:.1f} MB")
+                    break
+    except Exception:
+        pass
+
+    if tracemalloc.is_tracing():
+        current, peak = tracemalloc.get_traced_memory()
+        print(f"  🧠 [{label}] tracemalloc — current: {current / 1024**2:.1f} MB, peak: {peak / 1024**2:.1f} MB")
+
 
 async def call_worker(payload: dict) -> bool:
     """Forward a payload to the Cloudflare Worker. Returns True on success."""
@@ -119,6 +142,7 @@ async def keepalive():
 
 @bot.event
 async def on_ready():
+    tracemalloc.start()          # <-- add this line
     print(f"✦ GTA Lorcana Bot online as {bot.user}")
     print(f"  Watching #{ANNOUNCEMENTS_CHANNEL} for website sync")
     print(f"  Watching #{RESULTS_REPORTING_CHANNEL} for website sync")
@@ -219,7 +243,17 @@ async def process_results_reporting_thread(thread: discord.Thread) -> bool:
         # ── YOUR FUNCTION GOES HERE ──────────────────────────
         loop = asyncio.get_running_loop()
         result1 = await loop.run_in_executor(None, append_play_hub_url, text)
+        log_memory("before get_standings")  # <-- add
         result2 = await loop.run_in_executor(None, lambda: get_standings())
+        log_memory("after get_standings")  # <-- add
+
+        # ── Also add a snapshot call after get_standings() to see the top allocators ──
+
+        snapshot = tracemalloc.take_snapshot()
+        top_stats = snapshot.statistics("lineno")
+        print("  🧠 Top 10 memory allocations:")
+        for stat in top_stats[:10]:
+            print(f"     {stat}")
         # ────────────────────────────────────────────────────
 
         return True
@@ -234,6 +268,10 @@ async def run_results_reporting_pipeline(thread: discord.Thread, starter_msg: di
     """Shared processing logic for both on_thread_create and on_message_edit."""
     retry_prefix = "Still could not" if is_retry else "Could not"
     retry_suffix = "again " if is_retry else ""
+
+    # Transient status messages sent during this run.
+    # All deleted in finally — only the final success/error message is kept.
+    transient_msgs: list[discord.Message] = []
 
     # Clear any previous result reactions, then add the running indicator.
     # Each reaction gets its own try/except — if one doesn't exist, the others still run.
@@ -250,10 +288,23 @@ async def run_results_reporting_pipeline(thread: discord.Thread, starter_msg: di
     except Exception:
         pass
 
+    # Single status message covers both first run and retries.
+    try:
+        status_msg = await thread.send(
+            embed=make_embed(
+                title="🔄 Retrying..." if is_retry else "🔄 Processing...",
+                description="Reprocessing your results now..." if is_retry else "Your results are being uploaded...",
+                colour=discord.Colour.blurple()
+            )
+        )
+        transient_msgs.append(status_msg)
+    except Exception:
+        pass
+
     try:
         await process_results_reporting_thread(thread)
 
-        # Success — send message first, then react
+        # Success — permanent message kept in thread
         await thread.send(
             embed=make_embed(
                 title="✅ Results Processed",
@@ -268,6 +319,7 @@ async def run_results_reporting_pipeline(thread: discord.Thread, starter_msg: di
         print(f"  ✓ Results processed OK: '{thread.name}'")
 
     except ValueError as e:
+        # Validation error — permanent message kept so the user knows what to fix
         await thread.send(
             embed=make_embed(
                 title="⚠️ Validation Error",
@@ -282,6 +334,7 @@ async def run_results_reporting_pipeline(thread: discord.Thread, starter_msg: di
         print(f"  ⚠ Validation error in '{thread.name}': {e}")
 
     except Exception as e:
+        # Unexpected error — permanent message kept so the user knows to retry
         await thread.send(
             embed=make_embed(
                 title="❌ Processing Error",
@@ -296,11 +349,19 @@ async def run_results_reporting_pipeline(thread: discord.Thread, starter_msg: di
         print(f"  ✗ Error processing '{thread.name}': {e}")
 
     finally:
-        # Always remove running reaction
+        # Remove the ⏳ reaction
         try:
             await starter_msg.remove_reaction("⏳", thread.guild.me)
         except Exception:
             pass
+
+        # Delete all transient status messages (Processing..., Retrying..., etc.)
+        # Success/error messages are NOT in this list and are intentionally kept.
+        for msg in transient_msgs:
+            try:
+                await msg.delete()
+            except Exception:
+                pass
 
 
 @bot.event
@@ -345,14 +406,6 @@ async def on_message_edit(before: discord.Message, after: discord.Message):
     # _seen_threads intentionally not checked here — user edits should always retry
 
     print(f"  ✏️  [on_message_edit] Results thread edited: '{after.channel.name}' — retrying...")
-
-    await after.channel.send(
-        embed=make_embed(
-            title="🔄 Retrying...",
-            description="Detected an edit — reprocessing your results now.",
-            colour=discord.Colour.blurple()
-        )
-    )
 
     await run_results_reporting_pipeline(after.channel, after, is_retry=True)
 

@@ -2,47 +2,64 @@ from datetime import datetime, timezone
 
 from util.google_sheets_api_utils import GoogleSheetsApi
 from util.rph_api_utils import RphApi
-from var.constants import SAMPLE_SPREADSHEET_ID, HALF_AUTO_EVENTS_RANGE_NAME, HALF_AUTO_STANDINGS_RANGE_NAME, \
-    HALF_AUTO_EVENTS_TIMESTAMP_RANGE_NAME, HALF_AUTO_EVENTS_URLS_RANGE_NAME
+from constants import LEAGUE_SPREADSHEET_ID, EVENTS_RANGE_NAME, STANDINGS_RANGE_NAME, \
+    EVENTS_TIMESTAMP_RANGE_NAME, EVENTS_URLS_RANGE_NAME
+
+# ── Singletons ────────────────────────────────────────────────────────────────
+#
+# GoogleSheetsApi and RphApi are constructed once at module load time and
+# reused for every call. This is critical for memory:
+#
+# googleapiclient.discovery.build() — called inside GoogleSheetsApi.__init__ —
+# downloads and parses Google's full API discovery document, allocating ~160 MB
+# (93 MB in discovery.py + 67 MB in schema.py per tracemalloc). Python's memory
+# allocator does not release RSS back to the OS after the object is freed, so
+# constructing a new GoogleSheetsApi() on every get_standings() call causes RSS
+# to grow permanently with each invocation, eventually triggering OOM.
+#
+# By constructing once here, the discovery document is fetched exactly once per
+# process lifetime regardless of how many times get_standings() is called.
+
+_gs = GoogleSheetsApi()
+_rph_api = RphApi()
 
 
 def get_standings():
-    rph_api = RphApi()
-    gs = GoogleSheetsApi()
     event_rows = []
     standing_rows = []
 
     # Write to Standings and Events page
-    user_input_data = gs.get_values(
-        SAMPLE_SPREADSHEET_ID,
-        HALF_AUTO_EVENTS_RANGE_NAME
+    user_input_data = _gs.get_values(
+        LEAGUE_SPREADSHEET_ID,
+        EVENTS_RANGE_NAME
     )
 
     for row in user_input_data['values']:
         # 40 is the length of "https://tcg.ravensburgerplay.com/events/"
-        event_id = row[4][40:]
-        note = row[5] if 5 < len(row) else None
+        event_id = row[0][40:]
+        note = row[1] if 1 < len(row) else None
 
-        for event in rph_api.get_event_by_id(event_id):
+        for event in _rph_api.get_event_by_id(event_id):
 
             gameplay_format_name = event['gameplay_format']['name']
 
             if note == "Format: Core Constructed":
                 gameplay_format_name = "Core Constructed"
 
-            # Event should be added no matter what.  To not remove the event_id from the original spreadsheet
+            # Event should be added no matter what. To not remove the event_id from the original spreadsheet
             event_rows.append([
+                row[0],
+                row[1],
                 event['start_datetime'][:10],
                 event['store']['name'],
                 gameplay_format_name,
                 event['starting_player_count'],
-                "https://tcg.ravensburgerplay.com/events/" + str(event['id']),
             ])
 
             if len(event['tournament_phases']) > 0:
                 last_tournament_phase = event['tournament_phases'][-1]
 
-                if note == "No Top Cut":
+                if note == "No Single Elimination Phase":
                     last_tournament_phase = event['tournament_phases'][-2]
 
                 if len(last_tournament_phase['rounds']) > 0:
@@ -51,7 +68,7 @@ def get_standings():
                     if note == "Remove Last Round":
                         last_round_id = last_tournament_phase['rounds'][-2]['id']
 
-                    standings = rph_api.get_standings_from_tournament_round_id(str(last_round_id))
+                    standings = _rph_api.get_standings_from_tournament_round_id(str(last_round_id))
 
                     for standing in standings:
                         standing_rows.append([
@@ -64,49 +81,46 @@ def get_standings():
                         ])
 
     # Update Events Data
-    gs.update_values(
-        SAMPLE_SPREADSHEET_ID,
-        HALF_AUTO_EVENTS_RANGE_NAME,
+    _gs.update_values(
+        LEAGUE_SPREADSHEET_ID,
+        EVENTS_RANGE_NAME,
         "USER_ENTERED",
         event_rows
     )
 
     # Update Standings Data
-    gs.update_values(
-        SAMPLE_SPREADSHEET_ID,
-        HALF_AUTO_STANDINGS_RANGE_NAME,
+    _gs.update_values(
+        LEAGUE_SPREADSHEET_ID,
+        STANDINGS_RANGE_NAME,
         "USER_ENTERED",
         standing_rows
     )
 
     # Timestamp
     utc_dt = datetime.now(timezone.utc)
-
     local_dt = utc_dt.astimezone().isoformat()
 
-    gs.update_values(
-        SAMPLE_SPREADSHEET_ID,
-        HALF_AUTO_EVENTS_TIMESTAMP_RANGE_NAME,
+    _gs.update_values(
+        LEAGUE_SPREADSHEET_ID,
+        EVENTS_TIMESTAMP_RANGE_NAME,
         "USER_ENTERED",
         [['Last updated', local_dt]]
     )
 
 
 def append_play_hub_url(url):
-    gs = GoogleSheetsApi()
-
-    previous_playhub_urls = gs.get_values(
-        SAMPLE_SPREADSHEET_ID,
-        HALF_AUTO_EVENTS_URLS_RANGE_NAME
+    previous_play_hub_urls = _gs.get_values(
+        LEAGUE_SPREADSHEET_ID,
+        EVENTS_URLS_RANGE_NAME
     )
 
-    for idx, row in enumerate(previous_playhub_urls['values']):
+    for idx, row in enumerate(previous_play_hub_urls['values']):
         if row[0] == url:
             raise ValueError(f"Play Hub link is already recorded.\nURL: {url}\nCell: E{idx + 2}")
 
-    gs.append_values(
-        SAMPLE_SPREADSHEET_ID,
-        HALF_AUTO_EVENTS_URLS_RANGE_NAME,
+    _gs.append_values(
+        LEAGUE_SPREADSHEET_ID,
+        EVENTS_URLS_RANGE_NAME,
         "USER_ENTERED",
-        [[None, None, None, None, url]]
+        [[url]]
     )
