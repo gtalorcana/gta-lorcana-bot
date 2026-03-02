@@ -235,6 +235,10 @@ async def run_results_reporting_pipeline(thread: discord.Thread, starter_msg: di
     retry_prefix = "Still could not" if is_retry else "Could not"
     retry_suffix = "again " if is_retry else ""
 
+    # Transient status messages sent during this run.
+    # All deleted in finally — only the final success/error message is kept.
+    transient_msgs: list[discord.Message] = []
+
     # Clear any previous result reactions, then add the running indicator.
     # Each reaction gets its own try/except — if one doesn't exist, the others still run.
     try:
@@ -250,18 +254,23 @@ async def run_results_reporting_pipeline(thread: discord.Thread, starter_msg: di
     except Exception:
         pass
 
-    await thread.send(
-        embed=make_embed(
-            title="🔄 Processing...",
-            description="Your results are being uploaded...",
-            colour=discord.Colour.blurple()
+    # Single status message covers both first run and retries.
+    try:
+        status_msg = await thread.send(
+            embed=make_embed(
+                title="🔄 Retrying..." if is_retry else "🔄 Processing...",
+                description="Reprocessing your results now..." if is_retry else "Your results are being uploaded...",
+                colour=discord.Colour.blurple()
+            )
         )
-    )
+        transient_msgs.append(status_msg)
+    except Exception:
+        pass
 
     try:
         await process_results_reporting_thread(thread)
 
-        # Success — send message first, then react
+        # Success — permanent message kept in thread
         await thread.send(
             embed=make_embed(
                 title="✅ Results Processed",
@@ -276,6 +285,7 @@ async def run_results_reporting_pipeline(thread: discord.Thread, starter_msg: di
         print(f"  ✓ Results processed OK: '{thread.name}'")
 
     except ValueError as e:
+        # Validation error — permanent message kept so the user knows what to fix
         await thread.send(
             embed=make_embed(
                 title="⚠️ Validation Error",
@@ -290,6 +300,7 @@ async def run_results_reporting_pipeline(thread: discord.Thread, starter_msg: di
         print(f"  ⚠ Validation error in '{thread.name}': {e}")
 
     except Exception as e:
+        # Unexpected error — permanent message kept so the user knows to retry
         await thread.send(
             embed=make_embed(
                 title="❌ Processing Error",
@@ -304,11 +315,19 @@ async def run_results_reporting_pipeline(thread: discord.Thread, starter_msg: di
         print(f"  ✗ Error processing '{thread.name}': {e}")
 
     finally:
-        # Always remove running reaction
+        # Remove the ⏳ reaction
         try:
             await starter_msg.remove_reaction("⏳", thread.guild.me)
         except Exception:
             pass
+
+        # Delete all transient status messages (Processing..., Retrying..., etc.)
+        # Success/error messages are NOT in this list and are intentionally kept.
+        for msg in transient_msgs:
+            try:
+                await msg.delete()
+            except Exception:
+                pass
 
 
 @bot.event
@@ -353,14 +372,6 @@ async def on_message_edit(before: discord.Message, after: discord.Message):
     # _seen_threads intentionally not checked here — user edits should always retry
 
     print(f"  ✏️  [on_message_edit] Results thread edited: '{after.channel.name}' — retrying...")
-
-    await after.channel.send(
-        embed=make_embed(
-            title="🔄 Retrying...",
-            description="Detected an edit — reprocessing your results now.",
-            colour=discord.Colour.blurple()
-        )
-    )
 
     await run_results_reporting_pipeline(after.channel, after, is_retry=True)
 
