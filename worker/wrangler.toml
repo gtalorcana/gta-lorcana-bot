@@ -8,3 +8,8 @@ GITHUB_REPO           = "gtalorcana.ca"
 GITHUB_FILE_PATH      = "data/announcements.json"
 ANNOUNCEMENTS_CHANNEL = "announcements"
 MAX_ANNOUNCEMENTS     = "10"
+
+[observability]
+[observability.logs]
+enabled = true
+invocation_logs = true
