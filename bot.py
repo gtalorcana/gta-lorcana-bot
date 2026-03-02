@@ -14,18 +14,17 @@ Features:
 Requirements:
   pip install discord.py aiohttp python-dotenv
 
-Environment variables (.env or Wispbyte):
+Environment variables (required — set as Fly.io secrets):
   DISCORD_BOT_TOKEN
   WORKER_URL
   WORKER_SECRET
+  GOOGLE_CREDENTIALS_JSON
+  GOOGLE_TOKEN_JSON
+
+Environment variables (optional — override constants.py defaults via .env locally):
   ANNOUNCEMENTS_CHANNEL      (default: announcements)
   RESULTS_REPORTING_CHANNEL  (default: results-reporting)
-  RESULTS_CHANNEL            (default: results)
-  DECKLISTS_CHANNEL          (default: decklists)
-  WELCOME_CHANNEL            (default: general)
 """
-# Add this import at the top of bot.py alongside the existing imports
-import tracemalloc
 
 import asyncio
 import os
@@ -39,19 +38,26 @@ from dotenv import load_dotenv
 from datetime import datetime, timezone
 
 from rph_util import append_play_hub_url, get_standings
+from constants import (
+    ANNOUNCEMENTS_CHANNEL as DEFAULT_ANNOUNCEMENTS_CHANNEL,
+    RESULTS_REPORTING_CHANNEL as DEFAULT_RESULTS_REPORTING_CHANNEL,
+    RESULTS_CHANNEL,
+    DECKLISTS_CHANNEL,
+    WELCOME_CHANNEL,
+    EVENTS_URL_RE,
+)
 
 load_dotenv()
 
 # ── Config ────────────────────────────────────────────────────
-DISCORD_BOT_TOKEN     = os.getenv("DISCORD_BOT_TOKEN")
-WORKER_URL            = os.getenv("WORKER_URL")
-WORKER_SECRET         = os.getenv("WORKER_SECRET")
-ANNOUNCEMENTS_CHANNEL = os.getenv("ANNOUNCEMENTS_CHANNEL", "announcements")
-RESULTS_REPORTING_CHANNEL = os.getenv("RESULTS_REPORTING_CHANNEL", "results-reporting")
-RESULTS_CHANNEL           = os.getenv("RESULTS_CHANNEL", "results")
-DECKLISTS_CHANNEL     = os.getenv("DECKLISTS_CHANNEL", "decklists")
-WELCOME_CHANNEL       = os.getenv("WELCOME_CHANNEL", "general")
-EVENTS_URL_RE         = os.getenv("EVENTS_URL_RE", r'https://tcg.ravensburgerplay.com/events/[0-9]*')
+DISCORD_BOT_TOKEN         = os.getenv("DISCORD_BOT_TOKEN")
+WORKER_URL                = os.getenv("WORKER_URL")
+WORKER_SECRET             = os.getenv("WORKER_SECRET")
+
+# Channel names: use .env override if set (for local dev against test channels),
+# otherwise fall back to production constants.
+ANNOUNCEMENTS_CHANNEL     = os.getenv("ANNOUNCEMENTS_CHANNEL", DEFAULT_ANNOUNCEMENTS_CHANNEL)
+RESULTS_REPORTING_CHANNEL = os.getenv("RESULTS_REPORTING_CHANNEL", DEFAULT_RESULTS_REPORTING_CHANNEL)
 
 # Roles members can self-assign via /rank
 SELF_ASSIGN_ROLES = ["Casual", "Competitive", "Judge"]
@@ -73,29 +79,8 @@ tree = bot.tree
 # HELPERS
 # ═══════════════════════════════════════════════════════════════
 
-# ── Add this helper anywhere in the HELPERS section ───────────────────────────
-
-def log_memory(label: str):
-    """Log current and peak memory usage. Call before/after suspected hot spots."""
-    import os
-    try:
-        # RSS = total physical memory used by the process
-        with open("/proc/self/status") as f:
-            for line in f:
-                if line.startswith("VmRSS"):
-                    rss_kb = int(line.split()[1])
-                    print(f"  🧠 [{label}] RSS: {rss_kb / 1024:.1f} MB")
-                    break
-    except Exception:
-        pass
-
-    if tracemalloc.is_tracing():
-        current, peak = tracemalloc.get_traced_memory()
-        print(f"  🧠 [{label}] tracemalloc — current: {current / 1024**2:.1f} MB, peak: {peak / 1024**2:.1f} MB")
-
-
-async def call_worker(payload: dict) -> bool:
-    """Forward a payload to the Cloudflare Worker. Returns True on success."""
+async def post_to_worker(payload: dict) -> bool:
+    """POST a payload to the Cloudflare Worker. Returns True on success."""
     headers = {
         "Content-Type":    "application/json",
         "X-Worker-Secret": WORKER_SECRET,
@@ -134,23 +119,20 @@ def get_channel(guild: discord.Guild, name: str):
 # EVENTS
 # ═══════════════════════════════════════════════════════════════
 
-@tasks.loop(minutes=5)
+@tasks.loop(minutes=30)
 async def keepalive():
-    """Periodic heartbeat to keep the Discord gateway connection alive on Wispbyte."""
+    """Periodic heartbeat to confirm the bot is alive and connected."""
     print(f"  ♥ Heartbeat — bot alive, watching #{ANNOUNCEMENTS_CHANNEL} and #{RESULTS_REPORTING_CHANNEL}")
 
 
 @bot.event
 async def on_ready():
-    tracemalloc.start()          # <-- add this line
     print(f"✦ GTA Lorcana Bot online as {bot.user}")
     print(f"  Watching #{ANNOUNCEMENTS_CHANNEL} for website sync")
-    print(f"  Watching #{RESULTS_REPORTING_CHANNEL} for website sync")
-    # Start heartbeat first — before any potentially blocking calls
+    print(f"  Watching #{RESULTS_REPORTING_CHANNEL} for results processing")
     if not keepalive.is_running():
         keepalive.start()
         print(f"  ♻ Keepalive task started")
-    # Sync slash commands in background — non-blocking
     try:
         await tree.sync()
         print(f"  Slash commands synced")
@@ -185,7 +167,7 @@ async def on_message(message: discord.Message):
             for e in message.embeds
         ],
     }
-    await call_worker(payload)
+    await post_to_worker(payload)
     await bot.process_commands(message)
 
 
@@ -212,8 +194,6 @@ async def on_message(message: discord.Message):
 #     await channel.send(embed=embed)
 
 
-
-
 # ═══════════════════════════════════════════════════════════════
 # RESULTS REPORTING — Thread Detection
 # ═══════════════════════════════════════════════════════════════
@@ -226,42 +206,22 @@ _seen_threads: set[int] = set()
 
 async def process_results_reporting_thread(thread: discord.Thread) -> bool:
     """
-    Fetch the thread starter message and run your results processing function.
-    Returns True on success, False on validation/HTTP error.
-    Replace the body of this function with your actual processing logic.
+    Fetch the thread starter message and run the results processing pipeline.
+    Returns True on success, raises on validation/HTTP error.
     """
-    try:
-        # Fetch the starter message (first message in the thread)
-        starter = await thread.fetch_message(thread.id)
-        text = starter.content
+    starter = await thread.fetch_message(thread.id)
+    text = starter.content
 
-        print(f"  → Processing results thread: '{thread.name}' — {len(text)} chars")
+    print(f"  → Processing results thread: '{thread.name}' — {len(text)} chars")
 
-        if not re.fullmatch(EVENTS_URL_RE, text.strip()):
-            raise ValueError(f"Thread content does not match expected URL format.\nExpected: {EVENTS_URL_RE}\nGot: {text.strip()[:100]}")
+    if not re.fullmatch(EVENTS_URL_RE, text.strip()):
+        raise ValueError(f"Thread content does not match expected URL format.\nExpected: {EVENTS_URL_RE}\nGot: {text.strip()[:100]}")
 
-        # ── YOUR FUNCTION GOES HERE ──────────────────────────
-        loop = asyncio.get_running_loop()
-        result1 = await loop.run_in_executor(None, append_play_hub_url, text)
-        log_memory("before get_standings")  # <-- add
-        result2 = await loop.run_in_executor(None, lambda: get_standings())
-        log_memory("after get_standings")  # <-- add
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, append_play_hub_url, text)
+    await loop.run_in_executor(None, get_standings)
 
-        # ── Also add a snapshot call after get_standings() to see the top allocators ──
-
-        snapshot = tracemalloc.take_snapshot()
-        top_stats = snapshot.statistics("lineno")
-        print("  🧠 Top 10 memory allocations:")
-        for stat in top_stats[:10]:
-            print(f"     {stat}")
-        # ────────────────────────────────────────────────────
-
-        return True
-
-    except ValueError as e:
-        raise  # Re-raise validation errors so caller can handle them
-    except Exception as e:
-        raise  # Re-raise HTTP/other errors so caller can handle them
+    return True
 
 
 async def run_results_reporting_pipeline(thread: discord.Thread, starter_msg: discord.Message, is_retry: bool = False):
@@ -501,7 +461,7 @@ async def results(
         "embeds":       [],
         "icon":         "🏆",
     }
-    synced = await call_worker(payload)
+    synced = await post_to_worker(payload)
 
     status = "✅ Results posted"
     if results_ch:
