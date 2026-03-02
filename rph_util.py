@@ -24,28 +24,32 @@ def get_standings():
         note = row[5] if 5 < len(row) else None
 
         for event in rph_api.get_event_by_id(event_id):
+
+            gameplay_format_name = event['gameplay_format']['name']
+
+            if note == "Format: Core Constructed":
+                gameplay_format_name = "Core Constructed"
+
+            # Event should be added no matter what.  To not remove the event_id from the original spreadsheet
+            event_rows.append([
+                event['start_datetime'][:10],
+                event['store']['name'],
+                gameplay_format_name,
+                event['starting_player_count'],
+                "https://tcg.ravensburgerplay.com/events/" + str(event['id']),
+            ])
+
             if len(event['tournament_phases']) > 0:
                 last_tournament_phase = event['tournament_phases'][-1]
+
+                if note == "No Top Cut":
+                    last_tournament_phase = event['tournament_phases'][-2]
+
                 if len(last_tournament_phase['rounds']) > 0:
+                    last_round_id = last_tournament_phase['rounds'][-1]['id']
 
                     if note == "Remove Last Round":
                         last_round_id = last_tournament_phase['rounds'][-2]['id']
-                    else:
-                        # standing['record'] is the same as last round, but removed one point/ correct tiebreakers
-                        last_round_id = last_tournament_phase['rounds'][-1]['id']
-
-                    if note == "Format: Core Constructed":
-                        gameplay_format_name = "Core Constructed"
-                    else:
-                        gameplay_format_name = event['gameplay_format']['name']
-
-                    event_rows.append([
-                        event['start_datetime'][:10],
-                        event['store']['name'],
-                        gameplay_format_name,
-                        event['starting_player_count'],
-                        "https://tcg.ravensburgerplay.com/events/" + str(event['id']),
-                    ])
 
                     standings = rph_api.get_standings_from_tournament_round_id(str(last_round_id))
 
