@@ -1,6 +1,6 @@
 """
 Run this once to force-sync slash commands to your Discord server instantly.
-Usage: python sync_commands.py
+Usage: python discord_sync_commands.py
 Requires: pip install discord.py python-dotenv
 
 Must be run from the same directory as bot.py.
