@@ -250,6 +250,14 @@ async def run_results_reporting_pipeline(thread: discord.Thread, starter_msg: di
     except Exception:
         pass
 
+    await thread.send(
+        embed=make_embed(
+            title="🔄 Processing...",
+            description="Your results are being uploaded...",
+            colour=discord.Colour.blurple()
+        )
+    )
+
     try:
         await process_results_reporting_thread(thread)
 
