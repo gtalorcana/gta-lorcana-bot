@@ -59,6 +59,60 @@ export default {
       }
     }
 
+    // ── Handle delete action ──────────────────────────────────
+    if (payload.action === 'delete') {
+      // Read existing announcements
+      let existingAnnouncements = [];
+      let fileSha = null;
+
+      try {
+        const res = await fetch(`${fileUrl}?ref=${GITHUB_BRANCH}`, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          fileSha = data.sha;
+          const decoded = decodeURIComponent(escape(atob(data.content.replace(/\n/g, ''))));
+          existingAnnouncements = JSON.parse(decoded);
+        }
+      } catch {
+        return new Response('Could not read announcements.json', { status: 500 });
+      }
+
+      const before = existingAnnouncements.length;
+      const updated = existingAnnouncements.filter(a => a.id !== payload.id);
+
+      if (updated.length === before) {
+        // Message not found — already gone or never stored
+        return new Response(JSON.stringify({ ok: true, note: 'not found' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      const body = {
+        message: `🗑 Deleted announcement: ${payload.id}`,
+        content: btoa(unescape(encodeURIComponent(JSON.stringify(updated, null, 2)))),
+        branch: GITHUB_BRANCH,
+        sha: fileSha,
+      };
+
+      const writeRes = await fetch(fileUrl, {
+        method: 'PUT',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (!writeRes.ok) {
+        const err = await writeRes.text();
+        console.error('GitHub delete write failed:', err);
+        return new Response('GitHub write failed', { status: 500 });
+      }
+
+      return new Response(JSON.stringify({ ok: true, deleted: payload.id }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     // ── Build announcement object ─────────────────────────
     const announcement = {
       id: payload.id || Date.now().toString(),
