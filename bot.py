@@ -46,6 +46,7 @@ from constants import (
     DECKLISTS_CHANNEL,
     WELCOME_CHANNEL,
     EVENTS_URL_RE,
+    UPCOMING_EVENTS_JSON_URL
 )
 
 load_dotenv()
@@ -411,34 +412,76 @@ async def on_thread_delete(thread: discord.Thread):
 # ═══════════════════════════════════════════════════════════════
 
 # ── /schedule ─────────────────────────────────────────────────
+# Events are read from data/events.json in the website repo.
+# To add or update events, edit that file directly in GitHub.
+# Future enhancement: /addevent bot command to write to events.json via the Worker.
+
 @tree.command(name="schedule", description="Show upcoming GTA Lorcana events")
 async def schedule(interaction: discord.Interaction):
-    """
-    Shows upcoming events. Edit the EVENTS list below to keep it current.
-    Future enhancement: fetch from events.json in your GitHub repo,
-    using the same pattern as announcements.json.
-    """
-    EVENTS = [
-        {"date": "Sat Mar 8",  "name": "Monthly Championship", "type": "🏆 Tournament", "location": "TBA"},
-        {"date": "Wed Mar 12", "name": "Weekly Casual Night",   "type": "🎴 Casual",     "location": "TBA"},
-        {"date": "Sat Mar 22", "name": "Booster Draft Night",   "type": "✨ Draft",      "location": "TBA"},
+    await interaction.response.defer()
+
+    # Fetch events.json from the website repo
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(EVENTS_JSON_URL) as resp:
+                if resp.status != 200:
+                    await interaction.followup.send(
+                        embed=make_embed(
+                            title="📅 Upcoming Events",
+                            description="Could not load events right now — check `#announcements` for the latest.",
+                            colour=discord.Colour.red()
+                        )
+                    )
+                    return
+                events = await resp.json(content_type=None)
+    except Exception as e:
+        print(f"  ✗ Failed to fetch events.json: {e}")
+        await interaction.followup.send(
+            embed=make_embed(
+                title="📅 Upcoming Events",
+                description="Could not load events right now — check `#announcements` for the latest.",
+                colour=discord.Colour.red()
+            )
+        )
+        return
+
+    # Filter to upcoming events only (today included)
+    today = datetime.now(timezone.utc).date()
+    upcoming = [
+        e for e in events
+        if e.get("date") and datetime.strptime(e["date"], "%Y-%m-%d").date() >= today
     ]
+    upcoming.sort(key=lambda e: e["date"])
 
-    lines = "\n\n".join(
-        f"**{e['date']}** — {e['name']}\n{e['type']} · {e['location']}"
-        for e in EVENTS
-    )
+    embed = make_embed(title="📅 Upcoming Events", description="")
 
-    embed = make_embed(
-        title="📅 Upcoming Events",
-        description=lines or "No events scheduled yet — check back soon!"
-    )
+    if not upcoming:
+        embed.description = "No upcoming events — check back soon!"
+    else:
+        type_icons = {
+            "Tournament": "🏆",
+            "Casual":     "🎴",
+            "Draft":      "✨",
+        }
+        for e in upcoming:
+            icon = type_icons.get(e.get("type", ""), "📅")
+            date = datetime.strptime(e["date"], "%Y-%m-%d").strftime("%a %b %-d")
+            name = e.get("name", "Unnamed Event")
+            location = e.get("location", "TBA")
+            url = e.get("url", "")
+
+            value = f"{icon} {e.get('type', '')} · {location}"
+            if url:
+                value += f"\n[RSVP here]({url})"
+
+            embed.add_field(name=f"**{date}** — {name}", value=value, inline=False)
+
     embed.add_field(
-        name="Full details & RSVPs",
+        name="Full details",
         value="Check `#announcements` or visit the GTA Lorcana website.",
         inline=False
     )
-    await interaction.response.send_message(embed=embed)
+    await interaction.followup.send(embed=embed)
 
 
 # ── /results ──────────────────────────────────────────────────

@@ -34,3 +34,8 @@ WELCOME_CHANNEL           = "general"
 
 # Regex to validate RPH event URLs submitted in results threads
 EVENTS_URL_RE = r'https://tcg.ravensburgerplay.com/events/[0-9]+'
+
+# Get events.json from Github
+GITHUB_OWNER = "gtalorcana"
+GITHUB_REPO  = "gtalorcana.ca"
+UPCOMING_EVENTS_JSON_URL   = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/main/data/events.json"
