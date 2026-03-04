@@ -1,5 +1,9 @@
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
 # League Variables
-CURRENT_SEASON      = "S11"
+CURRENT_SEASON = os.getenv("CURRENT_SEASON", "S11")
 SEASON_START_DATE   = "2026-02-13"
 SEASON_END_DATE     = "2026-04-24"
 
@@ -25,8 +29,8 @@ EVENTS_TIMESTAMP_RANGE_NAME = EVENTS_SHEET_NAME + "!" + "J1:K1"
 # Override via .env locally to point at test channels, e.g.:
 #   ANNOUNCEMENTS_CHANNEL=test-announcements
 #   RESULTS_REPORTING_CHANNEL=test-results-reporting
-ANNOUNCEMENTS_CHANNEL     = "announcements"
-RESULTS_REPORTING_CHANNEL = "results-reporting"
+ANNOUNCEMENTS_CHANNEL     = os.getenv("ANNOUNCEMENTS_CHANNEL", "announcements")
+RESULTS_REPORTING_CHANNEL = os.getenv("RESULTS_REPORTING_CHANNEL", "results-reporting")
 RESULTS_REPORTING_CHANNEL_URL = "https://discord.com/channels/1253915141716578314/"
 RESULTS_CHANNEL           = "results"
 DECKLISTS_CHANNEL         = "decklists"

@@ -34,14 +34,13 @@ import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from dotenv import load_dotenv
 from datetime import datetime, timezone
 
 from rph_util import process_event_data, remove_event_data
 
 from constants import (
-    ANNOUNCEMENTS_CHANNEL as DEFAULT_ANNOUNCEMENTS_CHANNEL,
-    RESULTS_REPORTING_CHANNEL as DEFAULT_RESULTS_REPORTING_CHANNEL,
+    ANNOUNCEMENTS_CHANNEL,
+    RESULTS_REPORTING_CHANNEL,
     RESULTS_CHANNEL,
     DECKLISTS_CHANNEL,
     WELCOME_CHANNEL,
@@ -49,17 +48,10 @@ from constants import (
     UPCOMING_EVENTS_JSON_URL
 )
 
-load_dotenv()
-
 # ── Config ────────────────────────────────────────────────────
 DISCORD_BOT_TOKEN         = os.getenv("DISCORD_BOT_TOKEN")
 WORKER_URL                = os.getenv("WORKER_URL")
 WORKER_SECRET             = os.getenv("WORKER_SECRET")
-
-# Channel names: use .env override if set (for local dev against test channels),
-# otherwise fall back to production constants.
-ANNOUNCEMENTS_CHANNEL     = os.getenv("ANNOUNCEMENTS_CHANNEL", DEFAULT_ANNOUNCEMENTS_CHANNEL)
-RESULTS_REPORTING_CHANNEL = os.getenv("RESULTS_REPORTING_CHANNEL", DEFAULT_RESULTS_REPORTING_CHANNEL)
 
 # Roles members can self-assign via /rank
 SELF_ASSIGN_ROLES = ["Casual", "Competitive", "Judge"]

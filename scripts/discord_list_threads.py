@@ -11,10 +11,7 @@ import sys
 from datetime import datetime, timezone
 
 import discord
-from dotenv import load_dotenv
 import os
-
-load_dotenv()
 
 from constants import RESULTS_REPORTING_CHANNEL
 
