@@ -1,3 +1,4 @@
+import os
 import time
 import requests
 
@@ -12,6 +13,10 @@ def _get_with_retry(session, url, params=None):
     GET a URL with up to _MAX_RETRIES attempts.
     Raises RuntimeError if all attempts fail.
     """
+
+    if os.getenv("DEBUG") and os.getenv("FORCE_RPH_FAIL"):
+        raise RuntimeError("Simulated RPH API failure (FORCE_RPH_FAIL is set)")
+
     last_error = None
     for attempt in range(1, _MAX_RETRIES + 1):
         try:

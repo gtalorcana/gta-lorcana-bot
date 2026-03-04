@@ -55,7 +55,7 @@ SELF_ASSIGN_ROLES = ["Casual", "Competitive", "Judge"]
 
 # Auto-retry settings for flaky RPH API failures
 _RPH_RETRY_ATTEMPTS = 2    # number of auto-retries after initial failure
-_RPH_RETRY_DELAY    = 300  # seconds between retries (5 minutes)
+_RPH_RETRY_DELAY = int(os.getenv("RPH_RETRY_DELAY", 300))  # seconds between retries (5 minutes)
 
 
 # ── Bot setup ─────────────────────────────────────────────────

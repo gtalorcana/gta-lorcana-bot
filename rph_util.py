@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timezone
 
 from util.google_sheets_api_utils import GoogleSheetsApi
@@ -95,6 +96,9 @@ def _fetch_event_rows_and_standings(input_rows):
                     standing['record'],
                     standing['match_points'],
                 ])
+
+    if os.getenv("DEBUG") and os.getenv("FORCE_COUNT_MISMATCH"):
+        event_rows.pop()
 
     return event_rows, standing_rows
 
