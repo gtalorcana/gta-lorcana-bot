@@ -1,7 +1,7 @@
-import os
 import time
 import requests
 
+from constants import RPH_EVENTS_URL, RPH_STANDINGS_URL, RPH_GAME_STORES_URL
 
 _MAX_RETRIES = 3
 _RETRY_DELAY = 2  # seconds between retries
@@ -42,7 +42,7 @@ class RphApi:
         return results
 
     def fetch_game_stores(self):
-        url = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/game-stores/?"
+        url = RPH_GAME_STORES_URL
         params = {
             'latitude': 43.653226,
             'longitude': -79.3831843,
@@ -72,7 +72,7 @@ class RphApi:
         return results
 
     def fetch_events(self, start_date_after, start_date_before):
-        url = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/events/?"
+        url = RPH_EVENTS_URL
         params = {
             'start_date_after': start_date_after,
             'start_date_before': start_date_before,
@@ -106,13 +106,13 @@ class RphApi:
         return results
 
     def fetch_event_by_id(self, event_id):
-        url = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/events/?"
+        url = RPH_EVENTS_URL
         params = {'id': event_id}
 
         current_page = _get_with_retry(self.session, url, params)
         yield current_page['results']
 
     def get_standings_from_tournament_round_id(self, round_id):
-        url = f"https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/tournament-rounds/{round_id}/standings"
+        url = RPH_STANDINGS_URL.format(round_id=round_id)
         data = _get_with_retry(self.session, url)
         return data['standings']

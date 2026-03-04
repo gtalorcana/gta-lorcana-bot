@@ -20,10 +20,6 @@ Environment variables (required — set as Fly.io secrets):
   WORKER_SECRET
   GOOGLE_CREDENTIALS_JSON
   GOOGLE_TOKEN_JSON
-
-Environment variables (optional — override constants.py defaults via .env locally):
-  ANNOUNCEMENTS_CHANNEL      (default: announcements)
-  RESULTS_REPORTING_CHANNEL  (default: results-reporting)
 """
 
 import asyncio
@@ -45,16 +41,21 @@ from constants import (
     DECKLISTS_CHANNEL,
     WELCOME_CHANNEL,
     EVENTS_URL_RE,
-    UPCOMING_EVENTS_JSON_URL
+    UPCOMING_EVENTS_JSON_URL,
+    ADMIN_USER_ID,
 )
 
 # ── Config ────────────────────────────────────────────────────
-DISCORD_BOT_TOKEN         = os.getenv("DISCORD_BOT_TOKEN")
-WORKER_URL                = os.getenv("WORKER_URL")
-WORKER_SECRET             = os.getenv("WORKER_SECRET")
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+WORKER_URL        = os.getenv("WORKER_URL")
+WORKER_SECRET     = os.getenv("WORKER_SECRET")
 
 # Roles members can self-assign via /rank
 SELF_ASSIGN_ROLES = ["Casual", "Competitive", "Judge"]
+
+# Auto-retry settings for flaky RPH API failures
+_RPH_RETRY_ATTEMPTS = 2    # number of auto-retries after initial failure
+_RPH_RETRY_DELAY    = 300  # seconds between retries (5 minutes)
 
 
 # ── Bot setup ─────────────────────────────────────────────────
@@ -67,6 +68,9 @@ bot = commands.Bot(
     intents=intents,
 )
 tree = bot.tree
+
+# Serializes all sheet writes — prevents concurrent threads from overwriting each other
+_sheet_lock = asyncio.Lock()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -198,36 +202,58 @@ async def on_message(message: discord.Message):
 _seen_threads: set[int] = set()
 
 
-async def process_results_reporting_thread(thread: discord.Thread) -> bool:
+async def _run_process_event_data(thread: discord.Thread, rph_url: str) -> None:
     """
-    Fetch the thread starter message and run the results processing pipeline.
-    Returns True on success, raises on validation/HTTP error.
+    Acquire the sheet lock and run process_event_data in a thread executor.
+    Raises on any error — caller is responsible for handling.
+    """
+    async with _sheet_lock:
+        if _sheet_lock._waiters:
+            waiter_count = len(_sheet_lock._waiters)
+            print(f"  ⏳ Sheet lock acquired for '{thread.name}' ({waiter_count} thread(s) were waiting)")
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, process_event_data, rph_url, thread.id)
+
+
+async def process_results_reporting_thread(thread: discord.Thread) -> None:
+    """
+    Validate the thread starter message URL and run the results processing pipeline.
+    Raises ValueError on bad URL, RuntimeError on API/sheet failure.
     """
     starter = await thread.fetch_message(thread.id)
-    text = starter.content
+    rph_url = starter.content.strip()
 
-    print(f"  → Processing results thread: '{thread.name}' — {len(text)} chars")
+    print(f"  → Validating results thread: '{thread.name}'")
 
-    if not re.fullmatch(EVENTS_URL_RE, text.strip()):
-        raise ValueError(f"Thread content does not match expected URL format.\nExpected: {EVENTS_URL_RE}\nGot: {text.strip()[:100]}")
+    if not re.fullmatch(EVENTS_URL_RE, rph_url):
+        raise ValueError(
+            f"Thread content does not match expected URL format.\n"
+            f"Expected: {EVENTS_URL_RE}\n"
+            f"Got: {rph_url[:100]}"
+        )
 
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, process_event_data, text, thread.id)
-
-    return True
+    print(f"  → URL validated: {rph_url}")
+    await _run_process_event_data(thread, rph_url)
 
 
-async def run_results_reporting_pipeline(thread: discord.Thread, starter_msg: discord.Message, is_retry: bool = False):
-    """Shared processing logic for both on_thread_create and on_message_edit."""
-    retry_prefix = "Still could not" if is_retry else "Could not"
-    retry_suffix = "again " if is_retry else ""
+async def run_results_reporting_pipeline(
+    thread: discord.Thread,
+    starter_msg: discord.Message,
+    is_retry: bool = False,
+    auto_retry: bool = False,
+):
+    """
+    Shared processing logic for on_thread_create, on_message_edit, and auto-retries.
 
-    # Transient status messages sent during this run.
-    # All deleted in finally — only the final success/error message is kept.
+    - is_retry:   True when triggered by a user edit (changes wording slightly)
+    - auto_retry: True when triggered by the bot's internal retry loop (suppresses
+                  the initial status message since one already exists in the thread)
+    """
+    # Transient status messages sent during this run — deleted in finally.
+    # Success/error messages are NOT added here and are intentionally kept.
     transient_msgs: list[discord.Message] = []
 
     # Clear any previous result reactions, then add the running indicator.
-    # Each reaction gets its own try/except — if one doesn't exist, the others still run.
     try:
         await starter_msg.remove_reaction("✅", thread.guild.me)
     except Exception:
@@ -241,23 +267,23 @@ async def run_results_reporting_pipeline(thread: discord.Thread, starter_msg: di
     except Exception:
         pass
 
-    # Single status message covers both first run and retries.
-    try:
-        status_msg = await thread.send(
-            embed=make_embed(
-                title="🔄 Retrying..." if is_retry else "🔄 Processing...",
-                description="Reprocessing your results now..." if is_retry else "Your results are being uploaded...",
-                colour=discord.Colour.blurple()
+    if not auto_retry:
+        try:
+            status_msg = await thread.send(
+                embed=make_embed(
+                    title="🔄 Retrying..." if is_retry else "🔄 Processing...",
+                    description="Reprocessing your results now..." if is_retry else "Your results are being uploaded...",
+                    colour=discord.Colour.blurple()
+                )
             )
-        )
-        transient_msgs.append(status_msg)
-    except Exception:
-        pass
+            transient_msgs.append(status_msg)
+        except Exception:
+            pass
 
     try:
         await process_results_reporting_thread(thread)
 
-        # Success — permanent message kept in thread
+        # ── Success ───────────────────────────────────────────
         await thread.send(
             embed=make_embed(
                 title="✅ Results Processed",
@@ -272,11 +298,15 @@ async def run_results_reporting_pipeline(thread: discord.Thread, starter_msg: di
         print(f"  ✓ Results processed OK: '{thread.name}'")
 
     except ValueError as e:
-        # Validation error — permanent message kept so the user knows what to fix
+        # ── Validation error — user needs to fix their URL ────
         await thread.send(
             embed=make_embed(
                 title="⚠️ Validation Error",
-                description=f"{retry_prefix} process your results:\n```{e}```\nPlease edit your message {retry_suffix}to fix the issue — I'll retry automatically.",
+                description=(
+                    f"{'Still could not' if is_retry else 'Could not'} process your results:\n"
+                    f"```{e}```\n"
+                    f"Please edit your message {'again ' if is_retry else ''}to fix the issue — I'll retry automatically."
+                ),
                 colour=discord.Colour.yellow()
             )
         )
@@ -287,11 +317,43 @@ async def run_results_reporting_pipeline(thread: discord.Thread, starter_msg: di
         print(f"  ⚠ Validation error in '{thread.name}': {e}")
 
     except Exception as e:
-        # Unexpected error — permanent message kept so the user knows to retry
+        # ── API / system error — schedule auto-retries ────────
+        print(f"  ✗ Error processing '{thread.name}': {e}")
+        await _schedule_auto_retry(thread, starter_msg, error=e)
+
+    finally:
+        try:
+            await starter_msg.remove_reaction("⏳", thread.guild.me)
+        except Exception:
+            pass
+        for msg in transient_msgs:
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+
+
+async def _schedule_auto_retry(
+    thread: discord.Thread,
+    starter_msg: discord.Message,
+    error: Exception,
+    attempt: int = 1,
+):
+    """
+    Automatically retry process_event_data after a delay when RPH is flaky.
+    Posts a countdown message, waits _RPH_RETRY_DELAY seconds, then retries.
+    Up to _RPH_RETRY_ATTEMPTS total retries. If all fail, pings the admin.
+    """
+    if attempt > _RPH_RETRY_ATTEMPTS:
+        print(f"  ✗ All auto-retries failed for '{thread.name}' — pinging admin")
         await thread.send(
             embed=make_embed(
-                title="❌ Processing Error",
-                description=f"An error occurred while processing your results:\n```{e}```\nPlease edit your message {retry_suffix}to retry — I'll pick it up automatically.",
+                title="❌ Processing Failed",
+                description=(
+                    f"All {_RPH_RETRY_ATTEMPTS} automatic retries failed.\n"
+                    f"Last error:\n```{error}```\n"
+                    f"<@{ADMIN_USER_ID}> Manual intervention required."
+                ),
                 colour=discord.Colour.red()
             )
         )
@@ -299,22 +361,50 @@ async def run_results_reporting_pipeline(thread: discord.Thread, starter_msg: di
             await starter_msg.add_reaction("❌")
         except Exception:
             pass
-        print(f"  ✗ Error processing '{thread.name}': {e}")
+        return
 
-    finally:
-        # Remove the ⏳ reaction
+    delay_minutes = _RPH_RETRY_DELAY // 60
+    print(f"  ⏳ Scheduling auto-retry {attempt}/{_RPH_RETRY_ATTEMPTS} for '{thread.name}' in {delay_minutes} min...")
+
+    try:
+        await thread.send(
+            embed=make_embed(
+                title="⏳ Processing Delayed",
+                description=(
+                    f"An error occurred while processing your results:\n```{error}```\n"
+                    f"I'll retry automatically in {delay_minutes} minutes. "
+                    f"*(Attempt {attempt}/{_RPH_RETRY_ATTEMPTS})*"
+                ),
+                colour=discord.Colour.orange()
+            )
+        )
+    except Exception:
+        pass
+
+    await asyncio.sleep(_RPH_RETRY_DELAY)
+
+    print(f"  🔄 Auto-retry {attempt}/{_RPH_RETRY_ATTEMPTS} for '{thread.name}'...")
+
+    try:
+        await _run_process_event_data(thread, starter_msg.content.strip())
+
+        await thread.send(
+            embed=make_embed(
+                title="✅ Results Processed",
+                description=f"Results successfully processed on retry {attempt}/{_RPH_RETRY_ATTEMPTS}!",
+                colour=discord.Colour.green()
+            )
+        )
         try:
-            await starter_msg.remove_reaction("⏳", thread.guild.me)
+            await starter_msg.add_reaction("✅")
+            await starter_msg.remove_reaction("❌", thread.guild.me)
         except Exception:
             pass
+        print(f"  ✓ Auto-retry {attempt} succeeded for '{thread.name}'")
 
-        # Delete all transient status messages (Processing..., Retrying..., etc.)
-        # Success/error messages are NOT in this list and are intentionally kept.
-        for msg in transient_msgs:
-            try:
-                await msg.delete()
-            except Exception:
-                pass
+    except Exception as retry_error:
+        print(f"  ✗ Auto-retry {attempt} failed for '{thread.name}': {retry_error}")
+        await _schedule_auto_retry(thread, starter_msg, error=retry_error, attempt=attempt + 1)
 
 
 @bot.event
@@ -344,23 +434,22 @@ async def on_thread_create(thread: discord.Thread):
 
 @bot.event
 async def on_message_edit(before: discord.Message, after: discord.Message):
-    """Re-process a results thread if the user edits the starter message after an error."""
+    """Re-process a results thread if the user edits the starter message after a validation error."""
     if not isinstance(after.channel, discord.Thread):
         return
     if not after.channel.parent or after.channel.parent.name != RESULTS_REPORTING_CHANNEL:
         return
-    # Only re-process the thread starter message (message ID == thread ID)
     if after.id != after.channel.id:
         return
     if after.author.bot:
         return
     if before.content == after.content:
         return  # URL embed preview or reaction update — not a real user edit
-    # _seen_threads intentionally not checked here — user edits should always retry
 
     print(f"  ✏️  [on_message_edit] Results thread edited: '{after.channel.name}' — retrying...")
 
     await run_results_reporting_pipeline(after.channel, after, is_retry=True)
+
 
 @bot.event
 async def on_message_delete(message: discord.Message):
@@ -393,25 +482,24 @@ async def on_thread_delete(thread: discord.Thread):
         await loop.run_in_executor(None, remove_event_data, thread.id)
         print(f"  ✓ Event data removed for thread '{thread.name}'")
     except ValueError as e:
-        # Thread was never successfully processed (e.g. always had ❌) — nothing to remove
         print(f"  ↩ No event data to remove for thread '{thread.name}': {e}")
     except Exception as e:
         print(f"  ✗ Failed to remove event data for thread '{thread.name}': {e}")
+
 
 # ═══════════════════════════════════════════════════════════════
 # SLASH COMMANDS
 # ═══════════════════════════════════════════════════════════════
 
 # ── /schedule ─────────────────────────────────────────────────
-# Events are read from data/events.json in the website repo.
+# Events are read from data/upcoming_events.json in the website repo.
 # To add or update events, edit that file directly in GitHub.
-# Future enhancement: /addevent bot command to write to events.json via the Worker.
+# Future enhancement: /addevent bot command to write to upcoming_events.json via the Worker.
 
 @tree.command(name="schedule", description="Show upcoming GTA Lorcana events")
 async def schedule(interaction: discord.Interaction):
     await interaction.response.defer()
 
-    # Fetch events.json from the website repo
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(UPCOMING_EVENTS_JSON_URL) as resp:
@@ -436,7 +524,6 @@ async def schedule(interaction: discord.Interaction):
         )
         return
 
-    # Filter to upcoming events only (today included)
     today = datetime.now(timezone.utc).date()
     upcoming = [
         e for e in events
@@ -455,11 +542,11 @@ async def schedule(interaction: discord.Interaction):
             "Draft":      "✨",
         }
         for e in upcoming:
-            icon = type_icons.get(e.get("type", ""), "📅")
-            date = datetime.strptime(e["date"], "%Y-%m-%d").strftime("%a %b %-d")
-            name = e.get("name", "Unnamed Event")
+            icon     = type_icons.get(e.get("type", ""), "📅")
+            date     = datetime.strptime(e["date"], "%Y-%m-%d").strftime("%a %b %-d")
+            name     = e.get("name", "Unnamed Event")
             location = e.get("location", "TBA")
-            url = e.get("url", "")
+            url      = e.get("url", "")
 
             value = f"{icon} {e.get('type', '')} · {location}"
             if url:
@@ -492,7 +579,6 @@ async def results(
     third: str,
     notes: str = ""
 ):
-    # Restrict to members with event management permission
     if not interaction.user.guild_permissions.manage_events:
         await interaction.response.send_message(
             "⚠️ Only event organizers can post results.", ephemeral=True
@@ -512,12 +598,10 @@ async def results(
     )
     embed.set_footer(text=f"GTA Lorcana ✦ {date_str}")
 
-    # Post to #results channel
     results_ch = get_channel(interaction.guild, RESULTS_CHANNEL)
     if results_ch:
         await results_ch.send(embed=embed)
 
-    # Sync a summary to the website via Worker
     content = f"**{event_name} Results** — 🥇 {winner} · 🥈 {second} · 🥉 {third}"
     if notes:
         content += f" | {notes}"
@@ -593,13 +677,11 @@ async def rank(interaction: discord.Interaction, role: app_commands.Choice[str])
     guild  = interaction.guild
     member = interaction.user
 
-    # Remove any existing self-assign roles
     for role_name in SELF_ASSIGN_ROLES:
         existing = discord.utils.get(guild.roles, name=role_name)
         if existing and existing in member.roles:
             await member.remove_roles(existing)
 
-    # Find or create the target role
     target_role = discord.utils.get(guild.roles, name=role.value)
     if not target_role:
         role_colours = {
@@ -654,15 +736,13 @@ async def welcome(interaction: discord.Interaction, member: discord.Member):
 @app_commands.describe(after="Only recheck threads created on or after this date (YYYY-MM-DD). Leave blank to check all.")
 async def recheck(interaction: discord.Interaction, after: str = ""):
     """
-    Scans all active threads in the results-reporting forum channel.
-    Any thread that does not already have a ✅ or ❌ reaction from the bot
-    is considered missed and will be reprocessed.
+    Scans all threads in the results-reporting forum channel.
+    Any thread without a ✅ or ❌ reaction from the bot is reprocessed.
     """
     if not interaction.user.guild_permissions.manage_guild:
         await interaction.response.send_message("⚠️ Admins only.", ephemeral=True)
         return
 
-    # Parse optional date filter
     after_date = None
     if after:
         try:
@@ -673,7 +753,6 @@ async def recheck(interaction: discord.Interaction, after: str = ""):
             )
             return
 
-    # Find the forum channel
     forum = discord.utils.get(interaction.guild.forums, name=RESULTS_REPORTING_CHANNEL)
     if not forum:
         await interaction.response.send_message(
@@ -683,14 +762,11 @@ async def recheck(interaction: discord.Interaction, after: str = ""):
 
     await interaction.response.defer(ephemeral=True)
 
-    # Collect all active (non-archived) threads
-    threads = forum.threads  # already-cached active threads
-    # Also fetch any active threads not yet in cache
+    threads = list(forum.threads)
     async for thread in forum.archived_threads(limit=None):
         if thread not in threads:
-            threads = list(threads) + [thread]
+            threads.append(thread)
 
-    # Apply date filter if provided
     if after_date:
         threads = [t for t in threads if t.created_at and t.created_at >= after_date]
 
@@ -706,10 +782,7 @@ async def recheck(interaction: discord.Interaction, after: str = ""):
         except Exception:
             continue
 
-        bot_reactions = {
-            r.emoji for r in starter_msg.reactions
-            if r.me  # reactions added by this bot
-        }
+        bot_reactions   = {r.emoji for r in starter_msg.reactions if r.me}
         already_handled = "✅" in bot_reactions or "❌" in bot_reactions
 
         if not already_handled:
@@ -757,14 +830,14 @@ async def help_command(interaction: discord.Interaction):
         title="✦ GTA Lorcana Bot — Commands",
         description="Here's everything I can do:"
     )
-    embed.add_field(name="/schedule",         value="Show upcoming events",                                  inline=False)
-    embed.add_field(name="/results",          value="Post tournament results *(organizers only)*",            inline=False)
-    embed.add_field(name="/decklist",         value="Submit your decklist to the community",                  inline=False)
-    embed.add_field(name="/rank",             value="Self-assign Casual / Competitive / Judge role",          inline=False)
-    embed.add_field(name="/welcome @member",  value="Manually welcome a member *(admins only)*",              inline=False)
-    embed.add_field(name="🔁 Auto-sync",      value=f"Posts in `#{ANNOUNCEMENTS_CHANNEL}` appear on the website automatically", inline=False)
-    embed.add_field(name="🧵 Results Threads", value=f"New threads in `#{RESULTS_REPORTING_CHANNEL}` are processed automatically. Edit to retry on error.", inline=False)
-    embed.add_field(name="/recheck",          value=f"Reprocess any missed threads in `#{RESULTS_REPORTING_CHANNEL}` *(admins only)*",     inline=False)
+    embed.add_field(name="/schedule",          value="Show upcoming events",                                                                                    inline=False)
+    embed.add_field(name="/results",           value="Post tournament results *(organizers only)*",                                                             inline=False)
+    embed.add_field(name="/decklist",          value="Submit your decklist to the community",                                                                   inline=False)
+    embed.add_field(name="/rank",              value="Self-assign Casual / Competitive / Judge role",                                                           inline=False)
+    embed.add_field(name="/welcome @member",   value="Manually welcome a member *(admins only)*",                                                               inline=False)
+    embed.add_field(name="🔁 Auto-sync",       value=f"Posts in `#{ANNOUNCEMENTS_CHANNEL}` appear on the website automatically",                                inline=False)
+    embed.add_field(name="🧵 Results Threads", value=f"New threads in `#{RESULTS_REPORTING_CHANNEL}` are processed automatically. Edit to retry on bad URL.",  inline=False)
+    embed.add_field(name="/recheck",           value=f"Reprocess any missed threads in `#{RESULTS_REPORTING_CHANNEL}` *(admins only)*",                        inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 

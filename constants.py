@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # League Variables
+ADMIN_USER_ID = "904550642213875723"
 CURRENT_SEASON = os.getenv("CURRENT_SEASON", "S11")
 SEASON_START_DATE   = "2026-02-13"
 SEASON_END_DATE     = "2026-04-24"
@@ -38,6 +39,9 @@ WELCOME_CHANNEL           = "general"
 
 # Regex to validate RPH event URLs submitted in results threads
 EVENTS_URL_RE = r'https://tcg.ravensburgerplay.com/events/[0-9]+'
+RPH_GAME_STORES_URL = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/game-stores/?"
+RPH_EVENTS_URL      = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/events/?"
+RPH_STANDINGS_URL   = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/tournament-rounds/{round_id}/standings"
 
 # Get events.json from Github
 GITHUB_OWNER = "gtalorcana"
