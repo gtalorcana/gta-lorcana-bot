@@ -37,7 +37,7 @@ from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from datetime import datetime, timezone
 
-from rph_util import append_event_data, remove_event_data, get_standings
+from rph_util import process_event_data, remove_event_data
 
 from constants import (
     ANNOUNCEMENTS_CHANNEL as DEFAULT_ANNOUNCEMENTS_CHANNEL,
@@ -220,8 +220,7 @@ async def process_results_reporting_thread(thread: discord.Thread) -> bool:
         raise ValueError(f"Thread content does not match expected URL format.\nExpected: {EVENTS_URL_RE}\nGot: {text.strip()[:100]}")
 
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, append_event_data, text, thread.id)
-    await loop.run_in_executor(None, get_standings)
+    await loop.run_in_executor(None, process_event_data, text, thread.id)
 
     return True
 
@@ -423,7 +422,7 @@ async def schedule(interaction: discord.Interaction):
     # Fetch events.json from the website repo
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(EVENTS_JSON_URL) as resp:
+            async with session.get(UPCOMING_EVENTS_JSON_URL) as resp:
                 if resp.status != 200:
                     await interaction.followup.send(
                         embed=make_embed(
@@ -435,7 +434,7 @@ async def schedule(interaction: discord.Interaction):
                     return
                 events = await resp.json(content_type=None)
     except Exception as e:
-        print(f"  ✗ Failed to fetch events.json: {e}")
+        print(f"  ✗ Failed to fetch upcoming_events.json: {e}")
         await interaction.followup.send(
             embed=make_embed(
                 title="📅 Upcoming Events",

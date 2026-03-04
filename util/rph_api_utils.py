@@ -1,4 +1,28 @@
+import time
 import requests
+
+
+_MAX_RETRIES = 3
+_RETRY_DELAY = 2  # seconds between retries
+
+
+def _get_with_retry(session, url, params=None):
+    """
+    GET a URL with up to _MAX_RETRIES attempts.
+    Raises RuntimeError if all attempts fail.
+    """
+    last_error = None
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            resp = session.get(url, params=params, timeout=10)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            last_error = e
+            if attempt < _MAX_RETRIES:
+                print(f"  ⚠ RPH API attempt {attempt}/{_MAX_RETRIES} failed: {e} — retrying in {_RETRY_DELAY}s...")
+                time.sleep(_RETRY_DELAY)
+    raise RuntimeError(f"RPH API failed after {_MAX_RETRIES} attempts: {last_error}")
 
 
 class RphApi:
@@ -27,21 +51,20 @@ class RphApi:
             'page_size': 50
         }
 
-        current_page = self.session.get(url, params=params).json()
+        current_page = _get_with_retry(self.session, url, params)
         yield current_page['results']
 
         while current_page['next']:
             params['page'] = current_page['next']
-            next_page = self.session.get(url, params=params).json()
-            current_page = next_page
-            yield next_page['results']
+            current_page = _get_with_retry(self.session, url, params)
+            yield current_page['results']
 
     def get_events(self, start_date_after, start_date_before):
         results = []
 
         for page_results in self.fetch_events(start_date_after, start_date_before):
             for event in page_results:
-                # filter on Ontario, Canada stores. and events with more than 0 people
+                # filter on Ontario, Canada stores and events with more than 0 people
                 if (event['store']['country'] == "CA" and
                         event['starting_player_count'] > 0):
                     results.append(event)
@@ -62,21 +85,20 @@ class RphApi:
             'gameplay_format_ids': ["2b6e184a-72d7-4ae5-a5f1-f16d79646c39", "4f43d777-beeb-4e1e-a04c-c1f2b3c5258a"]
         }
 
-        current_page = self.session.get(url, params=params).json()
+        current_page = _get_with_retry(self.session, url, params)
         yield current_page['results']
 
         while current_page['next']:
             params['page'] = current_page['next']
-            next_page = self.session.get(url, params=params).json()
-            current_page = next_page
-            yield next_page['results']
+            current_page = _get_with_retry(self.session, url, params)
+            yield current_page['results']
 
     def get_event_by_id(self, event_id):
         results = []
 
         for page_results in self.fetch_event_by_id(event_id):
             for event in page_results:
-                # filter on Ontario, Canada stores. and events with more than 0 people
+                # filter on Ontario, Canada stores and events with more than 0 people
                 if (event['store']['country'] == "CA" and
                         event['starting_player_count'] > 0):
                     results.append(event)
@@ -84,14 +106,12 @@ class RphApi:
 
     def fetch_event_by_id(self, event_id):
         url = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/events/?"
-        params = {
-            'id': event_id
-        }
+        params = {'id': event_id}
 
-        current_page = self.session.get(url, params=params).json()
+        current_page = _get_with_retry(self.session, url, params)
         yield current_page['results']
 
     def get_standings_from_tournament_round_id(self, round_id):
-        url = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/tournament-rounds/" + round_id + "/standings"
-        current_page = self.session.get(url).json()
-        return current_page['standings']
+        url = f"https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/tournament-rounds/{round_id}/standings"
+        data = _get_with_retry(self.session, url)
+        return data['standings']
