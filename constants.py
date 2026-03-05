@@ -2,6 +2,11 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
+# Bot Secrets
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+WORKER_URL        = os.getenv("WORKER_URL")
+WORKER_SECRET     = os.getenv("WORKER_SECRET")
+
 # League Variables
 # Discord ID of GTA Lorcana
 ADMIN_USER_ID = "904550642213875723"
@@ -37,6 +42,9 @@ RESULTS_REPORTING_CHANNEL_URL = "https://discord.com/channels/125391514171657831
 RESULTS_CHANNEL           = "results"
 DECKLISTS_CHANNEL         = "decklists"
 WELCOME_CHANNEL           = "general"
+
+# Roles members can self-assign via /rank
+SELF_ASSIGN_ROLES = ["Casual", "Competitive", "Judge"]
 
 # Regex to validate RPH event URLs submitted in results threads
 EVENTS_URL_RE = r'https://tcg.ravensburgerplay.com/events/[0-9]+'

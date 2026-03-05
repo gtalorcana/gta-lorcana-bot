@@ -35,25 +35,21 @@ from datetime import datetime, timezone
 from rph_util import process_event_data, remove_event_data
 
 from constants import (
+    DISCORD_BOT_TOKEN,
+    WORKER_URL,
+    WORKER_SECRET,
     ANNOUNCEMENTS_CHANNEL,
     RESULTS_REPORTING_CHANNEL,
+    EVENTS_URL_RE,
+    RPH_RETRY_DELAY,
+    RPH_RETRY_ATTEMPTS,
+    ADMIN_USER_ID,
+    UPCOMING_EVENTS_JSON_URL,
     RESULTS_CHANNEL,
     DECKLISTS_CHANNEL,
     WELCOME_CHANNEL,
-    EVENTS_URL_RE,
-    UPCOMING_EVENTS_JSON_URL,
-    ADMIN_USER_ID,
-    RPH_RETRY_ATTEMPTS,
-    RPH_RETRY_DELAY,
+    SELF_ASSIGN_ROLES,
 )
-
-# ── Config ────────────────────────────────────────────────────
-DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-WORKER_URL = os.getenv("WORKER_URL")
-WORKER_SECRET = os.getenv("WORKER_SECRET")
-
-# Roles members can self-assign via /rank
-SELF_ASSIGN_ROLES = ["Casual", "Competitive", "Judge"]
 
 # ── Bot setup ─────────────────────────────────────────────────
 intents = discord.Intents.default()

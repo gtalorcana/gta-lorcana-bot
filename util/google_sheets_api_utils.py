@@ -1,6 +1,5 @@
 import json
 import os
-import os.path
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -110,7 +109,7 @@ class GoogleSheetsApi:
             self.service = build("sheets", "v4", credentials=self.creds)
             self.sheet = self.service.spreadsheets()
         except HttpError as err:
-            print(err)
+            raise
 
     def get_values(self, spreadsheet_id, range_name):
         try:
@@ -121,7 +120,7 @@ class GoogleSheetsApi:
                 .execute()
             )
             rows = result.get("values", [])
-            print(f"{len(rows)} rows retrieved")
+            print(f"  {len(rows)} rows retrieved")
             return result
         except HttpError as error:
             raise
@@ -140,7 +139,7 @@ class GoogleSheetsApi:
                 )
                 .execute()
             )
-            print(f"{(result.get('updatedCells'))} cells updated.")
+            print(f"  {result.get('updatedCells')} cells updated")
             return result
         except HttpError as error:
             raise
@@ -159,7 +158,7 @@ class GoogleSheetsApi:
                 )
                 .execute()
             )
-            print(f"{(result.get('updates').get('updatedCells'))} cells appended.")
+            print(f"  {result.get('updates').get('updatedCells')} cells appended")
             return result
         except HttpError as error:
             raise

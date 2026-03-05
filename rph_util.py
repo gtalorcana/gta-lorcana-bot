@@ -1,4 +1,3 @@
-import os
 from datetime import datetime, timezone
 
 from util.google_sheets_api_utils import GoogleSheetsApi
@@ -6,9 +5,9 @@ from util.rph_api_utils import RphApi
 from constants import (
     LEAGUE_SPREADSHEET_ID,
     EVENTS_RANGE_NAME,
+    RESULTS_REPORTING_CHANNEL_URL,
     STANDINGS_RANGE_NAME,
     EVENTS_TIMESTAMP_RANGE_NAME,
-    RESULTS_REPORTING_CHANNEL_URL,
     EVENTS_SHEET_NAME,
 )
 
