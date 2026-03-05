@@ -8,11 +8,13 @@ Features:
   - /decklist        — members submit decklists to a dedicated channel
   - /rank            — self-assign a player role (Casual / Competitive / Judge)
   - /welcome         — manually welcome a member (admins only)
+  - /recheck         — reprocess missed results threads (admins only)
   - /help            — list all commands
-  - on_member_join   — auto-greets new members automatically
+  - on_member_join   — auto-greets new members (currently disabled)
 
 Requirements:
-  pip install discord.py aiohttp python-dotenv
+  pip install discord.py aiohttp python-dotenv requests
+              google-api-python-client google-auth-httplib2 google-auth-oauthlib
 
 Environment variables (required — set as Fly.io secrets):
   DISCORD_BOT_TOKEN
@@ -20,6 +22,13 @@ Environment variables (required — set as Fly.io secrets):
   WORKER_SECRET
   GOOGLE_CREDENTIALS_JSON
   GOOGLE_TOKEN_JSON
+
+Environment variables (optional — override via .env for local dev):
+  ANNOUNCEMENTS_CHANNEL       default: announcements
+  RESULTS_REPORTING_CHANNEL   default: results-reporting
+  CURRENT_SEASON              default: S11
+  RPH_RETRY_ATTEMPTS          default: 2
+  RPH_RETRY_DELAY             default: 300 (seconds)
 """
 
 import asyncio

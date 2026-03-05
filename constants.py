@@ -8,7 +8,7 @@ WORKER_URL        = os.getenv("WORKER_URL")
 WORKER_SECRET     = os.getenv("WORKER_SECRET")
 
 # League Variables
-# Discord ID of GTA Lorcana
+# Discord user ID of the bot admin (pinged when all auto-retries fail)
 ADMIN_USER_ID = "904550642213875723"
 CURRENT_SEASON = os.getenv("CURRENT_SEASON", "S11")
 SEASON_START_DATE   = "2026-02-13"
@@ -29,7 +29,6 @@ STANDINGS_SHEET_NAME        = CURRENT_SEASON + " Standings - User Reported"
 EVENTS_SHEET_NAME           = CURRENT_SEASON + " Events - User Reported"
 STANDINGS_RANGE_NAME        = STANDINGS_SHEET_NAME + "!" + "A3:F"
 EVENTS_RANGE_NAME           = EVENTS_SHEET_NAME + "!" + "A2:G"
-EVENTS_INPUT_RANGE_NAME      = EVENTS_SHEET_NAME + "!" + "A2:B"
 EVENTS_TIMESTAMP_RANGE_NAME = EVENTS_SHEET_NAME + "!" + "J1:K1"
 
 # Discord channel names (production values)
@@ -51,10 +50,11 @@ EVENTS_URL_RE = r'https://tcg.ravensburgerplay.com/events/[0-9]+'
 RPH_GAME_STORES_URL = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/game-stores/?"
 RPH_EVENTS_URL      = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/events/?"
 RPH_STANDINGS_URL   = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/tournament-rounds/{round_id}/standings"
+# Override via .env locally, e.g. RPH_RETRY_DELAY=10 for faster testing
 RPH_RETRY_ATTEMPTS = int(os.getenv("RPH_RETRY_ATTEMPTS", 2))
-RPH_RETRY_DELAY    = int(os.getenv("RPH_RETRY_DELAY", 300))
+RPH_RETRY_DELAY    = int(os.getenv("RPH_RETRY_DELAY", 300))  # seconds
 
-# Get events.json from Github
+# Fetch upcoming_events.json from GitHub for the /schedule command
 GITHUB_OWNER = "gtalorcana"
 GITHUB_REPO  = "gtalorcana.ca"
 UPCOMING_EVENTS_JSON_URL   = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/main/data/upcoming_events.json"

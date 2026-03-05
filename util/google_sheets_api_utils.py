@@ -67,7 +67,7 @@ class GoogleSheetsApi:
         #
         #   Fix:
         #     1. On your local machine, delete var/token.json
-        #     2. Run the bot locally once (python bot.py or python sync_commands.py)
+        #     2. Run the bot locally once (python bot.py or python discord_sync_commands.py)
         #        — a browser window will open asking you to log in with Google
         #     3. Complete the OAuth flow — var/token.json will be regenerated
         #     4. Update the Fly.io secret with the new token:
