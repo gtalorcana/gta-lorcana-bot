@@ -115,6 +115,10 @@ def process_event_data(rph_url, thread_id):
       5. Validate fetched event count matches expected input count
       6. Write all sheets atomically — nothing is written if any step above fails
     """
+    import time
+    print("  🐢 DEBUG: sleeping 15s to simulate slow processing...")
+    time.sleep(15)
+
     print(f"  → process_event_data: reading existing events from sheet...")
     existing_data = _gs.get_values(LEAGUE_SPREADSHEET_ID, EVENTS_RANGE_NAME)
     existing_rows = existing_data.get('values', [])

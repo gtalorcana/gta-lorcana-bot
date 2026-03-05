@@ -43,25 +43,22 @@ from constants import (
     EVENTS_URL_RE,
     UPCOMING_EVENTS_JSON_URL,
     ADMIN_USER_ID,
+    RPH_RETRY_ATTEMPTS,
+    RPH_RETRY_DELAY,
 )
 
 # ── Config ────────────────────────────────────────────────────
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-WORKER_URL        = os.getenv("WORKER_URL")
-WORKER_SECRET     = os.getenv("WORKER_SECRET")
+WORKER_URL = os.getenv("WORKER_URL")
+WORKER_SECRET = os.getenv("WORKER_SECRET")
 
 # Roles members can self-assign via /rank
 SELF_ASSIGN_ROLES = ["Casual", "Competitive", "Judge"]
 
-# Auto-retry settings for flaky RPH API failures
-_RPH_RETRY_ATTEMPTS = 2    # number of auto-retries after initial failure
-_RPH_RETRY_DELAY = int(os.getenv("RPH_RETRY_DELAY", 300))  # seconds between retries (5 minutes)
-
-
 # ── Bot setup ─────────────────────────────────────────────────
 intents = discord.Intents.default()
 intents.message_content = True  # read message text
-intents.members = True          # on_member_join event
+intents.members = True  # on_member_join event
 
 bot = commands.Bot(
     command_prefix="!",
@@ -80,7 +77,7 @@ _sheet_lock = asyncio.Lock()
 async def post_to_worker(payload: dict) -> bool:
     """POST a payload to the Cloudflare Worker. Returns True on success."""
     headers = {
-        "Content-Type":    "application/json",
+        "Content-Type": "application/json",
         "X-Worker-Secret": WORKER_SECRET,
     }
     try:
@@ -98,9 +95,9 @@ async def post_to_worker(payload: dict) -> bool:
 
 
 def make_embed(
-    title: str,
-    description: str,
-    colour: discord.Colour = discord.Colour.gold()
+        title: str,
+        description: str,
+        colour: discord.Colour = discord.Colour.gold()
 ) -> discord.Embed:
     """Create a consistently branded embed."""
     embed = discord.Embed(title=title, description=description, colour=colour)
@@ -152,13 +149,13 @@ async def on_message(message: discord.Message):
     print(f"  → Announcement from {message.author.display_name}: {message.content[:60]}...")
 
     payload = {
-        "id":           str(message.id),
-        "content":      message.content,
-        "timestamp":    message.created_at.isoformat(),
+        "id": str(message.id),
+        "content": message.content,
+        "timestamp": message.created_at.isoformat(),
         "channel_name": message.channel.name,
         "author": {
             "username": message.author.display_name,
-            "bot":      False,
+            "bot": False,
         },
         "embeds": [
             {"title": e.title or "", "description": e.description or ""}
@@ -237,10 +234,10 @@ async def process_results_reporting_thread(thread: discord.Thread) -> None:
 
 
 async def run_results_reporting_pipeline(
-    thread: discord.Thread,
-    starter_msg: discord.Message,
-    is_retry: bool = False,
-    auto_retry: bool = False,
+        thread: discord.Thread,
+        starter_msg: discord.Message,
+        is_retry: bool = False,
+        auto_retry: bool = False,
 ):
     """
     Shared processing logic for on_thread_create, on_message_edit, and auto-retries.
@@ -334,23 +331,23 @@ async def run_results_reporting_pipeline(
 
 
 async def _schedule_auto_retry(
-    thread: discord.Thread,
-    starter_msg: discord.Message,
-    error: Exception,
-    attempt: int = 1,
+        thread: discord.Thread,
+        starter_msg: discord.Message,
+        error: Exception,
+        attempt: int = 1,
 ):
     """
     Automatically retry process_event_data after a delay when RPH is flaky.
-    Posts a countdown message, waits _RPH_RETRY_DELAY seconds, then retries.
-    Up to _RPH_RETRY_ATTEMPTS total retries. If all fail, pings the admin.
+    Posts a countdown message, waits RPH_RETRY_DELAY seconds, then retries.
+    Up to RPH_RETRY_ATTEMPTS total retries. If all fail, pings the admin.
     """
-    if attempt > _RPH_RETRY_ATTEMPTS:
+    if attempt > RPH_RETRY_ATTEMPTS:
         print(f"  ✗ All auto-retries failed for '{thread.name}' — pinging admin")
         await thread.send(
             embed=make_embed(
                 title="❌ Processing Failed",
                 description=(
-                    f"All {_RPH_RETRY_ATTEMPTS} automatic retries failed.\n"
+                    f"All {RPH_RETRY_ATTEMPTS} automatic retries failed.\n"
                     f"Last error:\n```{error}```\n"
                     f"<@{ADMIN_USER_ID}> Manual intervention required."
                 ),
@@ -363,8 +360,8 @@ async def _schedule_auto_retry(
             pass
         return
 
-    delay_minutes = _RPH_RETRY_DELAY // 60
-    print(f"  ⏳ Scheduling auto-retry {attempt}/{_RPH_RETRY_ATTEMPTS} for '{thread.name}' in {delay_minutes} min...")
+    delay_minutes = RPH_RETRY_DELAY // 60
+    print(f"  ⏳ Scheduling auto-retry {attempt}/{RPH_RETRY_ATTEMPTS} for '{thread.name}' in {delay_minutes} min...")
 
     try:
         await thread.send(
@@ -373,7 +370,7 @@ async def _schedule_auto_retry(
                 description=(
                     f"An error occurred while processing your results:\n```{error}```\n"
                     f"I'll retry automatically in {delay_minutes} minutes. "
-                    f"*(Attempt {attempt}/{_RPH_RETRY_ATTEMPTS})*"
+                    f"*(Attempt {attempt}/{RPH_RETRY_ATTEMPTS})*"
                 ),
                 colour=discord.Colour.orange()
             )
@@ -381,9 +378,9 @@ async def _schedule_auto_retry(
     except Exception:
         pass
 
-    await asyncio.sleep(_RPH_RETRY_DELAY)
+    await asyncio.sleep(RPH_RETRY_DELAY)
 
-    print(f"  🔄 Auto-retry {attempt}/{_RPH_RETRY_ATTEMPTS} for '{thread.name}'...")
+    print(f"  🔄 Auto-retry {attempt}/{RPH_RETRY_ATTEMPTS} for '{thread.name}'...")
 
     try:
         await _run_process_event_data(thread, starter_msg.content.strip())
@@ -391,7 +388,7 @@ async def _schedule_auto_retry(
         await thread.send(
             embed=make_embed(
                 title="✅ Results Processed",
-                description=f"Results successfully processed on retry {attempt}/{_RPH_RETRY_ATTEMPTS}!",
+                description=f"Results successfully processed on retry {attempt}/{RPH_RETRY_ATTEMPTS}!",
                 colour=discord.Colour.green()
             )
         )
@@ -462,8 +459,8 @@ async def on_message_delete(message: discord.Message):
     print(f"  🗑 Announcement deleted by {message.author.display_name}: {message.content[:60]}...")
 
     payload = {
-        "id":           str(message.id),
-        "action":       "delete",
+        "id": str(message.id),
+        "action": "delete",
         "channel_name": message.channel.name,
     }
     await post_to_worker(payload)
@@ -538,15 +535,15 @@ async def schedule(interaction: discord.Interaction):
     else:
         type_icons = {
             "Tournament": "🏆",
-            "Casual":     "🎴",
-            "Draft":      "✨",
+            "Casual": "🎴",
+            "Draft": "✨",
         }
         for e in upcoming:
-            icon     = type_icons.get(e.get("type", ""), "📅")
-            date     = datetime.strptime(e["date"], "%Y-%m-%d").strftime("%a %b %-d")
-            name     = e.get("name", "Unnamed Event")
+            icon = type_icons.get(e.get("type", ""), "📅")
+            date = datetime.strptime(e["date"], "%Y-%m-%d").strftime("%a %b %-d")
+            name = e.get("name", "Unnamed Event")
             location = e.get("location", "TBA")
-            url      = e.get("url", "")
+            url = e.get("url", "")
 
             value = f"{icon} {e.get('type', '')} · {location}"
             if url:
@@ -565,19 +562,19 @@ async def schedule(interaction: discord.Interaction):
 # ── /results ──────────────────────────────────────────────────
 @tree.command(name="results", description="Post tournament results (organizers only)")
 @app_commands.describe(
-    event_name = "Tournament name (e.g. March Championship)",
-    winner     = "1st place player name",
-    second     = "2nd place player name",
-    third      = "3rd place player name",
-    notes      = "Extra notes, e.g. decklist link (optional)",
+    event_name="Tournament name (e.g. March Championship)",
+    winner="1st place player name",
+    second="2nd place player name",
+    third="3rd place player name",
+    notes="Extra notes, e.g. decklist link (optional)",
 )
 async def results(
-    interaction: discord.Interaction,
-    event_name: str,
-    winner: str,
-    second: str,
-    third: str,
-    notes: str = ""
+        interaction: discord.Interaction,
+        event_name: str,
+        winner: str,
+        second: str,
+        third: str,
+        notes: str = ""
 ):
     if not interaction.user.guild_permissions.manage_events:
         await interaction.response.send_message(
@@ -590,10 +587,10 @@ async def results(
     embed = make_embed(
         title=f"🏆 {event_name} — Results",
         description=(
-            f"🥇 **1st** — {winner}\n"
-            f"🥈 **2nd** — {second}\n"
-            f"🥉 **3rd** — {third}\n"
-            + (f"\n📝 {notes}" if notes else "")
+                f"🥇 **1st** — {winner}\n"
+                f"🥈 **2nd** — {second}\n"
+                f"🥉 **3rd** — {third}\n"
+                + (f"\n📝 {notes}" if notes else "")
         )
     )
     embed.set_footer(text=f"GTA Lorcana ✦ {date_str}")
@@ -607,13 +604,13 @@ async def results(
         content += f" | {notes}"
 
     payload = {
-        "id":           str(int(datetime.now().timestamp())),
-        "content":      content,
-        "timestamp":    datetime.now().isoformat(),
+        "id": str(int(datetime.now().timestamp())),
+        "content": content,
+        "timestamp": datetime.now().isoformat(),
         "channel_name": "announcements",
-        "author":       {"username": "GTA Lorcana", "bot": False},
-        "embeds":       [],
-        "icon":         "🏆",
+        "author": {"username": "GTA Lorcana", "bot": False},
+        "embeds": [],
+        "icon": "🏆",
     }
     synced = await post_to_worker(payload)
 
@@ -628,25 +625,25 @@ async def results(
 # ── /decklist ─────────────────────────────────────────────────
 @tree.command(name="decklist", description="Submit your Lorcana decklist to the community")
 @app_commands.describe(
-    deck_name   = "Your deck's name",
-    ink_colours = "Ink colours used (e.g. Amber/Sapphire)",
-    decklist    = "Paste your card list or a dreamborn.ink / moxfield link",
-    notes       = "Strategy or description (optional)",
+    deck_name="Your deck's name",
+    ink_colours="Ink colours used (e.g. Amber/Sapphire)",
+    decklist="Paste your card list or a dreamborn.ink / moxfield link",
+    notes="Strategy or description (optional)",
 )
 async def decklist(
-    interaction: discord.Interaction,
-    deck_name: str,
-    ink_colours: str,
-    decklist: str,
-    notes: str = ""
+        interaction: discord.Interaction,
+        deck_name: str,
+        ink_colours: str,
+        decklist: str,
+        notes: str = ""
 ):
     embed = make_embed(
         title=f"🎴 {deck_name}",
         description=(
-            f"**Submitted by:** {interaction.user.display_name}\n"
-            f"**Inks:** {ink_colours}\n\n"
-            f"**Decklist:**\n```\n{decklist[:800]}\n```"
-            + (f"\n**Notes:** {notes}" if notes else "")
+                f"**Submitted by:** {interaction.user.display_name}\n"
+                f"**Inks:** {ink_colours}\n\n"
+                f"**Decklist:**\n```\n{decklist[:800]}\n```"
+                + (f"\n**Notes:** {notes}" if notes else "")
         ),
         colour=discord.Colour.purple()
     )
@@ -669,12 +666,12 @@ async def decklist(
 @tree.command(name="rank", description="Self-assign your player role")
 @app_commands.describe(role="Choose the role that best describes you")
 @app_commands.choices(role=[
-    app_commands.Choice(name="Casual — I play for fun",       value="Casual"),
-    app_commands.Choice(name="Competitive — I play to win",   value="Competitive"),
+    app_commands.Choice(name="Casual — I play for fun", value="Casual"),
+    app_commands.Choice(name="Competitive — I play to win", value="Competitive"),
     app_commands.Choice(name="Judge — I know the rules well", value="Judge"),
 ])
 async def rank(interaction: discord.Interaction, role: app_commands.Choice[str]):
-    guild  = interaction.guild
+    guild = interaction.guild
     member = interaction.user
 
     for role_name in SELF_ASSIGN_ROLES:
@@ -685,9 +682,9 @@ async def rank(interaction: discord.Interaction, role: app_commands.Choice[str])
     target_role = discord.utils.get(guild.roles, name=role.value)
     if not target_role:
         role_colours = {
-            "Casual":      discord.Colour.green(),
+            "Casual": discord.Colour.green(),
             "Competitive": discord.Colour.red(),
-            "Judge":       discord.Colour.gold(),
+            "Judge": discord.Colour.gold(),
         }
         target_role = await guild.create_role(
             name=role.value,
@@ -732,8 +729,10 @@ async def welcome(interaction: discord.Interaction, member: discord.Member):
 
 
 # ── /recheck ──────────────────────────────────────────────────
-@tree.command(name="recheck", description=f"Reprocess any unhandled threads in #{RESULTS_REPORTING_CHANNEL} (admins only)")
-@app_commands.describe(after="Only recheck threads created on or after this date (YYYY-MM-DD). Leave blank to check all.")
+@tree.command(name="recheck",
+              description=f"Reprocess any unhandled threads in #{RESULTS_REPORTING_CHANNEL} (admins only)")
+@app_commands.describe(
+    after="Only recheck threads created on or after this date (YYYY-MM-DD). Leave blank to check all.")
 async def recheck(interaction: discord.Interaction, after: str = ""):
     """
     Scans all threads in the results-reporting forum channel.
@@ -782,7 +781,7 @@ async def recheck(interaction: discord.Interaction, after: str = ""):
         except Exception:
             continue
 
-        bot_reactions   = {r.emoji for r in starter_msg.reactions if r.me}
+        bot_reactions = {r.emoji for r in starter_msg.reactions if r.me}
         already_handled = "✅" in bot_reactions or "❌" in bot_reactions
 
         if not already_handled:
@@ -830,14 +829,19 @@ async def help_command(interaction: discord.Interaction):
         title="✦ GTA Lorcana Bot — Commands",
         description="Here's everything I can do:"
     )
-    embed.add_field(name="/schedule",          value="Show upcoming events",                                                                                    inline=False)
-    embed.add_field(name="/results",           value="Post tournament results *(organizers only)*",                                                             inline=False)
-    embed.add_field(name="/decklist",          value="Submit your decklist to the community",                                                                   inline=False)
-    embed.add_field(name="/rank",              value="Self-assign Casual / Competitive / Judge role",                                                           inline=False)
-    embed.add_field(name="/welcome @member",   value="Manually welcome a member *(admins only)*",                                                               inline=False)
-    embed.add_field(name="🔁 Auto-sync",       value=f"Posts in `#{ANNOUNCEMENTS_CHANNEL}` appear on the website automatically",                                inline=False)
-    embed.add_field(name="🧵 Results Threads", value=f"New threads in `#{RESULTS_REPORTING_CHANNEL}` are processed automatically. Edit to retry on bad URL.",  inline=False)
-    embed.add_field(name="/recheck",           value=f"Reprocess any missed threads in `#{RESULTS_REPORTING_CHANNEL}` *(admins only)*",                        inline=False)
+    embed.add_field(name="/schedule", value="Show upcoming events", inline=False)
+    embed.add_field(name="/results", value="Post tournament results *(organizers only)*", inline=False)
+    embed.add_field(name="/decklist", value="Submit your decklist to the community", inline=False)
+    embed.add_field(name="/rank", value="Self-assign Casual / Competitive / Judge role", inline=False)
+    embed.add_field(name="/welcome @member", value="Manually welcome a member *(admins only)*", inline=False)
+    embed.add_field(name="🔁 Auto-sync",
+                    value=f"Posts in `#{ANNOUNCEMENTS_CHANNEL}` appear on the website automatically", inline=False)
+    embed.add_field(name="🧵 Results Threads",
+                    value=f"New threads in `#{RESULTS_REPORTING_CHANNEL}` are processed automatically. Edit to retry on bad URL.",
+                    inline=False)
+    embed.add_field(name="/recheck",
+                    value=f"Reprocess any missed threads in `#{RESULTS_REPORTING_CHANNEL}` *(admins only)*",
+                    inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 

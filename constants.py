@@ -43,6 +43,8 @@ EVENTS_URL_RE = r'https://tcg.ravensburgerplay.com/events/[0-9]+'
 RPH_GAME_STORES_URL = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/game-stores/?"
 RPH_EVENTS_URL      = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/events/?"
 RPH_STANDINGS_URL   = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/tournament-rounds/{round_id}/standings"
+RPH_RETRY_ATTEMPTS = int(os.getenv("RPH_RETRY_ATTEMPTS", 2))
+RPH_RETRY_DELAY    = int(os.getenv("RPH_RETRY_DELAY", 300))
 
 # Get events.json from Github
 GITHUB_OWNER = "gtalorcana"

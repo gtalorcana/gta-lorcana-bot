@@ -17,9 +17,6 @@ def _get_with_retry(session, url, params=None):
     GET a URL with up to _MAX_RETRIES attempts.
     Raises RuntimeError if all attempts fail.
     """
-    if os.getenv("DEBUG"):
-        print("GET %s with params %s" % (url + urllib.parse.urlencode(params), params))
-
     global _fail_count
     if os.getenv("DEBUG") and os.getenv("FORCE_RPH_FAIL"):
         if _fail_count < 1:
