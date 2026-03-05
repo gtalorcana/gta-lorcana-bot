@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # League Variables
+# Discord ID of GTA Lorcana
 ADMIN_USER_ID = "904550642213875723"
 CURRENT_SEASON = os.getenv("CURRENT_SEASON", "S11")
 SEASON_START_DATE   = "2026-02-13"
@@ -47,3 +48,12 @@ RPH_STANDINGS_URL   = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/ap
 GITHUB_OWNER = "gtalorcana"
 GITHUB_REPO  = "gtalorcana.ca"
 UPCOMING_EVENTS_JSON_URL   = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/main/data/upcoming_events.json"
+
+# Scripts Constants
+SET_CHAMPS_SPREADSHEET_ID = "1sF-TJ5ue5_sOCCpj9UlV_RvXbuJ9l2GwxTFVPthpCrc"
+SET_CHAMPS_EVENTS_SHEET_NAME = CURRENT_SEASON + " Set Champs"
+SET_CHAMPS_EVENTS_RANGE_NAME = SET_CHAMPS_EVENTS_SHEET_NAME + "!" + "A2:F"
+SET_CHAMPS_START_DATE   = "2026-04-04"
+SET_CHAMPS_END_DATE     = "2026-04-24"
+SET_CHAMPS_START_DT     = SET_CHAMPS_START_DATE + START_OF_DAY
+SET_CHAMPS_END_DT       = SET_CHAMPS_END_DATE + END_OF_DAY
