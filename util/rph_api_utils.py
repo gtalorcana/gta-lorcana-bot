@@ -1,6 +1,4 @@
-import os
 import time
-import urllib
 
 import requests
 
@@ -9,20 +7,12 @@ from constants import RPH_EVENTS_URL, RPH_GAME_STORES_URL, RPH_STANDINGS_URL
 _MAX_RETRIES = 3
 _RETRY_DELAY = 2  # seconds between retries
 
-_fail_count = 0  # used by FORCE_RPH_FAIL debug simulation
-
 
 def _get_with_retry(session, url, params=None):
     """
     GET a URL with up to _MAX_RETRIES attempts.
     Raises RuntimeError if all attempts fail.
     """
-    global _fail_count
-    if os.getenv("DEBUG") and os.getenv("FORCE_RPH_FAIL"):
-        if _fail_count < 1:
-            _fail_count += 1
-            raise RuntimeError("Simulated RPH API failure (FORCE_RPH_FAIL is set)")
-
     last_error = None
     for attempt in range(1, _MAX_RETRIES + 1):
         try:
