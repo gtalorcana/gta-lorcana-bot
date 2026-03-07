@@ -743,8 +743,10 @@ async def recheck(interaction: discord.Interaction, after: str = ""):
     Scans all threads in the results-reporting forum channel.
     Any thread without a ✅ or ❌ reaction from the bot is reprocessed.
     """
+    await interaction.response.defer(ephemeral=True)
+
     if not interaction.user.guild_permissions.manage_guild:
-        await interaction.response.send_message("⚠️ Admins only.", ephemeral=True)
+        await interaction.followup.send("⚠️ Admins only.", ephemeral=True)
         return
 
     after_date = None
@@ -752,19 +754,17 @@ async def recheck(interaction: discord.Interaction, after: str = ""):
         try:
             after_date = datetime.strptime(after, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         except ValueError:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "⚠️ Invalid date format. Use YYYY-MM-DD (e.g. `2025-01-15`).", ephemeral=True
             )
             return
 
     forum = discord.utils.get(interaction.guild.forums, name=RESULTS_REPORTING_CHANNEL)
     if not forum:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"⚠️ Could not find forum channel `#{RESULTS_REPORTING_CHANNEL}`.", ephemeral=True
         )
         return
-
-    await interaction.response.defer(ephemeral=True)
 
     threads = list(forum.threads)
     async for thread in forum.archived_threads(limit=None):
@@ -787,7 +787,7 @@ async def recheck(interaction: discord.Interaction, after: str = ""):
             continue
 
         bot_reactions = {r.emoji for r in starter_msg.reactions if r.me}
-        already_handled = "✅" in bot_reactions or "❌" in bot_reactions
+        already_handled = "✅" in bot_reactions
 
         if not already_handled:
             missed.append((thread, starter_msg))
