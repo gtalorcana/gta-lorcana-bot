@@ -48,8 +48,7 @@ async def sync():
         tree.clear_commands(guild=None)
         await tree.sync()
 
-        # Sync to guild
-        tree.clear_commands(guild=guild)
+        # Copy global commands to guild and sync
         tree.copy_global_to(guild=guild)
         synced = await tree.sync(guild=guild)
 
