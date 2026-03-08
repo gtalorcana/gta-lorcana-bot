@@ -14,8 +14,7 @@ Grouping key:
 
 Classification rules (symmetric):
   Regular    — current consecutive streak >= RSVP_MIN_CONSECUTIVE_WEEKS
-  Semi-Regular — has some history but streak < RSVP_MIN_CONSECUTIVE_WEEKS,
-               or missed RSVP_MISS_WEEKS_BEFORE_RELEGATE consecutive weeks
+  Semi-Regular — has some history but streak < WHOS_GOING_MIN_CONSECUTIVE_WEEKS
 
 State persistence:
   Classifications are read from and written back to the
@@ -68,19 +67,20 @@ def _get_week_start(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
 
-def _parse_event_time_toronto(start_datetime: str) -> tuple[str, str]:
+def _parse_event_time_toronto(start_datetime: str) -> tuple[str, str, datetime | None]:
     """
     Parse an RPH start_datetime string and return two time representations
     in Toronto time (handles EST/EDT via zoneinfo):
 
       raw_time    — exact time string, e.g. '7:30 PM'
       floored_time — hour-floored time string, e.g. '7:00 PM'
+      dt_toronto  — the full timezone-aware datetime in Toronto time
 
     The floored_time is used as the grouping key to merge events whose
     organizer adjusted the start time slightly week to week. The raw_time
     is collected across events so the most common value can be displayed.
 
-    Returns ('', '') on parse failure.
+    Returns ('', '', None) on parse failure.
     """
     try:
         dt_utc     = datetime.fromisoformat(start_datetime.replace('Z', '+00:00'))
@@ -436,7 +436,7 @@ def _apply_overrides(analysis: dict, overrides: list) -> dict:
     for entry in analysis['regular'] + analysis['semi_regular']:
         k = _key(entry)
         if k in match_overrides:
-            ov = override_map = match_overrides[k]
+            ov = match_overrides[k]
             status = ov['override_status']
             print(f"  ↪ Override: {entry['store_name']} {entry['day']} {entry['time']} → {status}"
                   f"{' ' + ov['override_day'] if ov['override_day'] else ''}"
@@ -619,10 +619,3 @@ def get_expected_stores_for_date(target_date: date, store_analysis: dict = None)
 
     print(f"  ✓ {len(expected)} event type(s) expected on {target_day_name} ({target_date})")
     return expected
-
-
-# ── Formatting helpers ────────────────────────────────────────────────────────
-
-def format_store_days(days_of_week: list) -> str:
-    """e.g. [5, 6] -> 'Saturday, Sunday'"""
-    return ', '.join(_DAY_NAMES[d] for d in sorted(days_of_week))

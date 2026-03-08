@@ -45,10 +45,10 @@ import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from datetime import datetime, timezone, timedelta, date
+from datetime import datetime, timezone, date
 
 from rph_util import process_event_data, remove_event_data
-from rsvp_util import analyse_stores, get_expected_stores_for_date, load_store_analysis, load_bot_state, save_bot_state
+from rsvp_util import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state
 
 from constants import (
     DISCORD_BOT_TOKEN,
@@ -70,7 +70,6 @@ from constants import (
     WHOS_GOING_POST_HOUR_ET,
     WHERE_TO_PLAY_POST_DAY,
     WHERE_TO_PLAY_POST_HOUR_ET,
-    WHOS_GOING_MIN_CONSECUTIVE_WEEKS,
 )
 
 # ── Bot setup ─────────────────────────────────────────────────
@@ -109,12 +108,14 @@ _sheet_lock = asyncio.Lock()
 # HELPERS
 # ═══════════════════════════════════════════════════════════════
 
-_ET = timezone(timedelta(hours=-5))  # EST; close enough for daily scheduling
+from zoneinfo import ZoneInfo
+
+_TZ_ET = ZoneInfo("America/Toronto")
 
 
 def _now_et():
-    """Current datetime in Eastern Time."""
-    return datetime.now(_ET)
+    """Current datetime in Eastern Time (DST-aware)."""
+    return datetime.now(_TZ_ET)
 
 
 async def post_to_worker(payload: dict) -> bool:
@@ -248,23 +249,23 @@ async def _post_whos_going_polls(target_date, interaction: discord.Interaction =
         )
     except Exception as e:
         msg = f"Failed to fetch store analysis: {e}"
-        print(f"  ✗ _post_rsvp_polls: {msg}")
+        print(f"  ✗ _post_whos_going_polls: {msg}")
         if interaction:
             await interaction.followup.send(f"❌ {msg}", ephemeral=True)
         return
 
     if not expected_stores:
         msg = f"No stores expected on {target_date} — no polls posted."
-        print(f"  ↩ _post_rsvp_polls: {msg}")
+        print(f"  ↩ _post_whos_going_polls: {msg}")
         if interaction:
             await interaction.followup.send(f"ℹ️ {msg}", ephemeral=True)
         return
 
     posted = 0
     for guild in bot.guilds:
-        rsvp_ch = discord.utils.get(guild.text_channels, name=WHOS_GOING_CHANNEL)
+        rsvp_ch = get_channel(guild, WHOS_GOING_CHANNEL)
         if not rsvp_ch:
-            print(f"  ⚠ _post_rsvp_polls: #{WHOS_GOING_CHANNEL} not found in {guild.name}")
+            print(f"  ⚠ _post_whos_going_polls: #{WHOS_GOING_CHANNEL} not found in {guild.name}")
             continue
 
         for store in expected_stores:
@@ -322,7 +323,7 @@ async def where_to_play_weekly():
     messages = _build_where_to_play_messages(store_analysis, now_et.date())
 
     for guild in bot.guilds:
-        wtp_ch = discord.utils.get(guild.text_channels, name=WHERE_TO_PLAY_CHANNEL)
+        wtp_ch = get_channel(guild, WHERE_TO_PLAY_CHANNEL)
         if not wtp_ch:
             print(f"  ⚠ where_to_play_weekly: #{WHERE_TO_PLAY_CHANNEL} not found in {guild.name}")
             continue
@@ -343,7 +344,6 @@ async def where_to_play_weekly():
                 new_ids.append(msg.id)
             _where_to_play_msg_ids = new_ids
             # Persist message IDs so edits survive restarts
-            loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, save_bot_state, {
                 'wtp_msg_0': str(new_ids[0]) if new_ids[0] else '',
                 'wtp_msg_1': str(new_ids[1]) if new_ids[1] else '',
@@ -380,7 +380,7 @@ async def on_ready():
         print(f"  ♻ Keepalive task started")
     if not whos_going_daily.is_running():
         whos_going_daily.start()
-        print(f"  ♻ RSVP daily task started (fires at {WHOS_GOING_POST_HOUR_ET}AM ET)")
+        print(f"  ♻ Whos-going daily task started (fires at {WHOS_GOING_POST_HOUR_ET}AM ET)")
     if not where_to_play_weekly.is_running():
         where_to_play_weekly.start()
         print(f"  ♻ Where-to-play weekly task started (fires Sundays at {WHERE_TO_PLAY_POST_HOUR_ET}:00 ET)")
@@ -1113,7 +1113,7 @@ async def wheretoplay_command(interaction: discord.Interaction):
         loop = asyncio.get_running_loop()
         store_analysis = await loop.run_in_executor(None, analyse_stores, date.today())
 
-        channel = discord.utils.get(interaction.guild.text_channels, name=WHERE_TO_PLAY_CHANNEL)
+        channel = get_channel(interaction.guild, WHERE_TO_PLAY_CHANNEL)
         if not channel:
             await interaction.followup.send(f"⚠️ #{WHERE_TO_PLAY_CHANNEL} channel not found.", ephemeral=True)
             return

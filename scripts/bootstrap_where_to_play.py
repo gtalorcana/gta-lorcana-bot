@@ -28,11 +28,6 @@ from datetime import date, timedelta
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from util.rph_api_utils import RphApi
-from util.google_sheets_api_utils import GoogleSheetsApi
-from constants import (
-    STORE_SPREADSHEET_ID,
-    STORE_CLASSIFICATIONS_RANGE_NAME,
-)
 from rsvp_util import (
     _build_event_type_map,
     _classify_event_types,
@@ -40,6 +35,7 @@ from rsvp_util import (
     _load_overrides,
     _apply_overrides,
     save_raw_event_map,
+    save_store_analysis,
 )
 
 # ── Bootstrap config ──────────────────────────────────────────────────────────
@@ -53,17 +49,12 @@ BOOTSTRAP_START = BOOTSTRAP_END - timedelta(weeks=4)
 BOOTSTRAP_START_DT = BOOTSTRAP_START.isoformat() + START_OF_DAY
 BOOTSTRAP_END_DT   = BOOTSTRAP_END.isoformat() + END_OF_DAY
 
-# Set to True to write raw event_map data to a "Bootstrap Raw Data" tab for debugging.
+# Set to True to write raw event_map data to the Bootstrap Raw Data tab for debugging.
 WRITE_RAW_DATA = False
-
-RAW_DATA_SHEET  = "Bootstrap Raw Data"
-RAW_DATA_RANGE  = RAW_DATA_SHEET + "!A1:G"
-RAW_DATA_HEADER = ['store_id', 'store_name', 'day', 'floored_time', 'format', 'week_starts', 'raw_times']
 
 
 def main():
     rph_api = RphApi()
-    gs      = GoogleSheetsApi()
 
     print(f"\nBootstrapping Where-to-Play...")
     print(f"  Date range: {BOOTSTRAP_START} → {BOOTSTRAP_END}")
@@ -86,20 +77,11 @@ def main():
     for s in analysis['semi_regular']:
         print(f"     {s['store_name']} — {s['day']} · {s['format']} ({s['event_count']} event(s))")
 
-    # ── Write classifications to Google Sheet ─────────────────
-    rows = _store_analysis_to_rows(analysis)
-    print(f"\n  → Writing {len(rows) - 1} event types to Google Sheet...")
-    gs.update_values(
-        STORE_SPREADSHEET_ID,
-        STORE_CLASSIFICATIONS_RANGE_NAME,
-        "USER_ENTERED",
-        rows,
-    )
+    save_store_analysis(analysis)
     print(f"  ✓ Store Classifications sheet updated")
 
-    # ── Optionally write raw event_map for debugging ──────────
     if WRITE_RAW_DATA:
-        print(f"\n  → Writing raw event data to '{RAW_DATA_SHEET}' tab...")
+        print(f"\n  → Writing raw event data...")
         save_raw_event_map(event_map)
 
     print(f"\nDone. The bot will now use the Google Sheet for ongoing classifications.")

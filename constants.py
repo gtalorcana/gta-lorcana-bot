@@ -60,7 +60,7 @@ RESULTS_CHANNEL           = "results"
 DECKLISTS_CHANNEL         = "decklists"
 WELCOME_CHANNEL           = "general"
 WHERE_TO_PLAY_CHANNEL     = os.getenv("WHERE_TO_PLAY_CHANNEL", "where-to-play")
-WHOS_GOING_CHANNEL              = os.getenv("WHOS_GOING_CHANNEL", "rsvp")
+WHOS_GOING_CHANNEL              = os.getenv("WHOS_GOING_CHANNEL", "whos-going")
 
 # RSVP & Where-to-Play settings
 # Override via .env for local testing, e.g. WHOS_GOING_POST_HOUR_ET=9
@@ -68,7 +68,6 @@ WHOS_GOING_POST_HOUR_ET             = int(os.getenv("WHOS_GOING_POST_HOUR_ET", 7
 WHERE_TO_PLAY_POST_DAY        = 6   # Sunday (0=Mon … 6=Sun)
 WHERE_TO_PLAY_POST_HOUR_ET    = int(os.getenv("WHERE_TO_PLAY_POST_HOUR_ET", 18))  # 6PM ET Sunday
 WHOS_GOING_MIN_CONSECUTIVE_WEEKS    = 2   # weeks in a row to become Regular
-RSVP_MISS_WEEKS_BEFORE_RELEGATE = 2 # consecutive misses to drop back to Up & Coming
 
 # Roles members can self-assign via /rank
 SELF_ASSIGN_ROLES = ["Casual", "Competitive", "Judge"]
