@@ -79,7 +79,20 @@ intents = discord.Intents.default()
 intents.message_content = True  # read message text
 intents.members = True  # on_member_join event
 
-bot = commands.Bot(
+class GtaLorcanaBot(commands.Bot):
+    async def setup_hook(self):
+        if os.getenv("SYNC_COMMANDS_ONLY") == "1":
+            guild = discord.Object(id=int(os.getenv("DISCORD_GUILD_ID", "0")))
+            self.tree.clear_commands(guild=None)
+            await self.tree.sync()
+            self.tree.copy_global_to(guild=guild)
+            synced = await self.tree.sync(guild=guild)
+            print(f"✓ Synced {len(synced)} command(s) to guild {guild.id}:")
+            for cmd in synced:
+                print(f"  /{cmd.name}")
+            await self.close()
+
+bot = GtaLorcanaBot(
     command_prefix="!",
     intents=intents,
 )
