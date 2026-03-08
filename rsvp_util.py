@@ -2,7 +2,7 @@
 RSVP & Where-to-Play utility module.
 
 Analyses current season RPH event data to classify Ontario Lorcana store events
-as Regular or Occasional, persists state to Google Sheets, and determines which
+as Regular or Semi-Regular, persists state to Google Sheets, and determines which
 events are expected on a given date.
 
 Grouping key:
@@ -14,7 +14,7 @@ Grouping key:
 
 Classification rules (symmetric):
   Regular    — current consecutive streak >= RSVP_MIN_CONSECUTIVE_WEEKS
-  Occasional — has some history but streak < RSVP_MIN_CONSECUTIVE_WEEKS,
+  Semi-Regular — has some history but streak < RSVP_MIN_CONSECUTIVE_WEEKS,
                or missed RSVP_MISS_WEEKS_BEFORE_RELEGATE consecutive weeks
 
 State persistence:
@@ -220,34 +220,30 @@ def _compute_streaks(week_starts: set, reference_date: date) -> tuple[int, int]:
 
 def _classify_event_types(event_map: dict, reference_date: date) -> dict:
     """
-    Classify each (store, day, floored_hour, format) event type into Regular
-    or Occasional.
+    Classify each (store, day, floored_hour, format) event type into:
+      Regular      — ran both of the last 2 weeks (streak >= 2)
+      Semi-Regular — ran at least once in the last 2 weeks AND at least
+                     twice total in the window (active but inconsistent)
 
     Returns:
         {
-            'regular': [
-                {
-                    'store_id':    str,
-                    'store_name':  str,
-                    'status':      'Regular',
-                    'streak':      int,
-                    'event_count': int,
-                    'day':         str,   # e.g. 'Saturday'
-                    'time':        str,   # e.g. '7:00 PM' or '~7:00 PM'
-                    'format':      str,   # e.g. 'Core Constructed'
-                },
-                ...
-            ],
-            'occasional': [ ... same shape ... ],
+            'regular':      [ {store_id, store_name, status, streak,
+                               event_count, day, time, format}, ... ],
+            'semi_regular': [ ... same shape ... ],
         }
     """
-    regular    = []
-    occasional = []
+    regular      = []
+    semi_regular = []
+
+    ref_week      = _get_week_start(reference_date)
+    prev_week     = ref_week - timedelta(weeks=1)
 
     for key, info in event_map.items():
         current_streak, miss_streak = _compute_streaks(info['week_starts'], reference_date)
         event_count  = len(info['week_starts'])
         display_time = _display_time(info['raw_times'])
+
+        ran_recently = (ref_week in info['week_starts'] or prev_week in info['week_starts'])
 
         entry = {
             'store_id':    info['store_id'],
@@ -262,14 +258,23 @@ def _classify_event_types(event_map: dict, reference_date: date) -> dict:
         if current_streak >= RSVP_MIN_CONSECUTIVE_WEEKS:
             entry['status'] = 'Regular'
             regular.append(entry)
-        elif event_count > 0:
-            entry['status'] = 'Occasional'
-            occasional.append(entry)
+        elif ran_recently and event_count >= 2:
+            entry['status'] = 'Semi-Regular'
+            semi_regular.append(entry)
 
-    regular.sort(key=lambda s: (-s['streak'], s['store_name'], s['day'], s['time']))
-    occasional.sort(key=lambda s: (-s['event_count'], s['store_name']))
+    def _sort_key(s):
+        day_order = {d: i for i, d in enumerate(_DAY_NAMES)}
+        try:
+            dt = datetime.strptime(s['time'].lstrip('~'), '%I:%M %p')
+            minutes = dt.hour * 60 + dt.minute
+        except Exception:
+            minutes = 9999
+        return (day_order.get(s['day'], 99), minutes, s['store_name'])
 
-    return {'regular': regular, 'occasional': occasional}
+    regular.sort(key=_sort_key)
+    semi_regular.sort(key=_sort_key)
+
+    return {'regular': regular, 'semi_regular': semi_regular}
 
 
 # ── Sheet persistence ─────────────────────────────────────────────────────────
@@ -280,7 +285,7 @@ _SHEET_HEADER = ['store_id', 'store_name', 'status', 'streak', 'event_count', 'd
 def _store_analysis_to_rows(store_analysis: dict) -> list:
     """Convert a store analysis dict to sheet rows (header + data)."""
     rows = [_SHEET_HEADER]
-    for entry in store_analysis['regular'] + store_analysis['occasional']:
+    for entry in store_analysis['regular'] + store_analysis['semi_regular']:
         rows.append([
             entry['store_id'],
             entry['store_name'],
@@ -320,7 +325,7 @@ def _rows_to_store_analysis(rows: list) -> dict:
         else:
             occasional.append(entry)
 
-    return {'regular': regular, 'occasional': occasional}
+    return {'regular': regular, 'semi_regular': occasional}
 
 
 def save_store_analysis(store_analysis: dict) -> None:
@@ -346,7 +351,7 @@ def load_store_analysis() -> dict | None:
         print(f"  ⚠ Store classifications sheet is empty — run bootstrap script first")
         return None
     analysis = _rows_to_store_analysis(rows)
-    print(f"  ✓ Loaded {len(analysis['regular'])} regular, {len(analysis['occasional'])} occasional from sheet")
+    print(f"  ✓ Loaded {len(analysis['regular'])} regular, {len(analysis['semi_regular'])} occasional from sheet")
     return analysis
 
 
@@ -363,7 +368,7 @@ def analyse_stores(reference_date: date = None) -> dict:
         reference_date: Evaluate streaks as of this date. Defaults to today.
 
     Returns:
-        {'regular': [...], 'occasional': [...]}
+        {'regular': [...], 'semi_regular': [...]}
     """
     if reference_date is None:
         reference_date = date.today()
@@ -373,7 +378,7 @@ def analyse_stores(reference_date: date = None) -> dict:
     analysis  = _classify_event_types(event_map, reference_date)
 
     save_store_analysis(analysis)
-    print(f"  ✓ {len(analysis['regular'])} regular, {len(analysis['occasional'])} occasional event type(s)")
+    print(f"  ✓ {len(analysis['regular'])} regular, {len(analysis['semi_regular'])} occasional event type(s)")
     return analysis
 
 

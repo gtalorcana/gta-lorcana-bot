@@ -1,10 +1,10 @@
 """
 Bootstrap Where-to-Play store classifications for a new season.
 
-Run this ONCE at the start of each season. It pulls the final 2 weeks of RPH
-data up to today — enough to seed any store that was running consistently —
-classifies them as Regular or Up & Coming, and writes the result to the
-Google Sheet (STORE_CLASSIFICATIONS_SHEET_NAME).
+Run this ONCE at the start of each season. It pulls the last 4 weeks of RPH
+data up to today — 4 weeks of history ensures the reference date is current
+so streak calculations are accurate, while 2 consecutive weeks is enough to
+qualify as Regular.
 
 Once bootstrapped, rsvp_util.analyse_stores() takes over each Sunday,
 re-running against current season data and updating the sheet automatically.
@@ -44,7 +44,7 @@ START_OF_DAY = "T05%3A00%3A00.000Z"
 END_OF_DAY   = "T04%3A59%3A59.999Z"
 
 BOOTSTRAP_END   = date.today()
-BOOTSTRAP_START = BOOTSTRAP_END - timedelta(weeks=2)
+BOOTSTRAP_START = BOOTSTRAP_END - timedelta(weeks=4)
 
 BOOTSTRAP_START_DT = BOOTSTRAP_START.isoformat() + START_OF_DAY
 BOOTSTRAP_END_DT   = BOOTSTRAP_END.isoformat() + END_OF_DAY

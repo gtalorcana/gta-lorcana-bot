@@ -139,33 +139,44 @@ def get_channel(guild: discord.Guild, name: str):
 
 def _build_where_to_play_message(store_analysis: dict, as_of: date) -> str:
     """Build the #where-to-play plain text message from a store analysis result."""
-    lines = []
-    lines.append(f"📍 **Where to Play — GTA Lorcana**")
-    lines.append(f"*Updated {as_of.strftime('%B %-d, %Y')}*")
-    lines.append("")
 
-    lines.append("✅ **Regular Events**")
-    if store_analysis['regular']:
-        for s in store_analysis['regular']:
-            time = f" @ {s['time']}" if s.get('time') else ''
-            lines.append(f"• **{s['store_name']}** — {s['day']}{time} · {s['format']}")
-    else:
-        lines.append("*None yet this season*")
+    def _grouped_by_day(entries: list) -> str:
+        """Format a list of event entries grouped by day with day headers."""
+        if not entries:
+            return "*None yet this season*"
+        groups = {}
+        for e in entries:
+            groups.setdefault(e['day'], []).append(e)
+        lines = []
+        for day, day_entries in groups.items():
+            lines.append(f"__**{day}**__")
+            for e in day_entries:
+                time = f" @ {e['time']}" if e.get('time') else ''
+                lines.append(f"• **{e['store_name']}**{time} · {e['format']}")
+        return "\n".join(lines)
 
-    lines.append("")
-    lines.append("🏪 **Don't see your store?**")
-    lines.append("Ask them to run a Lorcana event two weeks in a row and it'll appear here automatically!")
+    parts = []
+    parts.append("📍 **Where to Play — GTA Lorcana**")
+    parts.append(f"*Updated {as_of.strftime('%B %-d, %Y')}*")
+    parts.append("")
 
-    lines.append("")
-    lines.append("ℹ️ **How this works**")
-    lines.append(
-        f"Stores with {RSVP_MIN_CONSECUTIVE_WEEKS}+ consecutive weeks of events are listed above. "
-        f"Miss {RSVP_MISS_WEEKS_BEFORE_RELEGATE} weeks in a row and they're removed. "
-        "This list updates every Sunday."
-    )
-    lines.append("*~ before a time means the start time may vary slightly week to week.*")
+    parts.append("✅ **Regular Events** — *runs consistently every week*")
+    parts.append(_grouped_by_day(store_analysis['regular']))
+    parts.append("")
 
-    return "\n".join(lines)
+    parts.append("🔄 **Semi-Regular Events** — *doesn't run every week; check #rsvp before heading out or contact the store to confirm*")
+    parts.append(_grouped_by_day(store_analysis.get('semi_regular', [])))
+    parts.append("")
+
+    parts.append("🏪 **Don't see your store?**")
+    parts.append("Ask them to run the same event (same day, same time) at least twice in the last 4 weeks and it'll appear here automatically!")
+    parts.append("")
+
+    parts.append("ℹ️ **How this works**")
+    parts.append("Ratings are based on historical RPH event data and update every Sunday.")
+    parts.append("*~ before a time means the start time varies slightly week to week — e.g. ~7:00 PM could mean anywhere from 7:00–7:30 PM. Arrive a few minutes early to be safe.*")
+
+    return "\n".join(parts)
 
 
 # ═══════════════════════════════════════════════════════════════
