@@ -88,9 +88,9 @@ def _parse_event_time_toronto(start_datetime: str) -> tuple[str, str]:
         raw_time     = dt_toronto.strftime('%I:%M %p').lstrip('0')
         floored      = dt_toronto.replace(minute=0, second=0, microsecond=0)
         floored_time = floored.strftime('%I:%M %p').lstrip('0')
-        return raw_time, floored_time
+        return raw_time, floored_time, dt_toronto
     except Exception:
-        return '', ''
+        return '', '', None
 
 
 def _build_event_type_map(events: list) -> dict:
@@ -131,12 +131,14 @@ def _build_event_type_map(events: list) -> dict:
     for event in events:
         store_id   = event['store']['id']
         store_name = event['store']['name']
-        event_date = date.fromisoformat(event['start_datetime'][:10])
-        day_str    = _DAY_NAMES[event_date.weekday()]
         format_str = event['gameplay_format']['name']
-        week_start = _get_week_start(event_date)
 
-        raw_time, floored_time = _parse_event_time_toronto(event['start_datetime'])
+        raw_time, floored_time, dt_toronto = _parse_event_time_toronto(event['start_datetime'])
+        if not dt_toronto:
+            continue
+        event_date = dt_toronto.date()
+        day_str    = _DAY_NAMES[event_date.weekday()]
+        week_start = _get_week_start(event_date)
 
         key = (store_id, day_str, floored_time, format_str)
         event_map[key]['store_id']     = store_id
