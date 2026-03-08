@@ -568,6 +568,11 @@ def analyse_stores(reference_date: date = None) -> dict:
     if reference_date is None:
         reference_date = date.today()
 
+    # Always evaluate streaks as of the last completed week so that
+    # the current in-progress week is never counted against a streak.
+    # e.g. if today is Monday Mar 9, ref = Mon Mar 2 (last completed week).
+    reference_date = _get_week_start(reference_date) - timedelta(weeks=1)
+
     events    = _fetch_current_season_events()
     event_map = _build_event_type_map(events)
     analysis  = _classify_event_types(event_map, reference_date)
