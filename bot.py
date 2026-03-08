@@ -137,54 +137,35 @@ def get_channel(guild: discord.Guild, name: str):
     return discord.utils.get(guild.text_channels, name=name)
 
 
-def _build_where_to_play_embed(store_analysis: dict, as_of: date) -> discord.Embed:
-    """Build the #where-to-play embed from a store analysis result."""
-    embed = make_embed(
-        title="🗺 Where to Play — GTA Lorcana",
-        description=(
-            f"Here's where you can find weekly Lorcana locals in the GTA.\n"
-            f"*Updated {as_of.strftime('%B %-d, %Y')}*"
-        ),
-        colour=discord.Colour.gold()
-    )
+def _build_where_to_play_message(store_analysis: dict, as_of: date) -> str:
+    """Build the #where-to-play plain text message from a store analysis result."""
+    lines = []
+    lines.append(f"📍 **Where to Play — GTA Lorcana**")
+    lines.append(f"*Updated {as_of.strftime('%B %-d, %Y')}*")
+    lines.append("")
 
-    # ── Regular events ────────────────────────────────────────
+    lines.append("✅ **Regular Events**")
     if store_analysis['regular']:
-        regular_lines = []
         for s in store_analysis['regular']:
             time = f" @ {s['time']}" if s.get('time') else ''
-            regular_lines.append(
-                f"**{s['store_name']}** — {s['day']}{time} · {s['format']}"
-            )
-        embed.add_field(
-            name="✅ Regular Events",
-            value="\n".join(regular_lines),
-            inline=False
-        )
+            lines.append(f"• **{s['store_name']}** — {s['day']}{time} · {s['format']}")
     else:
-        embed.add_field(name="✅ Regular Events", value="*None yet this season*", inline=False)
+        lines.append("*None yet this season*")
 
-    # ── Call to action ────────────────────────────────────────
-    embed.add_field(
-        name="🏪 Don't see your store?",
-        value=(
-            "Ask them to run a Lorcana event two weeks in a row and it'll appear here automatically!"
-        ),
-        inline=False
-    )
+    lines.append("")
+    lines.append("🏪 **Don't see your store?**")
+    lines.append("Ask them to run a Lorcana event two weeks in a row and it'll appear here automatically!")
 
-    # ── How this works ────────────────────────────────────────
-    embed.add_field(
-        name="ℹ️ How this works",
-        value=(
-            f"Stores with **{RSVP_MIN_CONSECUTIVE_WEEKS}+ consecutive weeks** of events are listed above. "
-            f"Miss {RSVP_MISS_WEEKS_BEFORE_RELEGATE} weeks in a row and they're removed. "
-            "This list updates every Sunday.\n"
-            "*~ before a time means the start time may vary slightly week to week.*"
-        ),
-        inline=False
+    lines.append("")
+    lines.append("ℹ️ **How this works**")
+    lines.append(
+        f"Stores with {RSVP_MIN_CONSECUTIVE_WEEKS}+ consecutive weeks of events are listed above. "
+        f"Miss {RSVP_MISS_WEEKS_BEFORE_RELEGATE} weeks in a row and they're removed. "
+        "This list updates every Sunday."
     )
-    return embed
+    lines.append("*~ before a time means the start time may vary slightly week to week.*")
+
+    return "\n".join(lines)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -281,7 +262,7 @@ async def where_to_play_weekly():
         print(f"  ✗ where_to_play_weekly: failed to fetch store analysis: {e}")
         return
 
-    embed = _build_where_to_play_embed(store_analysis, now_et.date())
+    content = _build_where_to_play_message(store_analysis, now_et.date())
 
     for guild in bot.guilds:
         wtp_ch = discord.utils.get(guild.text_channels, name=WHERE_TO_PLAY_CHANNEL)
@@ -293,13 +274,13 @@ async def where_to_play_weekly():
             if _where_to_play_message_id:
                 try:
                     existing = await wtp_ch.fetch_message(_where_to_play_message_id)
-                    await existing.edit(embed=embed)
+                    await existing.edit(content=content)
                     print(f"  ✓ #{WHERE_TO_PLAY_CHANNEL} post updated")
                     continue
                 except discord.NotFound:
                     print(f"  ⚠ Previous #{WHERE_TO_PLAY_CHANNEL} message not found — posting new one")
 
-            msg = await wtp_ch.send(embed=embed)
+            msg = await wtp_ch.send(content)
             _where_to_play_message_id = msg.id
             print(f"  ✓ #{WHERE_TO_PLAY_CHANNEL} post created (message ID: {msg.id})")
         except Exception as e:
@@ -1061,19 +1042,19 @@ async def wheretoplay_command(interaction: discord.Interaction):
             await interaction.followup.send(f"⚠️ #{WHERE_TO_PLAY_CHANNEL} channel not found.", ephemeral=True)
             return
 
-        embed = _build_where_to_play_embed(store_analysis, date.today())
+        content = _build_where_to_play_message(store_analysis, date.today())
 
         global _where_to_play_message_id
         if _where_to_play_message_id:
             try:
                 msg = await channel.fetch_message(_where_to_play_message_id)
-                await msg.edit(embed=embed)
+                await msg.edit(content=content)
                 await interaction.followup.send(f"✅ #{WHERE_TO_PLAY_CHANNEL} updated.", ephemeral=True)
                 return
             except discord.NotFound:
                 _where_to_play_message_id = None
 
-        msg = await channel.send(embed=embed)
+        msg = await channel.send(content)
         _where_to_play_message_id = msg.id
         await interaction.followup.send(f"✅ Posted to #{WHERE_TO_PLAY_CHANNEL}.", ephemeral=True)
 
