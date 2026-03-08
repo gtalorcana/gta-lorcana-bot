@@ -1,5 +1,5 @@
 """
-RSVP & Where-to-Play utility module.
+Whos-Going & Where-to-Play utility module.
 
 Analyses current season RPH event data to classify Ontario Lorcana store events
 as Regular or Semi-Regular, persists state to Google Sheets, and determines which
@@ -41,8 +41,7 @@ from constants import (
     STORE_OVERRIDES_RANGE_NAME,
     STORE_RAW_DATA_RANGE_NAME,
     BOT_STATE_RANGE_NAME,
-    RSVP_MIN_CONSECUTIVE_WEEKS,
-    RSVP_MISS_WEEKS_BEFORE_RELEGATE,
+    WHOS_GOING_MIN_CONSECUTIVE_WEEKS,
 )
 
 _TZ_TORONTO = ZoneInfo("America/Toronto")
@@ -260,7 +259,7 @@ def _classify_event_types(event_map: dict, reference_date: date) -> dict:
             'format':      info['format'],
         }
 
-        if current_streak >= RSVP_MIN_CONSECUTIVE_WEEKS:
+        if current_streak >= WHOS_GOING_MIN_CONSECUTIVE_WEEKS:
             entry['status'] = 'Regular'
             regular.append(entry)
         elif ran_recently and event_count >= 2:

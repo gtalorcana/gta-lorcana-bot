@@ -11,7 +11,7 @@ Features:
   - /recheck         — reprocess missed results threads (admins only)
   - /help            — list all commands
   - on_member_join   — auto-greets new members (currently disabled)
-  - rsvp_daily       — posts RSVP polls at 7AM ET for stores expected to run today
+  - whos_going_daily — posts #whos_going polls at 7AM ET for stores expected to run today
   - where_to_play_weekly — refreshes #where-to-play every Sunday evening
 
 Requirements:
@@ -29,11 +29,11 @@ Environment variables (optional — override via .env for local dev):
   ANNOUNCEMENTS_CHANNEL       default: announcements
   RESULTS_REPORTING_CHANNEL   default: results-reporting
   WHERE_TO_PLAY_CHANNEL       default: where-to-play
-  RSVP_CHANNEL                default: rsvp
+  WHOS_GOING_CHANNEL          default: whos_going
   CURRENT_SEASON              default: S11
   RPH_RETRY_ATTEMPTS          default: 2
   RPH_RETRY_DELAY             default: 300 (seconds)
-  RSVP_POST_HOUR_ET           default: 7 (7AM ET)
+  WHOS_GOING_POST_HOUR_ET     default: 7 (7AM ET)
   WHERE_TO_PLAY_POST_HOUR_ET  default: 18 (6PM ET)
 """
 
@@ -66,12 +66,11 @@ from constants import (
     WELCOME_CHANNEL,
     SELF_ASSIGN_ROLES,
     WHERE_TO_PLAY_CHANNEL,
-    RSVP_CHANNEL,
-    RSVP_POST_HOUR_ET,
+    WHOS_GOING_CHANNEL,
+    WHOS_GOING_POST_HOUR_ET,
     WHERE_TO_PLAY_POST_DAY,
     WHERE_TO_PLAY_POST_HOUR_ET,
-    RSVP_MIN_CONSECUTIVE_WEEKS,
-    RSVP_MISS_WEEKS_BEFORE_RELEGATE,
+    WHOS_GOING_MIN_CONSECUTIVE_WEEKS,
 )
 
 # ── Bot setup ─────────────────────────────────────────────────
@@ -214,7 +213,7 @@ async def keepalive():
     print(f"  ♥ Heartbeat — bot alive, watching #{ANNOUNCEMENTS_CHANNEL} and #{RESULTS_REPORTING_CHANNEL}")
 
 
-# ── RSVP & Where-to-Play tasks ────────────────────────────────
+# ── Whos-Going & Where-to-Play tasks ────────────────────────────────
 
 # Stores the message ID of the current #where-to-play post so we can edit it
 # in-place each Sunday rather than posting a new one.
@@ -222,21 +221,21 @@ _where_to_play_msg_ids: list[int | None] = [None, None, None]  # regular, semi-r
 
 
 @tasks.loop(minutes=1)
-async def rsvp_daily():
+async def whos_going_daily():
     """
-    Posts one RSVP poll per Regular store expected to run today.
-    Fires once daily at RSVP_POST_HOUR_ET (ET).
+    Posts one #Whos-Going poll per Regular store expected to run today.
+    Fires once daily at WHOS_GOING_POST_HOUR_ET (ET).
     Skips if no stores are expected today.
     """
     now_et = _now_et()
-    if now_et.hour != RSVP_POST_HOUR_ET or now_et.minute != 0:
+    if now_et.hour != WHOS_GOING_POST_HOUR_ET or now_et.minute != 0:
         return
 
-    print(f"  🗓 rsvp_daily: checking expected stores for {now_et.date()}...")
-    await _post_rsvp_polls(now_et.date())
+    print(f"  🗓 whos_going_daily: checking expected stores for {now_et.date()}...")
+    await _post_whos_going_polls(now_et.date())
 
 
-async def _post_rsvp_polls(target_date, interaction: discord.Interaction = None):
+async def _post_whos_going_polls(target_date, interaction: discord.Interaction = None):
     """
     Core RSVP poll posting logic. Posts one poll per Regular store expected on target_date.
     If interaction is provided, sends ephemeral feedback to the caller.
@@ -263,9 +262,9 @@ async def _post_rsvp_polls(target_date, interaction: discord.Interaction = None)
 
     posted = 0
     for guild in bot.guilds:
-        rsvp_ch = discord.utils.get(guild.text_channels, name=RSVP_CHANNEL)
+        rsvp_ch = discord.utils.get(guild.text_channels, name=WHOS_GOING_CHANNEL)
         if not rsvp_ch:
-            print(f"  ⚠ _post_rsvp_polls: #{RSVP_CHANNEL} not found in {guild.name}")
+            print(f"  ⚠ _post_rsvp_polls: #{WHOS_GOING_CHANNEL} not found in {guild.name}")
             continue
 
         for store in expected_stores:
@@ -379,9 +378,9 @@ async def on_ready():
     if not keepalive.is_running():
         keepalive.start()
         print(f"  ♻ Keepalive task started")
-    if not rsvp_daily.is_running():
-        rsvp_daily.start()
-        print(f"  ♻ RSVP daily task started (fires at {RSVP_POST_HOUR_ET}AM ET)")
+    if not whos_going_daily.is_running():
+        whos_going_daily.start()
+        print(f"  ♻ RSVP daily task started (fires at {WHOS_GOING_POST_HOUR_ET}AM ET)")
     if not where_to_play_weekly.is_running():
         where_to_play_weekly.start()
         print(f"  ♻ Where-to-play weekly task started (fires Sundays at {WHERE_TO_PLAY_POST_HOUR_ET}:00 ET)")
@@ -1147,9 +1146,9 @@ async def wheretoplay_command(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 
-@tree.command(name="testrsvp", description="Manually trigger today's RSVP polls (admins only)")
+@tree.command(name="testwhosgoing", description="Manually trigger today's #whos_going polls (admins only)")
 @app_commands.describe(date="Optional date to test (YYYY-MM-DD), defaults to today")
-async def testrsvp_command(interaction: discord.Interaction, date: str = None):
+async def testwhosgoing_command(interaction: discord.Interaction, date: str = None):
     if interaction.user.id != ADMIN_USER_ID:
         await interaction.response.send_message("❌ Admins only.", ephemeral=True)
         return
@@ -1162,7 +1161,7 @@ async def testrsvp_command(interaction: discord.Interaction, date: str = None):
             target_date = date_type.fromisoformat(date)
         else:
             target_date = _now_et().date()
-        await _post_rsvp_polls(target_date, interaction=interaction)
+        await _post_whos_going_polls(target_date, interaction=interaction)
     except ValueError:
         await interaction.followup.send("❌ Invalid date format — use YYYY-MM-DD.", ephemeral=True)
     except Exception as e:
