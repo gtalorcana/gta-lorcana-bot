@@ -570,8 +570,15 @@ def analyse_stores(reference_date: date = None) -> dict:
 
     # Always evaluate streaks as of the last completed week so that
     # the current in-progress week is never counted against a streak.
-    # e.g. if today is Monday Mar 9, ref = Mon Mar 2 (last completed week).
-    reference_date = _get_week_start(reference_date) - timedelta(weeks=1)
+    # Floor to the Monday of the current week; if today IS that Monday,
+    # step back one more week since the current week hasn't completed.
+    ref_week = _get_week_start(reference_date)
+    if reference_date == ref_week:
+        # Today is Monday — current week just started, use previous week
+        reference_date = ref_week - timedelta(weeks=1)
+    else:
+        # Mid-week or Sunday — current week is in progress, use its Monday as ref
+        reference_date = ref_week
 
     events    = _fetch_current_season_events()
     event_map = _build_event_type_map(events)
