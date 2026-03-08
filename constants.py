@@ -25,18 +25,21 @@ SEASON_END_DT   = SEASON_END_DATE + END_OF_DAY
 LEAGUE_SPREADSHEET_ID = "1dSv5lzVwhot1DR0e2FghyS7R1Vm1ODZtH3d8e3C55Zo"
 
 # Separate spreadsheet for store event data (classifications, raw debug data, overrides)
-STORE_SPREADSHEET_ID  = "1cKiZqVu88_umUbrGPXk-dmZhHEzx1uL-pGR6dQOJyaU"
+STORE_SPREADSHEET_ID  = "1rUV5GOlkjSiHXBcdjlcwI8HsdE7GQ9I6U4nQiLSGbJI"
+
+STORE_CLASSIFICATIONS_SHEET_NAME  = "Store Classifications"
+STORE_CLASSIFICATIONS_RANGE_NAME  = STORE_CLASSIFICATIONS_SHEET_NAME + "!A1:H"
+
+# Overrides tab — manually maintained, never overwritten by the bot
+# Columns: store_id | store_name | day | time | format | override_status | reason
+STORE_OVERRIDES_SHEET_NAME  = "Overrides"
+STORE_OVERRIDES_RANGE_NAME  = STORE_OVERRIDES_SHEET_NAME + "!A1:I"
 
 STANDINGS_SHEET_NAME        = CURRENT_SEASON + " Standings - User Reported"
 EVENTS_SHEET_NAME           = CURRENT_SEASON + " Events - User Reported"
 STANDINGS_RANGE_NAME        = STANDINGS_SHEET_NAME + "!" + "A3:F"
 EVENTS_RANGE_NAME           = EVENTS_SHEET_NAME + "!" + "A2:G"
 EVENTS_TIMESTAMP_RANGE_NAME = EVENTS_SHEET_NAME + "!" + "J1:K1"
-
-# Store classifications — written by bootstrap_where_to_play.py at season start,
-# then updated every Sunday by rsvp_util.analyse_stores()
-STORE_CLASSIFICATIONS_SHEET_NAME  = "Store Classifications"
-STORE_CLASSIFICATIONS_RANGE_NAME  = STORE_CLASSIFICATIONS_SHEET_NAME + "!A1:H"
 
 # Discord channel names (production values)
 # Override via .env locally to point at test channels, e.g.:

@@ -38,6 +38,7 @@ from constants import (
     SEASON_END_DT,
     STORE_SPREADSHEET_ID,
     STORE_CLASSIFICATIONS_RANGE_NAME,
+    STORE_OVERRIDES_RANGE_NAME,
     RSVP_MIN_CONSECUTIVE_WEEKS,
     RSVP_MISS_WEEKS_BEFORE_RELEGATE,
 )
@@ -355,6 +356,138 @@ def load_store_analysis() -> dict | None:
     return analysis
 
 
+# ── Overrides ─────────────────────────────────────────────────────────────────
+
+def _load_overrides() -> list:
+    """
+    Read manual overrides from the Overrides tab in STORE_SPREADSHEET_ID.
+
+    Each row matches a classified entry by (store_id, day, time, format) and
+    can force a new status, day, and/or time.
+
+    Sheet columns:
+      store_id | store_name | day | time | format | override_status | override_day | override_time | reason
+
+    override_status: 'Regular', 'Semi-Regular', or 'Exclude'
+    override_day:    replacement day (e.g. 'Tuesday') — leave blank to keep original
+    override_time:   replacement time (e.g. '6:30 PM') — leave blank to keep original
+
+    Returns a list of override dicts, or [] if the sheet is empty or missing.
+    """
+    try:
+        result = _gs.get_values(STORE_SPREADSHEET_ID, STORE_OVERRIDES_RANGE_NAME)
+        rows   = result.get('values', [])
+        if len(rows) <= 1:
+            return []
+        overrides = []
+        for row in rows[1:]:  # skip header
+            if len(row) < 6:
+                continue
+            overrides.append({
+                'store_id':        str(row[0]).strip(),
+                'store_name':      row[1],
+                'day':             row[2],
+                'time':            row[3],
+                'format':          row[4],
+                'override_status': row[5],
+                'override_day':    row[6].strip() if len(row) > 6 else '',
+                'override_time':   row[7].strip() if len(row) > 7 else '',
+                'reason':          row[8] if len(row) > 8 else '',
+            })
+        print(f"  ✓ Loaded {len(overrides)} override(s)")
+        return overrides
+    except Exception as e:
+        print(f"  ⚠ Could not load overrides: {e}")
+        return []
+
+
+def _apply_overrides(analysis: dict, overrides: list) -> dict:
+    """
+    Apply manual overrides to a store analysis dict.
+
+    Matches on (store_id, day, time, format). For each match:
+      - override_status 'Regular' / 'Semi-Regular': forces status, optionally replaces day/time
+      - override_status 'Exclude': removes the entry entirely
+      - override_status 'Add': injects a brand new entry using override_day/override_time
+        (no match key needed — store_id, store_name, format, override_day, override_time, reason required)
+
+    Returns a new analysis dict with overrides applied.
+    """
+    if not overrides:
+        return analysis
+
+    # Separate Add overrides from match-based overrides
+    add_overrides    = [o for o in overrides if o['override_status'] == 'Add']
+    match_overrides  = {
+        (o['store_id'], o['day'], o['time'], o['format']): o
+        for o in overrides if o['override_status'] != 'Add'
+    }
+
+    def _key(entry):
+        return (str(entry['store_id']), entry['day'], entry['time'], entry['format'])
+
+    regular      = []
+    semi_regular = []
+
+    for entry in analysis['regular'] + analysis['semi_regular']:
+        k = _key(entry)
+        if k in match_overrides:
+            ov = override_map = match_overrides[k]
+            status = ov['override_status']
+            print(f"  ↪ Override: {entry['store_name']} {entry['day']} {entry['time']} → {status}"
+                  f"{' ' + ov['override_day'] if ov['override_day'] else ''}"
+                  f"{' ' + ov['override_time'] if ov['override_time'] else ''}"
+                  f" ({ov['reason']})")
+            if status == 'Exclude':
+                continue
+            entry = {
+                **entry,
+                'status': status,
+                'day':    ov['override_day']  or entry['day'],
+                'time':   ov['override_time'] or entry['time'],
+            }
+            if status == 'Regular':
+                regular.append(entry)
+            else:
+                semi_regular.append(entry)
+        elif entry['status'] == 'Regular':
+            regular.append(entry)
+        else:
+            semi_regular.append(entry)
+
+    # Inject Add overrides as new entries
+    for ov in add_overrides:
+        if not ov['override_day'] or not ov['override_time']:
+            print(f"  ⚠ Add override for {ov['store_name']} missing override_day or override_time — skipping")
+            continue
+        entry = {
+            'store_id':    ov['store_id'],
+            'store_name':  ov['store_name'],
+            'status':      'Regular',
+            'streak':      0,
+            'event_count': 0,
+            'day':         ov['override_day'],
+            'time':        ov['override_time'],
+            'format':      ov['format'],
+        }
+        print(f"  ↪ Add override: {entry['store_name']} {entry['day']} {entry['time']} · {entry['format']} ({ov['reason']})")
+        regular.append(entry)
+
+    def _sort_key(s):
+        day_order = {d: i for i, d in enumerate(_DAY_NAMES)}
+        try:
+            dt = datetime.strptime(s['time'].lstrip('~'), '%I:%M %p')
+            minutes = dt.hour * 60 + dt.minute
+        except Exception:
+            minutes = 9999
+        return (day_order.get(s['day'], 99), minutes, s['store_name'])
+
+    regular.sort(key=_sort_key)
+    semi_regular.sort(key=_sort_key)
+
+    return {'regular': regular, 'semi_regular': semi_regular}
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def analyse_stores(reference_date: date = None) -> dict:
@@ -376,6 +509,8 @@ def analyse_stores(reference_date: date = None) -> dict:
     events    = _fetch_current_season_events()
     event_map = _build_event_type_map(events)
     analysis  = _classify_event_types(event_map, reference_date)
+    overrides = _load_overrides()
+    analysis  = _apply_overrides(analysis, overrides)
 
     save_store_analysis(analysis)
     print(f"  ✓ {len(analysis['regular'])} regular, {len(analysis['semi_regular'])} semi-regular event type(s)")
