@@ -168,11 +168,13 @@ def _build_where_to_play_messages(store_analysis: dict, as_of: date) -> tuple[st
     ])
 
     semi_regular_msg = "\n".join([
+        "\u200b",  # zero-width space to force blank line gap
         "🔄 **Semi-Regular Events** — *doesn't run every week; check #rsvp before heading out or contact the store to confirm*",
         _grouped_by_day(store_analysis.get('semi_regular', [])),
     ])
 
     info_msg = "\n".join([
+        "\u200b",  # zero-width space to force blank line gap
         "🏪 **Don't see your store?**",
         "Ask them to run the same event (same day, same time) at least twice in the last 4 weeks and it'll appear here automatically!",
         "",

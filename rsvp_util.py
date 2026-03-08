@@ -19,7 +19,7 @@ Classification rules (symmetric):
 
 State persistence:
   Classifications are read from and written back to the
-  STORE_CLASSIFICATIONS_SHEET_NAME tab in LEAGUE_SPREADSHEET_ID.
+  STORE_CLASSIFICATIONS_SHEET_NAME tab in STORE_SPREADSHEET_ID.
   This survives Fly.io restarts. The bootstrap script seeds this sheet
   using the last 2 weeks of RPH data.
 
@@ -36,7 +36,7 @@ from util.google_sheets_api_utils import GoogleSheetsApi
 from constants import (
     SEASON_START_DT,
     SEASON_END_DT,
-    LEAGUE_SPREADSHEET_ID,
+    STORE_SPREADSHEET_ID,
     STORE_CLASSIFICATIONS_RANGE_NAME,
     RSVP_MIN_CONSECUTIVE_WEEKS,
     RSVP_MISS_WEEKS_BEFORE_RELEGATE,
@@ -305,7 +305,7 @@ def _rows_to_store_analysis(rows: list) -> dict:
     Expects a header row first; skips malformed rows.
     """
     regular    = []
-    occasional = []
+    semi_regular = []
 
     for row in rows[1:]:  # skip header
         if len(row) < 8:
@@ -323,16 +323,16 @@ def _rows_to_store_analysis(rows: list) -> dict:
         if row[2] == 'Regular':
             regular.append(entry)
         else:
-            occasional.append(entry)
+            semi_regular.append(entry)
 
-    return {'regular': regular, 'semi_regular': occasional}
+    return {'regular': regular, 'semi_regular': semi_regular}
 
 
 def save_store_analysis(store_analysis: dict) -> None:
     """Write store classifications to the Google Sheet."""
     rows = _store_analysis_to_rows(store_analysis)
     _gs.update_values(
-        LEAGUE_SPREADSHEET_ID,
+        STORE_SPREADSHEET_ID,
         STORE_CLASSIFICATIONS_RANGE_NAME,
         "USER_ENTERED",
         rows,
@@ -345,13 +345,13 @@ def load_store_analysis() -> dict | None:
     Read store classifications from the Google Sheet.
     Returns None if the sheet is empty (not yet bootstrapped).
     """
-    result = _gs.get_values(LEAGUE_SPREADSHEET_ID, STORE_CLASSIFICATIONS_RANGE_NAME)
+    result = _gs.get_values(STORE_SPREADSHEET_ID, STORE_CLASSIFICATIONS_RANGE_NAME)
     rows   = result.get('values', [])
     if len(rows) <= 1:
         print(f"  ⚠ Store classifications sheet is empty — run bootstrap script first")
         return None
     analysis = _rows_to_store_analysis(rows)
-    print(f"  ✓ Loaded {len(analysis['regular'])} regular, {len(analysis['semi_regular'])} occasional from sheet")
+    print(f"  ✓ Loaded {len(analysis['regular'])} regular, {len(analysis['semi_regular'])} semi-regular from sheet")
     return analysis
 
 
@@ -378,7 +378,7 @@ def analyse_stores(reference_date: date = None) -> dict:
     analysis  = _classify_event_types(event_map, reference_date)
 
     save_store_analysis(analysis)
-    print(f"  ✓ {len(analysis['regular'])} regular, {len(analysis['semi_regular'])} occasional event type(s)")
+    print(f"  ✓ {len(analysis['regular'])} regular, {len(analysis['semi_regular'])} semi-regular event type(s)")
     return analysis
 
 

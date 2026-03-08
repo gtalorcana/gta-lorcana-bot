@@ -24,6 +24,9 @@ SEASON_END_DT   = SEASON_END_DATE + END_OF_DAY
 # Google Sheets Constants
 LEAGUE_SPREADSHEET_ID = "1dSv5lzVwhot1DR0e2FghyS7R1Vm1ODZtH3d8e3C55Zo"
 
+# Separate spreadsheet for store event data (classifications, raw debug data, overrides)
+STORE_SPREADSHEET_ID  = "1cKiZqVu88_umUbrGPXk-dmZhHEzx1uL-pGR6dQOJyaU"
+
 STANDINGS_SHEET_NAME        = CURRENT_SEASON + " Standings - User Reported"
 EVENTS_SHEET_NAME           = CURRENT_SEASON + " Events - User Reported"
 STANDINGS_RANGE_NAME        = STANDINGS_SHEET_NAME + "!" + "A3:F"
