@@ -6,7 +6,7 @@ data up to today — 4 weeks of history ensures the reference date is current
 so streak calculations are accurate, while 2 consecutive weeks is enough to
 qualify as Regular.
 
-Once bootstrapped, rsvp_util.analyse_stores() takes over each Sunday,
+Once bootstrapped, stores.analyse_stores() takes over each Sunday,
 re-running against current season data and updating the sheet automatically.
 
 Re-running this script mid-season will overwrite current season data — only
@@ -28,7 +28,7 @@ from datetime import date, timedelta
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from util.rph_api_utils import RphApi
-from rsvp_util import (
+from stores import (
     _build_event_type_map,
     _classify_event_types,
     _store_analysis_to_rows,

@@ -47,8 +47,8 @@ from discord import app_commands
 from discord.ext import commands, tasks
 from datetime import datetime, timezone, date
 
-from rph_util import process_event_data, remove_event_data
-from rsvp_util import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state
+from results import process_event_data, remove_event_data
+from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state
 
 from constants import (
     DISCORD_BOT_TOKEN,

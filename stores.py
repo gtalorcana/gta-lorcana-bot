@@ -45,7 +45,7 @@ from constants import (
 
 _TZ_TORONTO = ZoneInfo("America/Toronto")
 
-# Singletons — reuse existing connections if already constructed in rph_util
+# Singletons — reuse existing connections if already constructed in results.py
 _rph_api = RphApi()
 _gs      = GoogleSheetsApi()
 
@@ -619,3 +619,5 @@ def get_expected_stores_for_date(target_date: date, store_analysis: dict = None)
 
     print(f"  ✓ {len(expected)} event type(s) expected on {target_day_name} ({target_date})")
     return expected
+
+
