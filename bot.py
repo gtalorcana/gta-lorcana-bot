@@ -157,7 +157,7 @@ def _build_where_to_play_message(store_analysis: dict, as_of: date) -> str:
 
     parts = []
     parts.append("📍 **Where to Play — GTA Lorcana**")
-    parts.append(f"*Updated {as_of.strftime('%B %-d, %Y')}*")
+    parts.append(f"*Updated {as_of.strftime('%B %d, %Y').replace(' 0', ' ')}*")
     parts.append("")
 
     parts.append("✅ **Regular Events** — *runs consistently every week*")
@@ -234,7 +234,7 @@ async def rsvp_daily():
                 title=f"📅 Who's coming today?",
                 description=(
                     f"**{store['store_name']}**\n"
-                    f"📆 {now_et.strftime('%A, %B %-d')}\n"
+                    f"📆 {now_et.strftime('%A, %B %d').replace(' 0', ' ')}\n"
                     f"🕐 Typically starts: {store['time']} (Toronto time)\n"
                     f"🎮 Format: {store['format']}\n\n"
                     f"React below to let the community know if you're attending!\n"
@@ -724,7 +724,7 @@ async def schedule(interaction: discord.Interaction):
         }
         for e in upcoming:
             icon = type_icons.get(e.get("type", ""), "📅")
-            date = datetime.strptime(e["date"], "%Y-%m-%d").strftime("%a %b %-d")
+            date = datetime.strptime(e["date"], "%Y-%m-%d").strftime("%a %b %d").replace(" 0", " ")
             name = e.get("name", "Unnamed Event")
             location = e.get("location", "TBA")
             url = e.get("url", "")

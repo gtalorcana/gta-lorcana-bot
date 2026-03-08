@@ -23,9 +23,7 @@ from bot import bot, DISCORD_BOT_TOKEN
 async def on_ready():
     guild = discord.Object(id=int(DISCORD_GUILD_ID))
     try:
-        bot.tree.copy_global_to(guild=guild)
-        await bot.tree.sync()  # clears global commands
-        synced = await bot.tree.sync(guild=guild)
+        synced = await bot.tree.sync()  # clears global commands
         print(f"✓ Synced {len(synced)} command(s)")
         for cmd in synced:
             print(f"  /{cmd.name}")
