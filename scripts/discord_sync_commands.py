@@ -24,6 +24,7 @@ async def on_ready():
     guild = discord.Object(id=int(DISCORD_GUILD_ID))
     try:
         bot.tree.copy_global_to(guild=guild)
+        await bot.tree.sync()  # clears global commands
         synced = await bot.tree.sync(guild=guild)
         print(f"✓ Synced {len(synced)} command(s)")
         for cmd in synced:

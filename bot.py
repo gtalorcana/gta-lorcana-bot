@@ -154,7 +154,7 @@ def _build_where_to_play_embed(store_analysis: dict, as_of: date) -> discord.Emb
         for s in store_analysis['regular']:
             time = f" @ {s['time']}" if s.get('time') else ''
             regular_lines.append(
-                f"**{s['store_name']}** — {s['day']}{time} · {s['format']} *({s['streak']} weeks running)*"
+                f"**{s['store_name']}** — {s['day']}{time} · {s['format']}"
             )
         embed.add_field(
             name="✅ Regular Events",
