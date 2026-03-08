@@ -216,25 +216,39 @@ async def rsvp_daily():
         return
 
     print(f"  🗓 rsvp_daily: checking expected stores for {now_et.date()}...")
+    await _post_rsvp_polls(now_et.date())
 
+
+async def _post_rsvp_polls(target_date, interaction: discord.Interaction = None):
+    """
+    Core RSVP poll posting logic. Posts one poll per Regular store expected on target_date.
+    If interaction is provided, sends ephemeral feedback to the caller.
+    """
     loop = asyncio.get_running_loop()
     try:
-        store_analysis  = await loop.run_in_executor(None, analyse_stores, now_et.date())
+        store_analysis  = await loop.run_in_executor(None, analyse_stores, target_date)
         expected_stores = await loop.run_in_executor(
-            None, get_expected_stores_for_date, now_et.date(), store_analysis
+            None, get_expected_stores_for_date, target_date, store_analysis
         )
     except Exception as e:
-        print(f"  ✗ rsvp_daily: failed to fetch store analysis: {e}")
+        msg = f"Failed to fetch store analysis: {e}"
+        print(f"  ✗ _post_rsvp_polls: {msg}")
+        if interaction:
+            await interaction.followup.send(f"❌ {msg}", ephemeral=True)
         return
 
     if not expected_stores:
-        print(f"  ↩ rsvp_daily: no stores expected today — skipping")
+        msg = f"No stores expected on {target_date} — no polls posted."
+        print(f"  ↩ _post_rsvp_polls: {msg}")
+        if interaction:
+            await interaction.followup.send(f"ℹ️ {msg}", ephemeral=True)
         return
 
+    posted = 0
     for guild in bot.guilds:
         rsvp_ch = discord.utils.get(guild.text_channels, name=RSVP_CHANNEL)
         if not rsvp_ch:
-            print(f"  ⚠ rsvp_daily: #{RSVP_CHANNEL} not found in {guild.name}")
+            print(f"  ⚠ _post_rsvp_polls: #{RSVP_CHANNEL} not found in {guild.name}")
             continue
 
         for store in expected_stores:
@@ -242,7 +256,7 @@ async def rsvp_daily():
                 title=f"📅 Who's coming today?",
                 description=(
                     f"**{store['store_name']}**\n"
-                    f"📆 {now_et.strftime('%A, %B %d').replace(' 0', ' ')}\n"
+                    f"📆 {target_date.strftime('%A, %B %d').replace(' 0', ' ')}\n"
                     f"🕐 Typically starts: {store['time']} (Toronto time)\n"
                     f"🎮 Format: {store['format']}\n\n"
                     f"React below to let the community know if you're attending!\n"
@@ -255,9 +269,16 @@ async def rsvp_daily():
                 await msg.add_reaction("👍")
                 await msg.add_reaction("👎")
                 await msg.add_reaction("🤔")
-                print(f"  ✓ RSVP poll posted for {store['name']}")
+                print(f"  ✓ RSVP poll posted for {store['store_name']}")
+                posted += 1
             except Exception as e:
-                print(f"  ✗ Failed to post RSVP poll for {store['name']}: {e}")
+                print(f"  ✗ Failed to post RSVP poll for {store['store_name']}: {e}")
+
+    if interaction:
+        await interaction.followup.send(
+            f"✅ Posted {posted} RSVP poll(s) for {target_date.strftime('%A, %B %d').replace(' 0', ' ')}.",
+            ephemeral=True
+        )
 
 
 @tasks.loop(minutes=1)
@@ -347,11 +368,6 @@ async def on_ready():
     if not where_to_play_weekly.is_running():
         where_to_play_weekly.start()
         print(f"  ♻ Where-to-play weekly task started (fires Sundays at {WHERE_TO_PLAY_POST_HOUR_ET}:00 ET)")
-    try:
-        await tree.sync()
-        print(f"  Slash commands synced")
-    except Exception as e:
-        print(f"  ⚠ Slash command sync failed (non-fatal): {e}")
 
 
 @bot.event
@@ -1112,6 +1128,29 @@ async def wheretoplay_command(interaction: discord.Interaction):
 
     except Exception as e:
         await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
+
+@tree.command(name="testrsvp", description="Manually trigger today's RSVP polls (admins only)")
+@app_commands.describe(date="Optional date to test (YYYY-MM-DD), defaults to today")
+async def testrsvp_command(interaction: discord.Interaction, date: str = None):
+    if interaction.user.id != ADMIN_USER_ID:
+        await interaction.response.send_message("❌ Admins only.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        if date:
+            from datetime import date as date_type
+            target_date = date_type.fromisoformat(date)
+        else:
+            target_date = _now_et().date()
+        await _post_rsvp_polls(target_date, interaction=interaction)
+    except ValueError:
+        await interaction.followup.send("❌ Invalid date format — use YYYY-MM-DD.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
 
 if __name__ == "__main__":
     missing = [v for v in ["DISCORD_BOT_TOKEN", "WORKER_URL", "WORKER_SECRET"] if not os.getenv(v)]
