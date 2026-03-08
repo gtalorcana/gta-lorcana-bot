@@ -34,7 +34,7 @@ Environment variables (optional — override via .env for local dev):
   RPH_RETRY_ATTEMPTS          default: 2
   RPH_RETRY_DELAY             default: 300 (seconds)
   WHOS_GOING_POST_HOUR_ET     default: 7 (7AM ET)
-  WHERE_TO_PLAY_POST_HOUR_ET  default: 18 (6PM ET)
+  WHERE_TO_PLAY_POST_HOUR_ET  default: 23 (11PM ET)
 """
 
 import asyncio
