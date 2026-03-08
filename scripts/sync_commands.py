@@ -18,9 +18,12 @@ To make the bot global (i.e. work in all servers):
 
 import asyncio
 import os
+import sys
 import discord
-from discord.ext import commands
 from dotenv import load_dotenv
+
+# Ensure /app is on the path so `bot` can be imported when running from scripts/
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 load_dotenv()
 
