@@ -280,7 +280,7 @@ def _classify_event_types(event_map: dict, reference_date: date) -> dict:
 
 # ── Sheet persistence ─────────────────────────────────────────────────────────
 
-_SHEET_HEADER = ['store_id', 'store_name', 'status', 'streak', 'event_count', 'day', 'time', 'format']
+_SHEET_HEADER = ['store_id', 'store_name', 'status', 'streak', 'event_count', 'day', 'time', 'format', 'override']
 
 
 def _store_analysis_to_rows(store_analysis: dict) -> list:
@@ -296,6 +296,7 @@ def _store_analysis_to_rows(store_analysis: dict) -> list:
             entry['day'],
             entry['time'],
             entry['format'],
+            entry.get('override', ''),
         ])
     return rows
 
@@ -309,7 +310,7 @@ def _rows_to_store_analysis(rows: list) -> dict:
     semi_regular = []
 
     for row in rows[1:]:  # skip header
-        if len(row) < 8:
+        if len(row) < 8:  # override column is optional
             continue
         entry = {
             'store_id':    row[0],
@@ -442,9 +443,10 @@ def _apply_overrides(analysis: dict, overrides: list) -> dict:
                 continue
             entry = {
                 **entry,
-                'status': status,
-                'day':    ov['override_day']  or entry['day'],
-                'time':   ov['override_time'] or entry['time'],
+                'status':   status,
+                'day':      ov['override_day']  or entry['day'],
+                'time':     ov['override_time'] or entry['time'],
+                'override': ov['reason'] or 'overridden',
             }
             if status == 'Regular':
                 regular.append(entry)
@@ -469,6 +471,7 @@ def _apply_overrides(analysis: dict, overrides: list) -> dict:
             'day':         ov['override_day'],
             'time':        ov['override_time'],
             'format':      ov['format'],
+            'override':    ov['reason'] or 'manually added',
         }
         print(f"  ↪ Add override: {entry['store_name']} {entry['day']} {entry['time']} · {entry['format']} ({ov['reason']})")
         regular.append(entry)

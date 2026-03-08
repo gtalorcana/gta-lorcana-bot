@@ -37,6 +37,8 @@ from rsvp_util import (
     _build_event_type_map,
     _classify_event_types,
     _store_analysis_to_rows,
+    _load_overrides,
+    _apply_overrides,
 )
 
 # ── Bootstrap config ──────────────────────────────────────────────────────────
@@ -51,7 +53,7 @@ BOOTSTRAP_START_DT = BOOTSTRAP_START.isoformat() + START_OF_DAY
 BOOTSTRAP_END_DT   = BOOTSTRAP_END.isoformat() + END_OF_DAY
 
 # Set to True to write raw event_map data to a "Bootstrap Raw Data" tab for debugging.
-WRITE_RAW_DATA = True
+WRITE_RAW_DATA = False
 
 RAW_DATA_SHEET  = "Bootstrap Raw Data"
 RAW_DATA_RANGE  = RAW_DATA_SHEET + "!A1:G"
@@ -71,6 +73,8 @@ def main():
     reference_date = BOOTSTRAP_END
     event_map      = _build_event_type_map(events)
     analysis       = _classify_event_types(event_map, reference_date)
+    overrides      = _load_overrides()
+    analysis       = _apply_overrides(analysis, overrides)
 
     print(f"\nResults:")
     print(f"  ✅ Regular event types ({len(analysis['regular'])}):")
