@@ -1055,10 +1055,8 @@ async def wheretoplay_command(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
 
     try:
-        store_analysis = load_store_analysis()
-        if store_analysis is None:
-            await interaction.followup.send("⚠️ No store classifications found — run the bootstrap script first.", ephemeral=True)
-            return
+        loop = asyncio.get_running_loop()
+        store_analysis = await loop.run_in_executor(None, analyse_stores, date.today())
 
         channel = discord.utils.get(interaction.guild.text_channels, name=WHERE_TO_PLAY_CHANNEL)
         if not channel:
