@@ -13,7 +13,7 @@ Grouping key:
   A ~ prefix is added when raw times vary within a group.
 
 Classification rules (symmetric):
-  Regular    — current consecutive streak >= RSVP_MIN_CONSECUTIVE_WEEKS
+  Regular    — current consecutive streak >= WHOS_GOING_MIN_CONSECUTIVE_WEEKS
   Semi-Regular — has some history but streak < WHOS_GOING_MIN_CONSECUTIVE_WEEKS
 
 State persistence:
@@ -619,5 +619,3 @@ def get_expected_stores_for_date(target_date: date, store_analysis: dict = None)
 
     print(f"  ✓ {len(expected)} event type(s) expected on {target_day_name} ({target_date})")
     return expected
-
-

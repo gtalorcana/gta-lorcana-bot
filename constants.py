@@ -62,7 +62,7 @@ WELCOME_CHANNEL           = "general"
 WHERE_TO_PLAY_CHANNEL     = os.getenv("WHERE_TO_PLAY_CHANNEL", "where-to-play")
 WHOS_GOING_CHANNEL              = os.getenv("WHOS_GOING_CHANNEL", "whos-going")
 
-# RSVP & Where-to-Play settings
+# Who's-Going & Where-to-Play settings
 # Override via .env for local testing, e.g. WHOS_GOING_POST_HOUR_ET=9
 WHOS_GOING_POST_HOUR_ET             = int(os.getenv("WHOS_GOING_POST_HOUR_ET", 7))   # 7AM ET daily
 WHERE_TO_PLAY_POST_DAY        = 6   # Sunday (0=Mon … 6=Sun)

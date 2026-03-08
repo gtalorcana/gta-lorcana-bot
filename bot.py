@@ -238,7 +238,7 @@ async def whos_going_daily():
 
 async def _post_whos_going_polls(target_date, interaction: discord.Interaction = None):
     """
-    Core RSVP poll posting logic. Posts one poll per Regular store expected on target_date.
+    Core who's-going poll posting logic. Posts one poll per Regular store expected on target_date.
     If interaction is provided, sends ephemeral feedback to the caller.
     """
     loop = asyncio.get_running_loop()
@@ -263,8 +263,8 @@ async def _post_whos_going_polls(target_date, interaction: discord.Interaction =
 
     posted = 0
     for guild in bot.guilds:
-        rsvp_ch = get_channel(guild, WHOS_GOING_CHANNEL)
-        if not rsvp_ch:
+        whos_going_ch = get_channel(guild, WHOS_GOING_CHANNEL)
+        if not whos_going_ch:
             print(f"  ⚠ _post_whos_going_polls: #{WHOS_GOING_CHANNEL} not found in {guild.name}")
             continue
 
@@ -282,18 +282,18 @@ async def _post_whos_going_polls(target_date, interaction: discord.Interaction =
                 colour=discord.Colour.blurple()
             )
             try:
-                msg = await rsvp_ch.send(embed=embed)
+                msg = await whos_going_ch.send(embed=embed)
                 await msg.add_reaction("👍")
                 await msg.add_reaction("👎")
                 await msg.add_reaction("🤔")
-                print(f"  ✓ RSVP poll posted for {store['store_name']}")
+                print(f"  ✓ Who's-going poll posted for {store['store_name']}")
                 posted += 1
             except Exception as e:
-                print(f"  ✗ Failed to post RSVP poll for {store['store_name']}: {e}")
+                print(f"  ✗ Failed to post who's-going poll for {store['store_name']}: {e}")
 
     if interaction:
         await interaction.followup.send(
-            f"✅ Posted {posted} RSVP poll(s) for {target_date.strftime('%A, %B %d').replace(' 0', ' ')}.",
+            f"✅ Posted {posted} who's-going poll(s) for {target_date.strftime('%A, %B %d').replace(' 0', ' ')}.",
             ephemeral=True
         )
 
