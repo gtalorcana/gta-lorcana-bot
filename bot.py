@@ -82,6 +82,11 @@ intents.members = True  # on_member_join event
 class GtaLorcanaBot(commands.Bot):
     async def setup_hook(self):
         if os.getenv("SYNC_COMMANDS_ONLY") == "1":
+            #DEBUG
+            guild_id = os.getenv("DISCORD_GUILD_ID", "0")
+            print(
+                f"  SYNC_COMMANDS_ONLY mode — guild_id={guild_id}, commands registered={len(self.tree.get_commands())}")
+            #END DEBUG
             guild = discord.Object(id=int(os.getenv("DISCORD_GUILD_ID", "0")))
             self.tree.clear_commands(guild=None)
             await self.tree.sync()
