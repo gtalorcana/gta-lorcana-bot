@@ -137,46 +137,51 @@ def get_channel(guild: discord.Guild, name: str):
     return discord.utils.get(guild.text_channels, name=name)
 
 
-def _build_where_to_play_message(store_analysis: dict, as_of: date) -> str:
-    """Build the #where-to-play plain text message from a store analysis result."""
+def _grouped_by_day(entries: list) -> str:
+    """Format a list of event entries grouped by day with day headers."""
+    if not entries:
+        return "*None yet this season*"
+    groups = {}
+    for e in entries:
+        groups.setdefault(e['day'], []).append(e)
+    lines = []
+    for day, day_entries in groups.items():
+        lines.append(f"__**{day}**__")
+        for e in day_entries:
+            time = f" @ {e['time']}" if e.get('time') else ''
+            lines.append(f"• **{e['store_name']}**{time} · {e['format']}")
+    return "\n".join(lines)
 
-    def _grouped_by_day(entries: list) -> str:
-        """Format a list of event entries grouped by day with day headers."""
-        if not entries:
-            return "*None yet this season*"
-        groups = {}
-        for e in entries:
-            groups.setdefault(e['day'], []).append(e)
-        lines = []
-        for day, day_entries in groups.items():
-            lines.append(f"__**{day}**__")
-            for e in day_entries:
-                time = f" @ {e['time']}" if e.get('time') else ''
-                lines.append(f"• **{e['store_name']}**{time} · {e['format']}")
-        return "\n".join(lines)
 
-    parts = []
-    parts.append("📍 **Where to Play — GTA Lorcana**")
-    parts.append(f"*Updated {as_of.strftime('%B %d, %Y').replace(' 0', ' ')}*")
-    parts.append("")
+def _build_where_to_play_messages(store_analysis: dict, as_of: date) -> tuple[str, str, str]:
+    """
+    Build three #where-to-play messages from a store analysis result.
+    Returns (regular_msg, semi_regular_msg, info_msg).
+    """
+    date_str = as_of.strftime('%B %d, %Y').replace(' 0', ' ')
 
-    parts.append("✅ **Regular Events** — *runs consistently every week*")
-    parts.append(_grouped_by_day(store_analysis['regular']))
-    parts.append("")
+    regular_msg = "\n".join([
+        f"📍 **Where to Play — GTA Lorcana** — *Updated {date_str}*",
+        "",
+        "✅ **Regular Events** — *runs consistently every week*",
+        _grouped_by_day(store_analysis['regular']),
+    ])
 
-    parts.append("🔄 **Semi-Regular Events** — *doesn't run every week; check #rsvp before heading out or contact the store to confirm*")
-    parts.append(_grouped_by_day(store_analysis.get('semi_regular', [])))
-    parts.append("")
+    semi_regular_msg = "\n".join([
+        "🔄 **Semi-Regular Events** — *doesn't run every week; check #rsvp before heading out or contact the store to confirm*",
+        _grouped_by_day(store_analysis.get('semi_regular', [])),
+    ])
 
-    parts.append("🏪 **Don't see your store?**")
-    parts.append("Ask them to run the same event (same day, same time) at least twice in the last 4 weeks and it'll appear here automatically!")
-    parts.append("")
+    info_msg = "\n".join([
+        "🏪 **Don't see your store?**",
+        "Ask them to run the same event (same day, same time) at least twice in the last 4 weeks and it'll appear here automatically!",
+        "",
+        "ℹ️ **How this works**",
+        "Ratings are based on historical RPH event data and update every Sunday.",
+        "*~ before a time means the start time varies slightly week to week — e.g. ~7:00 PM could mean anywhere from 7:00–7:30 PM. Arrive a few minutes early to be safe.*",
+    ])
 
-    parts.append("ℹ️ **How this works**")
-    parts.append("Ratings are based on historical RPH event data and update every Sunday.")
-    parts.append("*~ before a time means the start time varies slightly week to week — e.g. ~7:00 PM could mean anywhere from 7:00–7:30 PM. Arrive a few minutes early to be safe.*")
-
-    return "\n".join(parts)
+    return regular_msg, semi_regular_msg, info_msg
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -193,7 +198,7 @@ async def keepalive():
 
 # Stores the message ID of the current #where-to-play post so we can edit it
 # in-place each Sunday rather than posting a new one.
-_where_to_play_message_id: int | None = None
+_where_to_play_msg_ids: list[int | None] = [None, None, None]  # regular, semi-regular, info
 
 
 @tasks.loop(minutes=1)
@@ -255,10 +260,11 @@ async def rsvp_daily():
 @tasks.loop(minutes=1)
 async def where_to_play_weekly():
     """
-    Posts or edits the #where-to-play embed every Sunday at WHERE_TO_PLAY_POST_HOUR_ET (ET).
+    Posts or edits the #where-to-play messages every Sunday at WHERE_TO_PLAY_POST_HOUR_ET (ET).
     Re-runs store analysis so graduations and relegations are reflected automatically.
+    Sends three messages: regular events, semi-regular events, and info/footer.
     """
-    global _where_to_play_message_id
+    global _where_to_play_msg_ids
 
     now_et = _now_et()
     if now_et.weekday() != WHERE_TO_PLAY_POST_DAY or now_et.hour != WHERE_TO_PLAY_POST_HOUR_ET or now_et.minute != 0:
@@ -273,7 +279,7 @@ async def where_to_play_weekly():
         print(f"  ✗ where_to_play_weekly: failed to fetch store analysis: {e}")
         return
 
-    content = _build_where_to_play_message(store_analysis, now_et.date())
+    messages = _build_where_to_play_messages(store_analysis, now_et.date())
 
     for guild in bot.guilds:
         wtp_ch = discord.utils.get(guild.text_channels, name=WHERE_TO_PLAY_CHANNEL)
@@ -282,18 +288,21 @@ async def where_to_play_weekly():
             continue
 
         try:
-            if _where_to_play_message_id:
-                try:
-                    existing = await wtp_ch.fetch_message(_where_to_play_message_id)
-                    await existing.edit(content=content)
-                    print(f"  ✓ #{WHERE_TO_PLAY_CHANNEL} post updated")
-                    continue
-                except discord.NotFound:
-                    print(f"  ⚠ Previous #{WHERE_TO_PLAY_CHANNEL} message not found — posting new one")
-
-            msg = await wtp_ch.send(content)
-            _where_to_play_message_id = msg.id
-            print(f"  ✓ #{WHERE_TO_PLAY_CHANNEL} post created (message ID: {msg.id})")
+            new_ids = []
+            for i, content in enumerate(messages):
+                msg_id = _where_to_play_msg_ids[i]
+                if msg_id:
+                    try:
+                        existing = await wtp_ch.fetch_message(msg_id)
+                        await existing.edit(content=content)
+                        new_ids.append(msg_id)
+                        continue
+                    except discord.NotFound:
+                        pass
+                msg = await wtp_ch.send(content)
+                new_ids.append(msg.id)
+            _where_to_play_msg_ids = new_ids
+            print(f"  ✓ #{WHERE_TO_PLAY_CHANNEL} updated ({len(messages)} messages)")
         except Exception as e:
             print(f"  ✗ Failed to update #{WHERE_TO_PLAY_CHANNEL}: {e}")
 
@@ -1053,21 +1062,24 @@ async def wheretoplay_command(interaction: discord.Interaction):
             await interaction.followup.send(f"⚠️ #{WHERE_TO_PLAY_CHANNEL} channel not found.", ephemeral=True)
             return
 
-        content = _build_where_to_play_message(store_analysis, date.today())
+        messages = _build_where_to_play_messages(store_analysis, date.today())
 
-        global _where_to_play_message_id
-        if _where_to_play_message_id:
-            try:
-                msg = await channel.fetch_message(_where_to_play_message_id)
-                await msg.edit(content=content)
-                await interaction.followup.send(f"✅ #{WHERE_TO_PLAY_CHANNEL} updated.", ephemeral=True)
-                return
-            except discord.NotFound:
-                _where_to_play_message_id = None
-
-        msg = await channel.send(content)
-        _where_to_play_message_id = msg.id
-        await interaction.followup.send(f"✅ Posted to #{WHERE_TO_PLAY_CHANNEL}.", ephemeral=True)
+        global _where_to_play_msg_ids
+        new_ids = []
+        for i, content in enumerate(messages):
+            msg_id = _where_to_play_msg_ids[i]
+            if msg_id:
+                try:
+                    existing = await channel.fetch_message(msg_id)
+                    await existing.edit(content=content)
+                    new_ids.append(msg_id)
+                    continue
+                except discord.NotFound:
+                    pass
+            msg = await channel.send(content)
+            new_ids.append(msg.id)
+        _where_to_play_msg_ids = new_ids
+        await interaction.followup.send(f"✅ #{WHERE_TO_PLAY_CHANNEL} updated.", ephemeral=True)
 
     except Exception as e:
         await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
