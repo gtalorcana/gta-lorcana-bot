@@ -14,12 +14,11 @@ CURRENT_SEASON = os.getenv("CURRENT_SEASON", "S11")
 SEASON_START_DATE   = "2026-02-13"
 SEASON_END_DATE     = "2026-04-24"
 
-
 # League Constants
-START_OF_DAY        = "T05%3A00%3A00.000Z"
-END_OF_DAY          = "T04%3A59%3A59.999Z"
-SEASON_START_DT     = SEASON_START_DATE + START_OF_DAY
-SEASON_END_DT       = SEASON_END_DATE + END_OF_DAY
+START_OF_DAY    = "T05%3A00%3A00.000Z"
+END_OF_DAY      = "T04%3A59%3A59.999Z"
+SEASON_START_DT = SEASON_START_DATE + START_OF_DAY
+SEASON_END_DT   = SEASON_END_DATE + END_OF_DAY
 
 
 # Google Sheets Constants
@@ -31,6 +30,11 @@ STANDINGS_RANGE_NAME        = STANDINGS_SHEET_NAME + "!" + "A3:F"
 EVENTS_RANGE_NAME           = EVENTS_SHEET_NAME + "!" + "A2:G"
 EVENTS_TIMESTAMP_RANGE_NAME = EVENTS_SHEET_NAME + "!" + "J1:K1"
 
+# Store classifications — written by bootstrap_where_to_play.py at season start,
+# then updated every Sunday by rsvp_util.analyse_stores()
+STORE_CLASSIFICATIONS_SHEET_NAME  = "Store Classifications"
+STORE_CLASSIFICATIONS_RANGE_NAME  = STORE_CLASSIFICATIONS_SHEET_NAME + "!A1:H"
+
 # Discord channel names (production values)
 # Override via .env locally to point at test channels, e.g.:
 #   ANNOUNCEMENTS_CHANNEL=test-announcements
@@ -41,6 +45,16 @@ RESULTS_REPORTING_CHANNEL_URL = "https://discord.com/channels/125391514171657831
 RESULTS_CHANNEL           = "results"
 DECKLISTS_CHANNEL         = "decklists"
 WELCOME_CHANNEL           = "general"
+WHERE_TO_PLAY_CHANNEL     = os.getenv("WHERE_TO_PLAY_CHANNEL", "where-to-play")
+RSVP_CHANNEL              = os.getenv("RSVP_CHANNEL", "rsvp")
+
+# RSVP & Where-to-Play settings
+# Override via .env for local testing, e.g. RSVP_POST_HOUR_ET=9
+RSVP_POST_HOUR_ET             = int(os.getenv("RSVP_POST_HOUR_ET", 7))   # 7AM ET daily
+WHERE_TO_PLAY_POST_DAY        = 6   # Sunday (0=Mon … 6=Sun)
+WHERE_TO_PLAY_POST_HOUR_ET    = int(os.getenv("WHERE_TO_PLAY_POST_HOUR_ET", 18))  # 6PM ET Sunday
+RSVP_MIN_CONSECUTIVE_WEEKS    = 2   # weeks in a row to become Regular
+RSVP_MISS_WEEKS_BEFORE_RELEGATE = 2 # consecutive misses to drop back to Up & Coming
 
 # Roles members can self-assign via /rank
 SELF_ASSIGN_ROLES = ["Casual", "Competitive", "Judge"]
@@ -50,11 +64,10 @@ EVENTS_URL_RE = r'https://tcg.ravensburgerplay.com/events/[0-9]+'
 RPH_GAME_STORES_URL = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/game-stores/?"
 RPH_EVENTS_URL      = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/events/?"
 RPH_STANDINGS_URL   = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/tournament-rounds/{round_id}/standings"
-# Override via .env locally, e.g. RPH_RETRY_DELAY=10 for faster testing
 RPH_RETRY_ATTEMPTS = int(os.getenv("RPH_RETRY_ATTEMPTS", 2))
-RPH_RETRY_DELAY    = int(os.getenv("RPH_RETRY_DELAY", 300))  # seconds
+RPH_RETRY_DELAY    = int(os.getenv("RPH_RETRY_DELAY", 300))
 
-# Fetch upcoming_events.json from GitHub for the /schedule command
+# Get events.json from Github
 GITHUB_OWNER = "gtalorcana"
 GITHUB_REPO  = "gtalorcana.ca"
 UPCOMING_EVENTS_JSON_URL   = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/main/data/upcoming_events.json"

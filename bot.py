@@ -11,6 +11,8 @@ Features:
   - /recheck         — reprocess missed results threads (admins only)
   - /help            — list all commands
   - on_member_join   — auto-greets new members (currently disabled)
+  - rsvp_daily       — posts RSVP polls at 7AM ET for stores expected to run today
+  - where_to_play_weekly — refreshes #where-to-play every Sunday evening
 
 Requirements:
   pip install discord.py aiohttp python-dotenv requests
@@ -26,9 +28,13 @@ Environment variables (required — set as Fly.io secrets):
 Environment variables (optional — override via .env for local dev):
   ANNOUNCEMENTS_CHANNEL       default: announcements
   RESULTS_REPORTING_CHANNEL   default: results-reporting
+  WHERE_TO_PLAY_CHANNEL       default: where-to-play
+  RSVP_CHANNEL                default: rsvp
   CURRENT_SEASON              default: S11
   RPH_RETRY_ATTEMPTS          default: 2
   RPH_RETRY_DELAY             default: 300 (seconds)
+  RSVP_POST_HOUR_ET           default: 7 (7AM ET)
+  WHERE_TO_PLAY_POST_HOUR_ET  default: 18 (6PM ET)
 """
 
 import asyncio
@@ -39,9 +45,10 @@ import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta, date
 
 from rph_util import process_event_data, remove_event_data
+from rsvp_util import analyse_stores, get_expected_stores_for_date
 
 from constants import (
     DISCORD_BOT_TOKEN,
@@ -58,6 +65,13 @@ from constants import (
     DECKLISTS_CHANNEL,
     WELCOME_CHANNEL,
     SELF_ASSIGN_ROLES,
+    WHERE_TO_PLAY_CHANNEL,
+    RSVP_CHANNEL,
+    RSVP_POST_HOUR_ET,
+    WHERE_TO_PLAY_POST_DAY,
+    WHERE_TO_PLAY_POST_HOUR_ET,
+    RSVP_MIN_CONSECUTIVE_WEEKS,
+    RSVP_MISS_WEEKS_BEFORE_RELEGATE,
 )
 
 # ── Bot setup ─────────────────────────────────────────────────
@@ -78,6 +92,14 @@ _sheet_lock = asyncio.Lock()
 # ═══════════════════════════════════════════════════════════════
 # HELPERS
 # ═══════════════════════════════════════════════════════════════
+
+_ET = timezone(timedelta(hours=-5))  # EST; close enough for daily scheduling
+
+
+def _now_et():
+    """Current datetime in Eastern Time."""
+    return datetime.now(_ET)
+
 
 async def post_to_worker(payload: dict) -> bool:
     """POST a payload to the Cloudflare Worker. Returns True on success."""
@@ -115,6 +137,64 @@ def get_channel(guild: discord.Guild, name: str):
     return discord.utils.get(guild.text_channels, name=name)
 
 
+def _build_where_to_play_embed(store_analysis: dict, as_of: date) -> discord.Embed:
+    """Build the #where-to-play embed from a store analysis result."""
+    embed = make_embed(
+        title="🗺 Where to Play — GTA Lorcana",
+        description=(
+            f"Here's where you can find weekly Lorcana locals in the GTA.\n"
+            f"*Updated {as_of.strftime('%B %-d, %Y')}*"
+        ),
+        colour=discord.Colour.gold()
+    )
+
+    # ── Regular events ────────────────────────────────────────
+    if store_analysis['regular']:
+        regular_lines = []
+        for s in store_analysis['regular']:
+            time = f" @ {s['time']}" if s.get('time') else ''
+            regular_lines.append(
+                f"**{s['store_name']}** — {s['day']}{time} · {s['format']} *({s['streak']} weeks running)*"
+            )
+        embed.add_field(
+            name="✅ Regular Events",
+            value="\n".join(regular_lines),
+            inline=False
+        )
+    else:
+        embed.add_field(name="✅ Regular Events", value="*None yet this season*", inline=False)
+
+    # ── Occasional events ─────────────────────────────────────
+    if store_analysis['occasional']:
+        # Group occasional entries by store to avoid repetition
+        seen_stores = {}
+        for s in store_analysis['occasional']:
+            seen_stores.setdefault(s['store_name'], []).append(f"{s['day']} · {s['format']}")
+        occ_lines = [
+            f"**{name}** — {', '.join(events)}"
+            for name, events in seen_stores.items()
+        ]
+        embed.add_field(
+            name="🌱 Occasional — Show Your Support!",
+            value=(
+                "These stores run events but not yet consistently. Come out and help them grow!\n\n" +
+                "\n".join(occ_lines)
+            ),
+            inline=False
+        )
+
+    embed.add_field(
+        name="ℹ️ How this works",
+        value=(
+            f"Events with **{RSVP_MIN_CONSECUTIVE_WEEKS}+ consecutive weeks** are listed as Regular. "
+            f"Miss {RSVP_MISS_WEEKS_BEFORE_RELEGATE} weeks in a row and they drop to Occasional. "
+            "This list updates every Sunday."
+        ),
+        inline=False
+    )
+    return embed
+
+
 # ═══════════════════════════════════════════════════════════════
 # EVENTS
 # ═══════════════════════════════════════════════════════════════
@@ -125,6 +205,115 @@ async def keepalive():
     print(f"  ♥ Heartbeat — bot alive, watching #{ANNOUNCEMENTS_CHANNEL} and #{RESULTS_REPORTING_CHANNEL}")
 
 
+# ── RSVP & Where-to-Play tasks ────────────────────────────────
+
+# Stores the message ID of the current #where-to-play post so we can edit it
+# in-place each Sunday rather than posting a new one.
+_where_to_play_message_id: int | None = None
+
+
+@tasks.loop(minutes=1)
+async def rsvp_daily():
+    """
+    Posts one RSVP poll per Regular store expected to run today.
+    Fires once daily at RSVP_POST_HOUR_ET (ET).
+    Skips if no stores are expected today.
+    """
+    now_et = _now_et()
+    if now_et.hour != RSVP_POST_HOUR_ET or now_et.minute != 0:
+        return
+
+    print(f"  🗓 rsvp_daily: checking expected stores for {now_et.date()}...")
+
+    loop = asyncio.get_running_loop()
+    try:
+        store_analysis  = await loop.run_in_executor(None, analyse_stores, now_et.date())
+        expected_stores = await loop.run_in_executor(
+            None, get_expected_stores_for_date, now_et.date(), store_analysis
+        )
+    except Exception as e:
+        print(f"  ✗ rsvp_daily: failed to fetch store analysis: {e}")
+        return
+
+    if not expected_stores:
+        print(f"  ↩ rsvp_daily: no stores expected today — skipping")
+        return
+
+    for guild in bot.guilds:
+        rsvp_ch = discord.utils.get(guild.text_channels, name=RSVP_CHANNEL)
+        if not rsvp_ch:
+            print(f"  ⚠ rsvp_daily: #{RSVP_CHANNEL} not found in {guild.name}")
+            continue
+
+        for store in expected_stores:
+            embed = make_embed(
+                title=f"📅 Who's coming today?",
+                description=(
+                    f"**{store['store_name']}**\n"
+                    f"📆 {now_et.strftime('%A, %B %-d')}\n"
+                    f"🕐 Typically starts: {store['time']} (Toronto time)\n"
+                    f"🎮 Format: {store['format']}\n\n"
+                    f"React below to let the community know if you're attending!\n"
+                    f"👍 Going · 👎 Not going · 🤔 Maybe"
+                ),
+                colour=discord.Colour.blurple()
+            )
+            try:
+                msg = await rsvp_ch.send(embed=embed)
+                await msg.add_reaction("👍")
+                await msg.add_reaction("👎")
+                await msg.add_reaction("🤔")
+                print(f"  ✓ RSVP poll posted for {store['name']}")
+            except Exception as e:
+                print(f"  ✗ Failed to post RSVP poll for {store['name']}: {e}")
+
+
+@tasks.loop(minutes=1)
+async def where_to_play_weekly():
+    """
+    Posts or edits the #where-to-play embed every Sunday at WHERE_TO_PLAY_POST_HOUR_ET (ET).
+    Re-runs store analysis so graduations and relegations are reflected automatically.
+    """
+    global _where_to_play_message_id
+
+    now_et = _now_et()
+    if now_et.weekday() != WHERE_TO_PLAY_POST_DAY or now_et.hour != WHERE_TO_PLAY_POST_HOUR_ET or now_et.minute != 0:
+        return
+
+    print(f"  🗺 where_to_play_weekly: refreshing #{WHERE_TO_PLAY_CHANNEL}...")
+
+    loop = asyncio.get_running_loop()
+    try:
+        store_analysis = await loop.run_in_executor(None, analyse_stores, now_et.date())
+    except Exception as e:
+        print(f"  ✗ where_to_play_weekly: failed to fetch store analysis: {e}")
+        return
+
+    embed = _build_where_to_play_embed(store_analysis, now_et.date())
+
+    for guild in bot.guilds:
+        wtp_ch = discord.utils.get(guild.text_channels, name=WHERE_TO_PLAY_CHANNEL)
+        if not wtp_ch:
+            print(f"  ⚠ where_to_play_weekly: #{WHERE_TO_PLAY_CHANNEL} not found in {guild.name}")
+            continue
+
+        try:
+            if _where_to_play_message_id:
+                try:
+                    existing = await wtp_ch.fetch_message(_where_to_play_message_id)
+                    await existing.edit(embed=embed)
+                    print(f"  ✓ #{WHERE_TO_PLAY_CHANNEL} post updated")
+                    continue
+                except discord.NotFound:
+                    print(f"  ⚠ Previous #{WHERE_TO_PLAY_CHANNEL} message not found — posting new one")
+
+            msg = await wtp_ch.send(embed=embed)
+            _where_to_play_message_id = msg.id
+            print(f"  ✓ #{WHERE_TO_PLAY_CHANNEL} post created (message ID: {msg.id})")
+        except Exception as e:
+            print(f"  ✗ Failed to update #{WHERE_TO_PLAY_CHANNEL}: {e}")
+
+
 @bot.event
 async def on_ready():
     print(f"✦ GTA Lorcana Bot online as {bot.user}")
@@ -133,6 +322,12 @@ async def on_ready():
     if not keepalive.is_running():
         keepalive.start()
         print(f"  ♻ Keepalive task started")
+    if not rsvp_daily.is_running():
+        rsvp_daily.start()
+        print(f"  ♻ RSVP daily task started (fires at {RSVP_POST_HOUR_ET}AM ET)")
+    if not where_to_play_weekly.is_running():
+        where_to_play_weekly.start()
+        print(f"  ♻ Where-to-play weekly task started (fires Sundays at {WHERE_TO_PLAY_POST_HOUR_ET}:00 ET)")
     try:
         await tree.sync()
         print(f"  Slash commands synced")
