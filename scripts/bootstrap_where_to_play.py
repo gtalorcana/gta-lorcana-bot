@@ -39,6 +39,7 @@ from rsvp_util import (
     _store_analysis_to_rows,
     _load_overrides,
     _apply_overrides,
+    save_raw_event_map,
 )
 
 # ── Bootstrap config ──────────────────────────────────────────────────────────
@@ -53,7 +54,7 @@ BOOTSTRAP_START_DT = BOOTSTRAP_START.isoformat() + START_OF_DAY
 BOOTSTRAP_END_DT   = BOOTSTRAP_END.isoformat() + END_OF_DAY
 
 # Set to True to write raw event_map data to a "Bootstrap Raw Data" tab for debugging.
-WRITE_RAW_DATA = True
+WRITE_RAW_DATA = False
 
 RAW_DATA_SHEET  = "Bootstrap Raw Data"
 RAW_DATA_RANGE  = RAW_DATA_SHEET + "!A1:G"
@@ -99,24 +100,7 @@ def main():
     # ── Optionally write raw event_map for debugging ──────────
     if WRITE_RAW_DATA:
         print(f"\n  → Writing raw event data to '{RAW_DATA_SHEET}' tab...")
-        raw_rows = [RAW_DATA_HEADER]
-        for (store_id, day, floored_time, fmt), info in sorted(event_map.items(), key=lambda x: x[1]['store_name']):
-            raw_rows.append([
-                store_id,
-                info['store_name'],
-                day,
-                floored_time,
-                fmt,
-                ", ".join(sorted(str(w) for w in info['week_starts'])),
-                ", ".join(info['raw_times']),
-            ])
-        gs.update_values(
-            STORE_SPREADSHEET_ID,
-            RAW_DATA_RANGE,
-            "USER_ENTERED",
-            raw_rows,
-        )
-        print(f"  ✓ Bootstrap Raw Data sheet updated ({len(raw_rows) - 1} rows)")
+        save_raw_event_map(event_map)
 
     print(f"\nDone. The bot will now use the Google Sheet for ongoing classifications.")
     print(f"Do not re-run this script mid-season — it will overwrite current season data.")

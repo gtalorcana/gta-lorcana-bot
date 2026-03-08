@@ -1,6 +1,9 @@
 app = "gta-lorcana-bot"
 primary_region = "yyz"
 
+[deploy]
+  release_command = "python scripts/sync_commands.py"
+
 [build]
 
 [env]

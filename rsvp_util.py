@@ -39,6 +39,7 @@ from constants import (
     STORE_SPREADSHEET_ID,
     STORE_CLASSIFICATIONS_RANGE_NAME,
     STORE_OVERRIDES_RANGE_NAME,
+    STORE_RAW_DATA_RANGE_NAME,
     BOT_STATE_RANGE_NAME,
     RSVP_MIN_CONSECUTIVE_WEEKS,
     RSVP_MISS_WEEKS_BEFORE_RELEGATE,
@@ -494,6 +495,33 @@ def _apply_overrides(analysis: dict, overrides: list) -> dict:
     return {'regular': regular, 'semi_regular': semi_regular}
 
 
+# ── Raw event map persistence ─────────────────────────────────────────────────
+
+_RAW_DATA_HEADER = ['store_id', 'store_name', 'day', 'floored_time', 'format', 'week_starts', 'raw_times']
+
+def save_raw_event_map(event_map: dict) -> None:
+    """
+    Write raw event map data to the Bootstrap Raw Data tab for debugging.
+    Called by analyse_stores() on every run (bootstrap and Sunday weekly).
+    """
+    try:
+        raw_rows = [_RAW_DATA_HEADER]
+        for (store_id, day, floored_time, fmt), info in sorted(event_map.items(), key=lambda x: x[1]['store_name']):
+            raw_rows.append([
+                store_id,
+                info['store_name'],
+                day,
+                floored_time,
+                fmt,
+                ", ".join(sorted(str(w) for w in info['week_starts'])),
+                ", ".join(info['raw_times']),
+            ])
+        _gs.update_values(STORE_SPREADSHEET_ID, STORE_RAW_DATA_RANGE_NAME, "USER_ENTERED", raw_rows)
+        print(f"  ✓ Bootstrap Raw Data sheet updated ({len(raw_rows) - 1} rows)")
+    except Exception as e:
+        print(f"  ⚠ Could not save raw event map: {e}")
+
+
 # ── Bot state persistence ─────────────────────────────────────────────────────
 
 def load_bot_state() -> dict:
@@ -546,6 +574,7 @@ def analyse_stores(reference_date: date = None) -> dict:
     overrides = _load_overrides()
     analysis  = _apply_overrides(analysis, overrides)
 
+    save_raw_event_map(event_map)
     save_store_analysis(analysis)
     print(f"  ✓ {len(analysis['regular'])} regular, {len(analysis['semi_regular'])} semi-regular event type(s)")
     return analysis
