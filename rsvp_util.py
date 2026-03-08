@@ -6,9 +6,11 @@ as Regular or Occasional, persists state to Google Sheets, and determines which
 events are expected on a given date.
 
 Grouping key:
-  Each unique (store_id, day_of_week, time, format) combination is tracked
-  independently. A store running Standard on Saturdays at 6PM and Core
-  Constructed on Wednesdays at 7PM gets two separate rows with separate streaks.
+  Each unique (store_id, day_of_week, floored_hour, format) combination is
+  tracked independently. The floored hour groups events that start at slightly
+  different times due to organizer edits (e.g. 7:00 PM and 7:30 PM both key
+  as 7:00 PM). The displayed time is the most common raw time in the group.
+  A ~ prefix is added when raw times vary within a group.
 
 Classification rules (symmetric):
   Regular    — current consecutive streak >= RSVP_MIN_CONSECUTIVE_WEEKS
@@ -64,45 +66,64 @@ def _get_week_start(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
 
-def _parse_event_time_toronto(start_datetime: str) -> str:
+def _parse_event_time_toronto(start_datetime: str) -> tuple[str, str]:
     """
-    Parse an RPH start_datetime string and return the time in Toronto time.
-    RPH datetimes are UTC ISO 8601, e.g. '2026-02-15T19:00:00Z'.
-    Returns a human-readable string like '7:00 PM'.
+    Parse an RPH start_datetime string and return two time representations
+    in Toronto time (handles EST/EDT via zoneinfo):
+
+      raw_time    — exact time string, e.g. '7:30 PM'
+      floored_time — hour-floored time string, e.g. '7:00 PM'
+
+    The floored_time is used as the grouping key to merge events whose
+    organizer adjusted the start time slightly week to week. The raw_time
+    is collected across events so the most common value can be displayed.
+
+    Returns ('', '') on parse failure.
     """
     try:
         dt_utc     = datetime.fromisoformat(start_datetime.replace('Z', '+00:00'))
         dt_toronto = dt_utc.astimezone(_TZ_TORONTO)
-        return dt_toronto.strftime('%I:%M %p').lstrip('0')
+        raw_time     = dt_toronto.strftime('%I:%M %p').lstrip('0')
+        floored      = dt_toronto.replace(minute=0, second=0, microsecond=0)
+        floored_time = floored.strftime('%I:%M %p').lstrip('0')
+        return raw_time, floored_time
     except Exception:
-        return ''
+        return '', ''
 
 
 def _build_event_type_map(events: list) -> dict:
     """
-    Build a map keyed by (store_id, day_of_week, time, format) — one entry per
-    unique event type. Each entry tracks the weeks it ran so streaks can be
-    computed independently per event type.
+    Build a map keyed by (store_id, day_of_week, floored_hour, format).
+
+    Events within the same store/day/format that start within the same clock
+    hour are merged into one entry. This handles the common case where an
+    organizer creates a new event with a slightly adjusted start time.
+
+    Each entry accumulates:
+      - week_starts: the Monday dates on which this event type ran (for streaks)
+      - raw_times:   all exact start times seen (to derive displayed time + variance)
 
     Returns:
         {
-            (store_id, day_of_week_str, time_str, format_str): {
+            (store_id, day_str, floored_time_str, format_str): {
                 'store_id':    str,
                 'store_name':  str,
-                'day':         str,   # e.g. 'Saturday'
-                'time':        str,   # e.g. '7:00 PM'
-                'format':      str,   # e.g. 'Standard'
+                'day':         str,        # e.g. 'Saturday'
+                'floored_time': str,       # e.g. '7:00 PM' (key only)
+                'raw_times':   [str, ...], # e.g. ['7:00 PM', '7:30 PM']
+                'format':      str,        # e.g. 'Core Constructed'
                 'week_starts': {date, ...},
             }
         }
     """
     event_map = defaultdict(lambda: {
-        'store_id':    '',
-        'store_name':  '',
-        'day':         '',
-        'time':        '',
-        'format':      '',
-        'week_starts': set(),
+        'store_id':     '',
+        'store_name':   '',
+        'day':          '',
+        'floored_time': '',
+        'raw_times':    [],
+        'format':       '',
+        'week_starts':  set(),
     })
 
     for event in events:
@@ -110,19 +131,57 @@ def _build_event_type_map(events: list) -> dict:
         store_name = event['store']['name']
         event_date = date.fromisoformat(event['start_datetime'][:10])
         day_str    = _DAY_NAMES[event_date.weekday()]
-        time_str   = _parse_event_time_toronto(event['start_datetime'])
         format_str = event['gameplay_format']['name']
         week_start = _get_week_start(event_date)
 
-        key = (store_id, day_str, time_str, format_str)
-        event_map[key]['store_id']   = store_id
-        event_map[key]['store_name'] = store_name
-        event_map[key]['day']        = day_str
-        event_map[key]['time']       = time_str
-        event_map[key]['format']     = format_str
+        raw_time, floored_time = _parse_event_time_toronto(event['start_datetime'])
+
+        key = (store_id, day_str, floored_time, format_str)
+        event_map[key]['store_id']     = store_id
+        event_map[key]['store_name']   = store_name
+        event_map[key]['day']          = day_str
+        event_map[key]['floored_time'] = floored_time
+        event_map[key]['format']       = format_str
         event_map[key]['week_starts'].add(week_start)
+        if raw_time:
+            event_map[key]['raw_times'].append(raw_time)
 
     return event_map
+
+
+def _display_time(raw_times: list) -> str:
+    """
+    Derive a display time from a list of raw event times.
+
+    Returns the most common raw time, prefixed with '~' if there is variance
+    (i.e. not all times in the group are identical). On a tie, picks the
+    earliest time — better to show up early than late.
+
+    Examples:
+      ['7:00 PM', '7:00 PM']             -> '7:00 PM'
+      ['7:00 PM', '7:30 PM']             -> '~7:00 PM'
+      ['6:30 PM', '6:30 PM', '6:15 PM']  -> '~6:30 PM'
+    """
+    if not raw_times:
+        return ''
+
+    has_variance = len(set(raw_times)) > 1
+
+    # Parse times for comparison — convert to 24h minutes-since-midnight
+    def _to_minutes(t: str) -> int:
+        try:
+            dt = datetime.strptime(t.lstrip('~'), '%I:%M %p')
+            return dt.hour * 60 + dt.minute
+        except Exception:
+            return 9999
+
+    counts = Counter(raw_times)
+    max_count = max(counts.values())
+    # Among times with the highest count, pick the earliest
+    candidates = [t for t, c in counts.items() if c == max_count]
+    most_common = min(candidates, key=_to_minutes)
+
+    return f"~{most_common}" if has_variance else most_common
 
 
 def _compute_streaks(week_starts: set, reference_date: date) -> tuple[int, int]:
@@ -161,7 +220,8 @@ def _compute_streaks(week_starts: set, reference_date: date) -> tuple[int, int]:
 
 def _classify_event_types(event_map: dict, reference_date: date) -> dict:
     """
-    Classify each (store, day, time, format) event type into Regular or Occasional.
+    Classify each (store, day, floored_hour, format) event type into Regular
+    or Occasional.
 
     Returns:
         {
@@ -169,12 +229,12 @@ def _classify_event_types(event_map: dict, reference_date: date) -> dict:
                 {
                     'store_id':    str,
                     'store_name':  str,
-                        'status':      'Regular',
+                    'status':      'Regular',
                     'streak':      int,
                     'event_count': int,
                     'day':         str,   # e.g. 'Saturday'
-                    'time':        str,   # e.g. '7:00 PM'
-                    'format':      str,   # e.g. 'Standard'
+                    'time':        str,   # e.g. '7:00 PM' or '~7:00 PM'
+                    'format':      str,   # e.g. 'Core Constructed'
                 },
                 ...
             ],
@@ -186,7 +246,8 @@ def _classify_event_types(event_map: dict, reference_date: date) -> dict:
 
     for key, info in event_map.items():
         current_streak, miss_streak = _compute_streaks(info['week_starts'], reference_date)
-        event_count = len(info['week_starts'])
+        event_count  = len(info['week_starts'])
+        display_time = _display_time(info['raw_times'])
 
         entry = {
             'store_id':    info['store_id'],
@@ -194,7 +255,7 @@ def _classify_event_types(event_map: dict, reference_date: date) -> dict:
             'streak':      current_streak,
             'event_count': event_count,
             'day':         info['day'],
-            'time':        info['time'],
+            'time':        display_time,
             'format':      info['format'],
         }
 

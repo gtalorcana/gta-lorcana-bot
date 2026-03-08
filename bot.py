@@ -48,7 +48,7 @@ from discord.ext import commands, tasks
 from datetime import datetime, timezone, timedelta, date
 
 from rph_util import process_event_data, remove_event_data
-from rsvp_util import analyse_stores, get_expected_stores_for_date
+from rsvp_util import analyse_stores, get_expected_stores_for_date, load_store_analysis
 
 from constants import (
     DISCORD_BOT_TOKEN,
@@ -164,31 +164,23 @@ def _build_where_to_play_embed(store_analysis: dict, as_of: date) -> discord.Emb
     else:
         embed.add_field(name="✅ Regular Events", value="*None yet this season*", inline=False)
 
-    # ── Occasional events ─────────────────────────────────────
-    if store_analysis['occasional']:
-        # Group occasional entries by store to avoid repetition
-        seen_stores = {}
-        for s in store_analysis['occasional']:
-            seen_stores.setdefault(s['store_name'], []).append(f"{s['day']} · {s['format']}")
-        occ_lines = [
-            f"**{name}** — {', '.join(events)}"
-            for name, events in seen_stores.items()
-        ]
-        embed.add_field(
-            name="🌱 Occasional — Show Your Support!",
-            value=(
-                "These stores run events but not yet consistently. Come out and help them grow!\n\n" +
-                "\n".join(occ_lines)
-            ),
-            inline=False
-        )
+    # ── Call to action ────────────────────────────────────────
+    embed.add_field(
+        name="🏪 Don't see your store?",
+        value=(
+            "Ask them to run a Lorcana event two weeks in a row and it'll appear here automatically!"
+        ),
+        inline=False
+    )
 
+    # ── How this works ────────────────────────────────────────
     embed.add_field(
         name="ℹ️ How this works",
         value=(
-            f"Events with **{RSVP_MIN_CONSECUTIVE_WEEKS}+ consecutive weeks** are listed as Regular. "
-            f"Miss {RSVP_MISS_WEEKS_BEFORE_RELEGATE} weeks in a row and they drop to Occasional. "
-            "This list updates every Sunday."
+            f"Stores with **{RSVP_MIN_CONSECUTIVE_WEEKS}+ consecutive weeks** of events are listed above. "
+            f"Miss {RSVP_MISS_WEEKS_BEFORE_RELEGATE} weeks in a row and they're removed. "
+            "This list updates every Sunday.\n"
+            "*~ before a time means the start time may vary slightly week to week.*"
         ),
         inline=False
     )
@@ -1042,12 +1034,51 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="/recheck",
                     value=f"Reprocess any missed threads in `#{RESULTS_REPORTING_CHANNEL}` *(admins only)*",
                     inline=False)
+    embed.add_field(name="/wheretoplay", value="Manually push the Where to Play post *(admins only)*", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 # ═══════════════════════════════════════════════════════════════
-# RUN
+# WHERE TO PLAY — MANUAL TRIGGER
 # ═══════════════════════════════════════════════════════════════
+
+@tree.command(name="wheretoplay", description="Manually push the Where to Play post (admins only)")
+async def wheretoplay_command(interaction: discord.Interaction):
+    if interaction.user.id != ADMIN_USER_ID:
+        await interaction.response.send_message("❌ Admins only.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        store_analysis = load_store_analysis()
+        if store_analysis is None:
+            await interaction.followup.send("⚠️ No store classifications found — run the bootstrap script first.", ephemeral=True)
+            return
+
+        channel = discord.utils.get(interaction.guild.text_channels, name=WHERE_TO_PLAY_CHANNEL)
+        if not channel:
+            await interaction.followup.send(f"⚠️ #{WHERE_TO_PLAY_CHANNEL} channel not found.", ephemeral=True)
+            return
+
+        embed = _build_where_to_play_embed(store_analysis, date.today())
+
+        global _where_to_play_message_id
+        if _where_to_play_message_id:
+            try:
+                msg = await channel.fetch_message(_where_to_play_message_id)
+                await msg.edit(embed=embed)
+                await interaction.followup.send(f"✅ #{WHERE_TO_PLAY_CHANNEL} updated.", ephemeral=True)
+                return
+            except discord.NotFound:
+                _where_to_play_message_id = None
+
+        msg = await channel.send(embed=embed)
+        _where_to_play_message_id = msg.id
+        await interaction.followup.send(f"✅ Posted to #{WHERE_TO_PLAY_CHANNEL}.", ephemeral=True)
+
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 if __name__ == "__main__":
     missing = [v for v in ["DISCORD_BOT_TOKEN", "WORKER_URL", "WORKER_SECRET"] if not os.getenv(v)]
