@@ -48,7 +48,7 @@ from discord.ext import commands, tasks
 from datetime import datetime, timezone, timedelta, date
 
 from rph_util import process_event_data, remove_event_data
-from rsvp_util import analyse_stores, get_expected_stores_for_date, load_store_analysis
+from rsvp_util import analyse_stores, get_expected_stores_for_date, load_store_analysis, load_bot_state, save_bot_state
 
 from constants import (
     DISCORD_BOT_TOKEN,
@@ -305,6 +305,13 @@ async def where_to_play_weekly():
                 msg = await wtp_ch.send(content)
                 new_ids.append(msg.id)
             _where_to_play_msg_ids = new_ids
+            # Persist message IDs so edits survive restarts
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, save_bot_state, {
+                'wtp_msg_0': str(new_ids[0]) if new_ids[0] else '',
+                'wtp_msg_1': str(new_ids[1]) if new_ids[1] else '',
+                'wtp_msg_2': str(new_ids[2]) if new_ids[2] else '',
+            })
             print(f"  ✓ #{WHERE_TO_PLAY_CHANNEL} updated ({len(messages)} messages)")
         except Exception as e:
             print(f"  ✗ Failed to update #{WHERE_TO_PLAY_CHANNEL}: {e}")
@@ -312,9 +319,25 @@ async def where_to_play_weekly():
 
 @bot.event
 async def on_ready():
+    global _where_to_play_msg_ids
     print(f"✦ GTA Lorcana Bot online as {bot.user}")
     print(f"  Watching #{ANNOUNCEMENTS_CHANNEL} for website sync")
     print(f"  Watching #{RESULTS_REPORTING_CHANNEL} for results processing")
+
+    # Restore persisted where-to-play message IDs so edits work after restarts
+    try:
+        loop = asyncio.get_running_loop()
+        state = await loop.run_in_executor(None, load_bot_state)
+        ids = [
+            int(state['wtp_msg_0']) if 'wtp_msg_0' in state else None,
+            int(state['wtp_msg_1']) if 'wtp_msg_1' in state else None,
+            int(state['wtp_msg_2']) if 'wtp_msg_2' in state else None,
+        ]
+        _where_to_play_msg_ids = ids
+        print(f"  ✓ Restored where-to-play message IDs: {ids}")
+    except Exception as e:
+        print(f"  ⚠ Could not restore where-to-play message IDs: {e}")
+
     if not keepalive.is_running():
         keepalive.start()
         print(f"  ♻ Keepalive task started")
@@ -1080,6 +1103,11 @@ async def wheretoplay_command(interaction: discord.Interaction):
             msg = await channel.send(content)
             new_ids.append(msg.id)
         _where_to_play_msg_ids = new_ids
+        await loop.run_in_executor(None, save_bot_state, {
+            'wtp_msg_0': str(new_ids[0]) if new_ids[0] else '',
+            'wtp_msg_1': str(new_ids[1]) if new_ids[1] else '',
+            'wtp_msg_2': str(new_ids[2]) if new_ids[2] else '',
+        })
         await interaction.followup.send(f"✅ #{WHERE_TO_PLAY_CHANNEL} updated.", ephemeral=True)
 
     except Exception as e:

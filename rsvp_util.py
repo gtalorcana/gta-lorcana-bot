@@ -39,6 +39,7 @@ from constants import (
     STORE_SPREADSHEET_ID,
     STORE_CLASSIFICATIONS_RANGE_NAME,
     STORE_OVERRIDES_RANGE_NAME,
+    BOT_STATE_RANGE_NAME,
     RSVP_MIN_CONSECUTIVE_WEEKS,
     RSVP_MISS_WEEKS_BEFORE_RELEGATE,
 )
@@ -427,11 +428,6 @@ def _apply_overrides(analysis: dict, overrides: list) -> dict:
     def _key(entry):
         return (str(entry['store_id']), entry['day'], entry['time'], entry['format'])
 
-    for entry in analysis['regular'] + analysis['semi_regular']:
-        if 'Game 3' in entry['store_name']:
-            print(f"  DEBUG Game 3 key: {_key(entry)}")
-    print(f"  DEBUG override_map keys: {list(match_overrides.keys())}")
-
     regular      = []
     semi_regular = []
 
@@ -494,6 +490,34 @@ def _apply_overrides(analysis: dict, overrides: list) -> dict:
     semi_regular.sort(key=_sort_key)
 
     return {'regular': regular, 'semi_regular': semi_regular}
+
+
+# ── Bot state persistence ─────────────────────────────────────────────────────
+
+def load_bot_state() -> dict:
+    """
+    Read persistent bot state from the Bot State tab in STORE_SPREADSHEET_ID.
+    Returns a dict of key -> value strings, or {} if the sheet is empty.
+    """
+    try:
+        result = _gs.get_values(STORE_SPREADSHEET_ID, BOT_STATE_RANGE_NAME)
+        rows   = result.get('values', [])
+        return {row[0]: row[1] for row in rows if len(row) >= 2}
+    except Exception as e:
+        print(f"  ⚠ Could not load bot state: {e}")
+        return {}
+
+
+def save_bot_state(state: dict) -> None:
+    """
+    Write persistent bot state to the Bot State tab in STORE_SPREADSHEET_ID.
+    Overwrites all existing rows.
+    """
+    try:
+        rows = [[k, v] for k, v in state.items()]
+        _gs.update_values(STORE_SPREADSHEET_ID, BOT_STATE_RANGE_NAME, "USER_ENTERED", rows)
+    except Exception as e:
+        print(f"  ⚠ Could not save bot state: {e}")
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
