@@ -163,13 +163,13 @@ def _build_where_to_play_messages(store_analysis: dict, as_of: date) -> tuple[st
     regular_msg = "\n".join([
         f"📍 **Where to Play — GTA Lorcana** — *Updated {date_str}*",
         "",
-        "✅ **Regular Events** — *runs consistently every week*",
+        "✅ **Regular Events** — *ran every week for 2+ weeks*",
         _grouped_by_day(store_analysis['regular']),
     ])
 
     semi_regular_msg = "\n".join([
         "\u200b",
-        "🔄 **Semi-Regular Events** — *runs most weeks but may occasionally skip due to attendance*",
+        "🔄 **Semi-Regular Events** — *ran at least twice in the last 4 weeks*",
         _grouped_by_day(store_analysis.get('semi_regular', [])),
     ])
 
