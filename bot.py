@@ -82,19 +82,18 @@ intents.members = True  # on_member_join event
 class GtaLorcanaBot(commands.Bot):
     async def setup_hook(self):
         if os.getenv("SYNC_COMMANDS_ONLY") == "1":
-            #DEBUG
             guild_id = os.getenv("DISCORD_GUILD_ID", "0")
-            print(
-                f"  SYNC_COMMANDS_ONLY mode — guild_id={guild_id}, commands registered={len(self.tree.get_commands())}")
-            #END DEBUG
-            guild = discord.Object(id=int(os.getenv("DISCORD_GUILD_ID", "0")))
-            self.tree.clear_commands(guild=None)
-            await self.tree.sync()
+            guild = discord.Object(id=int(guild_id))
+            print(f"  SYNC_COMMANDS_ONLY mode — guild_id={guild_id}, commands registered={len(self.tree.get_commands())}")
+            # Copy to guild FIRST, then clear globals
             self.tree.copy_global_to(guild=guild)
             synced = await self.tree.sync(guild=guild)
-            print(f"✓ Synced {len(synced)} command(s) to guild {guild.id}:")
+            print(f"✓ Synced {len(synced)} command(s) to guild {guild_id}:")
             for cmd in synced:
                 print(f"  /{cmd.name}")
+            # Clear global commands after guild sync
+            self.tree.clear_commands(guild=None)
+            await self.tree.sync()
             await self.close()
 
 bot = GtaLorcanaBot(
