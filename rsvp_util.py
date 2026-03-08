@@ -427,6 +427,11 @@ def _apply_overrides(analysis: dict, overrides: list) -> dict:
     def _key(entry):
         return (str(entry['store_id']), entry['day'], entry['time'], entry['format'])
 
+    for entry in analysis['regular'] + analysis['semi_regular']:
+        if 'Game 3' in entry['store_name']:
+            print(f"  DEBUG Game 3 key: {_key(entry)}")
+    print(f"  DEBUG override_map keys: {list(match_overrides.keys())}")
+
     regular      = []
     semi_regular = []
 

@@ -53,7 +53,7 @@ BOOTSTRAP_START_DT = BOOTSTRAP_START.isoformat() + START_OF_DAY
 BOOTSTRAP_END_DT   = BOOTSTRAP_END.isoformat() + END_OF_DAY
 
 # Set to True to write raw event_map data to a "Bootstrap Raw Data" tab for debugging.
-WRITE_RAW_DATA = False
+WRITE_RAW_DATA = True
 
 RAW_DATA_SHEET  = "Bootstrap Raw Data"
 RAW_DATA_RANGE  = RAW_DATA_SHEET + "!A1:G"
