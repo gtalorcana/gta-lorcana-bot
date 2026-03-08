@@ -23,8 +23,9 @@ from bot import bot, DISCORD_BOT_TOKEN
 async def on_ready():
     guild = discord.Object(id=int(DISCORD_GUILD_ID))
     try:
+        bot.tree.copy_global_to(guild=guild)
         synced = await bot.tree.sync(guild=guild)
-        print(f"✓ Synced {len(synced)} command(s) to guild {DISCORD_GUILD_ID}")
+        print(f"✓ Synced {len(synced)} command(s)")
         for cmd in synced:
             print(f"  /{cmd.name}")
     except Exception as e:
