@@ -9,7 +9,7 @@ WORKER_SECRET     = os.getenv("WORKER_SECRET")
 
 # League Variables
 # Discord user ID of the bot admin (pinged when all auto-retries fail)
-ADMIN_USER_ID = "904550642213875723"
+ADMIN_USER_ID = 904550642213875723
 CURRENT_SEASON = os.getenv("CURRENT_SEASON", "S11")
 SEASON_START_DATE   = "2026-02-13"
 SEASON_END_DATE     = "2026-04-24"
