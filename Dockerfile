@@ -12,5 +12,6 @@ COPY rph_util.py .
 COPY rsvp_util.py .
 COPY constants.py .
 COPY util/ ./util/
+COPY scripts/ ./scripts/
 
 CMD ["python", "bot.py"]
