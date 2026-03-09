@@ -45,10 +45,10 @@ import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 
 from results import process_event_data, remove_event_data
-from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state
+from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, refresh_set_champs
 
 from constants import (
     DISCORD_BOT_TOKEN,
@@ -70,6 +70,10 @@ from constants import (
     WHOS_GOING_POST_HOUR_ET,
     WHERE_TO_PLAY_POST_DAY,
     WHERE_TO_PLAY_POST_HOUR_ET,
+    SET_CHAMPS_START_DATE,
+    SET_CHAMPS_END_DATE,
+    SET_CHAMPS_SPREADSHEET_ID,
+    SET_CHAMPS_EVENTS_RANGE_NAME,
 )
 
 # ── Bot setup ─────────────────────────────────────────────────
@@ -354,6 +358,33 @@ async def where_to_play_weekly():
             print(f"  ✗ Failed to update #{WHERE_TO_PLAY_CHANNEL}: {e}")
 
 
+# ── Set Championships daily refresh ─────────────────────────────────────────
+
+_SET_CHAMPS_START = date.fromisoformat(SET_CHAMPS_START_DATE) - timedelta(weeks=2)
+_SET_CHAMPS_END   = date.fromisoformat(SET_CHAMPS_END_DATE)
+
+
+@tasks.loop(minutes=1)
+async def set_champs_daily():
+    """
+    Refreshes the Set Champs sheet once daily at noon ET during the set champs window.
+    No-ops outside of SET_CHAMPS_START_DATE to SET_CHAMPS_END_DATE.
+    """
+    now_et = _now_et()
+    if now_et.hour != 7 or now_et.minute != 0:
+        return
+    if not (_SET_CHAMPS_START <= now_et.date() <= _SET_CHAMPS_END):
+        return
+
+    print(f"  🏆 set_champs_daily: refreshing Set Champs sheet for {now_et.date()}...")
+    loop = asyncio.get_running_loop()
+    try:
+        count = await loop.run_in_executor(None, refresh_set_champs)
+        print(f"  ✓ Set Champs sheet refreshed ({count} event(s))")
+    except Exception as e:
+        print(f"  ✗ set_champs_daily failed: {e}")
+
+
 @bot.event
 async def on_ready():
     global _where_to_play_msg_ids
@@ -384,6 +415,9 @@ async def on_ready():
     if not where_to_play_weekly.is_running():
         where_to_play_weekly.start()
         print(f"  ♻ Where-to-play weekly task started (fires Sundays at {WHERE_TO_PLAY_POST_HOUR_ET}:00 ET)")
+    if not set_champs_daily.is_running():
+        set_champs_daily.start()
+        print(f"  ♻ Set Champs daily task started (fires 7AM ET, {SET_CHAMPS_START_DATE} → {SET_CHAMPS_END_DATE})")
 
 
 @bot.event

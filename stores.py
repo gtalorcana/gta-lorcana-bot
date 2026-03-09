@@ -41,6 +41,10 @@ from constants import (
     STORE_RAW_DATA_RANGE_NAME,
     BOT_STATE_RANGE_NAME,
     WHOS_GOING_MIN_CONSECUTIVE_WEEKS,
+    SET_CHAMPS_START_DT,
+    SET_CHAMPS_END_DT,
+    SET_CHAMPS_SPREADSHEET_ID,
+    SET_CHAMPS_EVENTS_RANGE_NAME,
 )
 
 _TZ_TORONTO = ZoneInfo("America/Toronto")
@@ -619,3 +623,63 @@ def get_expected_stores_for_date(target_date: date, store_analysis: dict = None)
 
     print(f"  ✓ {len(expected)} event type(s) expected on {target_day_name} ({target_date})")
     return expected
+
+
+
+# ── Set Championships ─────────────────────────────────────────────────────────
+
+_RPH_EVENT_BASE_URL     = "https://tcg.ravensburgerplay.com/events/"
+_SET_CHAMPS_NAME_FILTER = "Set Champ"
+
+
+def refresh_set_champs() -> int:
+    """
+    Fetch Set Championship events from RPH and write them to the Set Champs sheet.
+
+    Pulls all events in the SET_CHAMPS date window (including upcoming and
+    in-progress), filters by name containing 'Set Champ', and overwrites
+    the sheet with the latest data.
+
+    Called daily by the set_champs_daily task in bot.py during the window
+    defined by SET_CHAMPS_START_DATE and SET_CHAMPS_END_DATE.
+
+    Returns the number of rows written.
+    """
+    override_params = {
+        'display_status':   None,
+        'display_statuses': ['past', 'inProgress', 'upcoming'],
+    }
+
+    print(f"  → Fetching Set Championship events ({SET_CHAMPS_START_DT} → {SET_CHAMPS_END_DT})...")
+    events = _rph_api.get_events(
+        start_date_after=SET_CHAMPS_START_DT,
+        start_date_before=SET_CHAMPS_END_DT,
+        extra_params=override_params,
+    )
+
+    filtered = [
+        e for e in events
+        if _SET_CHAMPS_NAME_FILTER.lower() in (e.get('name') or '').lower()
+    ]
+    print(f"  ✓ {len(filtered)} set champs event(s) found (of {len(events)} total in window)")
+
+    rows = []
+    for e in filtered:
+        dt_utc     = datetime.fromisoformat(e['start_datetime'].replace('Z', '+00:00'))
+        dt_toronto = dt_utc.astimezone(_TZ_TORONTO)
+        rows.append([
+            dt_toronto.strftime('%Y-%m-%d'),
+            dt_toronto.strftime('%I:%M %p').lstrip('0'),
+            e['store']['name'],
+            e['store'].get('full_address', ''),
+            e.get('capacity', ''),
+            e['gameplay_format']['name'],
+            e.get('name', ''),
+            _RPH_EVENT_BASE_URL + str(e['id']),
+        ])
+
+    rows.sort(key=lambda r: (r[0], r[1]))  # sort by date then time
+
+    _gs.update_values(SET_CHAMPS_SPREADSHEET_ID, SET_CHAMPS_EVENTS_RANGE_NAME, "USER_ENTERED", rows)
+    print(f"  ✓ Set Champs sheet updated ({len(rows)} row(s))")
+    return len(rows)
