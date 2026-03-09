@@ -14,13 +14,14 @@ Discord bot for the Greater Toronto Area Lorcana community.
 ```
 bot.py                              # Main bot — events, slash commands, scheduled tasks
 results.py                          # Results reporting — processes RPH URLs, writes league standings
-stores.py                           # Store classification — RPH analysis, who's-going logic, sheet persistence
+stores.py                           # Store classification — RPH analysis, who's-going logic, set champs refresh
 constants.py                        # All config — IDs, channel names, env var defaults
 util/
   google_sheets_api_utils.py        # Google Sheets API wrapper (singleton)
   rph_api_utils.py                  # RPH API wrapper with pagination + retry
 scripts/
   bootstrap_where_to_play.py        # One-time season-start script — seeds store classifications
+  rph_get_set_championship_events.py  # Manual run script — inspect/write set champs events
   sync_commands.py                  # Syncs slash commands to guild (runs as Fly.io release_command)
   clear_global_commands.py          # One-time script — clears legacy global Discord commands
 ```
@@ -48,8 +49,29 @@ scripts/
 | Task | When | What it does |
 |------|------|-------------|
 | `whos_going_daily` | Daily at 7 AM ET | Posts a who's-going poll per Regular store expected today |
-| `where_to_play_weekly` | Sundays at 6 PM ET | Edits (or posts) the 3 `#where-to-play` messages |
+| `where_to_play_weekly` | Sundays at 11 PM ET | Edits (or posts) the 3 `#where-to-play` messages |
+| `set_champs_daily` | Daily at 7 AM ET, 2 weeks before `SET_CHAMPS_START_DATE` through `SET_CHAMPS_END_DATE` | Refreshes the Set Champs sheet from RPH |
 | `keepalive` | Every 30 min | Heartbeat log |
+
+---
+
+## Set Championships
+
+The `set_champs_daily` task calls `refresh_set_champs()` in `stores.py` every morning during the set champs window. It fetches all Ontario Lorcana events in the `SET_CHAMPS` date range (including upcoming and in-progress), filters to events whose name contains `"Set Champ"` (case-insensitive — matches "Set Championship", "Set Champs", etc.), and overwrites the Set Champs sheet.
+
+**Set Champs sheet columns (A2:H):**
+```
+Date | Time (Toronto) | Store Name | Full Address | Player Cap | Format | Event Name | RPH Link
+```
+
+The task starts **2 weeks before** `SET_CHAMPS_START_DATE` so the sheet is populated ahead of time as stores register their events on RPH.
+
+**Manual run** (inspect output before writing):
+```bash
+python scripts/rph_get_set_championship_events.py
+```
+
+Set `WRITE_TO_SHEET = True` in the script once the output looks correct. Set `NAME_FILTER = None` to see all events in the window and verify the filter keyword.
 
 ---
 
@@ -131,6 +153,7 @@ Manually add a store missing from RPH entirely:
 |------------|---------|
 | League Sheet | Standings and events — written by the bot on each results submission |
 | Store Sheet | Store classifications, raw event data, overrides, bot state |
+| Set Champs Sheet | Set Championship events — written daily by `set_champs_daily` during the window |
 
 **Store Sheet tabs:**
 
@@ -226,8 +249,8 @@ Use `/testwhosgoing` and `/wheretoplay` in Discord to trigger tasks manually wit
 
 ## Season Rollover
 
-1. Update `SEASON_START_DATE`, `SEASON_END_DATE`, and `CURRENT_SEASON` in `constants.py`
-2. Create new `S## Standings - User Reported` and `S## Events - User Reported` tabs in the League Sheet
+1. Update `SEASON_START_DATE`, `SEASON_END_DATE`, `CURRENT_SEASON`, `SET_CHAMPS_START_DATE`, and `SET_CHAMPS_END_DATE` in `constants.py`
+2. Create new `S## Standings - User Reported`, `S## Events - User Reported`, and `S## Set Champs` tabs in the relevant sheets
 3. Run the bootstrap script to seed store classifications:
    ```bash
    python scripts/bootstrap_where_to_play.py
