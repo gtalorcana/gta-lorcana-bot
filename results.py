@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 
-from util.google_sheets_api_utils import GoogleSheetsApi
-from util.rph_api_utils import RphApi
+from clients import gs as _gs, rph_api as _rph_api
 from constants import (
     LEAGUE_SPREADSHEET_ID,
     EVENTS_RANGE_NAME,
@@ -13,21 +12,8 @@ from constants import (
 
 # ── Singletons ────────────────────────────────────────────────────────────────
 #
-# GoogleSheetsApi and RphApi are constructed once at module load time and
-# reused for every call. This is critical for memory:
-#
-# googleapiclient.discovery.build() — called inside GoogleSheetsApi.__init__ —
-# downloads and parses Google's full API discovery document, allocating ~160 MB
-# (93 MB in discovery.py + 67 MB in schema.py per tracemalloc). Python's memory
-# allocator does not release RSS back to the OS after the object is freed, so
-# constructing a new instance on every process_event() call caused RSS to grow
-# permanently with each invocation, eventually triggering OOM on Fly.io.
-#
-# By constructing once here, the discovery document is fetched exactly once per
-# process lifetime regardless of how many times process_event() is called.
-
-_gs = GoogleSheetsApi()
-_rph_api = RphApi()
+# Imported from clients.py — see that module for the full explanation of why
+# these are shared rather than constructed per-module.
 
 
 def _fetch_event_rows_and_standings(input_rows):

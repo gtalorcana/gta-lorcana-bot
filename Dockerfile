@@ -8,8 +8,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy source
 COPY bot.py .
-COPY rph_util.py .
-COPY rsvp_util.py .
+COPY results.py .
+COPY stores.py .
+COPY clients.py .
 COPY constants.py .
 COPY util/ ./util/
 COPY scripts/ ./scripts/

@@ -30,8 +30,7 @@ from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from util.rph_api_utils import RphApi
-from util.google_sheets_api_utils import GoogleSheetsApi
+from clients import gs as _gs, rph_api as _rph_api
 from constants import (
     SEASON_START_DT,
     SEASON_END_DT,
@@ -49,9 +48,10 @@ from constants import (
 
 _TZ_TORONTO = ZoneInfo("America/Toronto")
 
-# Singletons — reuse existing connections if already constructed in results.py
-_rph_api = RphApi()
-_gs      = GoogleSheetsApi()
+# ── Singletons ────────────────────────────────────────────────────────────────
+#
+# Imported from clients.py — see that module for the full explanation of why
+# these are shared rather than constructed per-module.
 
 _DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 
