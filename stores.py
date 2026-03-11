@@ -531,6 +531,10 @@ def load_bot_state() -> dict:
     """
     Read persistent bot state from the Bot State tab in STORE_SPREADSHEET_ID.
     Returns a dict of key -> value strings, or {} if the sheet is empty.
+
+    # TODO: Replace Google Sheets bot state with a proper database (Postgres/SQLite)
+    # when white-labelling. Sheets is fine for a single-server bot but won't scale
+    # to concurrent multi-server writes.
     """
     try:
         result = _gs.get_values(STORE_SPREADSHEET_ID, BOT_STATE_RANGE_NAME)
@@ -551,6 +555,21 @@ def save_bot_state(state: dict) -> None:
         _gs.update_values(STORE_SPREADSHEET_ID, BOT_STATE_RANGE_NAME, "USER_ENTERED", rows)
     except Exception as e:
         print(f"  ⚠ Could not save bot state: {e}")
+
+
+def set_bot_state_key(key: str, value: str) -> None:
+    """Add or update a single key in bot state without overwriting other keys."""
+    state = load_bot_state()
+    state[key] = value
+    save_bot_state(state)
+
+
+def delete_bot_state_key(key: str) -> None:
+    """Remove a single key from bot state, silently ignoring if it doesn't exist."""
+    state = load_bot_state()
+    if key in state:
+        del state[key]
+        save_bot_state(state)
 
 
 # ── Public API ────────────────────────────────────────────────────────────────

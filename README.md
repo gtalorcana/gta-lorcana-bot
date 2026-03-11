@@ -162,7 +162,33 @@ Manually add a store missing from RPH entirely:
 | `Store Classifications` | store_id, store_name, status, streak, event_count, day, time, format, override | `analyse_stores()` every Sunday + `/wheretoplay` |
 | `Bootstrap Raw Data` | store_id, store_name, day, floored_time, format, week_starts, raw_times | `analyse_stores()` every run |
 | `Overrides` | store_id, store_name, day, time, format, override_status, override_day, override_time, reason | Manual — never touched by bot |
-| `Bot State` | key, value | Bot — persists `wtp_msg_0/1/2` message IDs across restarts |
+| `Bot State` | key, value | Bot — see below |
+
+**Bot State keys:**
+
+| Key | Value | Purpose |
+|-----|-------|---------|
+| `wtp_msg_0` / `wtp_msg_1` / `wtp_msg_2` | Discord message ID | Persists `#where-to-play` message IDs across restarts so the bot edits in-place rather than reposting |
+| `recheck:<thread_id>` | `1` | Crash-loop guard — set before a startup recheck attempt, cleared on success. If the bot crashes mid-processing and restarts, this key prevents the same thread from being retried indefinitely (see below) |
+
+> **Tech debt:** Bot State in Google Sheets works fine for a single-server bot but won't scale to concurrent multi-server writes. When white-labelling, replace with a proper per-guild database (Postgres, SQLite, or Redis).
+
+---
+
+## Crash-Loop Prevention
+
+On startup, the bot automatically rechecks any unprocessed threads from the last 3 days (threads without a ✅ reaction). This catches threads that were mid-flight when the bot crashed or restarted.
+
+To prevent a bad thread from causing an infinite crash loop, the bot tracks each startup recheck attempt in Bot State:
+
+1. Before processing a thread, `recheck:<thread_id>` is written to Bot State
+2. If the bot crashes mid-processing and restarts, the key is already set
+3. On the next startup, that thread is **skipped** — the bot adds ❌ and pings the admin instead
+4. If processing completes successfully, the key is cleared
+
+This means a bad thread will be attempted exactly once on startup. After that it requires manual intervention via `/recheck` or by deleting and resubmitting the thread.
+
+**Duplicate vs retry detection** (`process_event_data`): if the same RPH URL is submitted from the same thread (retry), it's allowed to overwrite. If it comes from a different thread, it's rejected as a true duplicate.
 
 ---
 

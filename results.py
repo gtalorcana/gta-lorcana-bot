@@ -91,20 +91,27 @@ def process_event_data(rph_url, thread_id):
 
     Flow:
       1. Read existing event data from the sheet
-      2. Check for duplicate URL — raise ValueError if already reported
+      2. Duplicate check — same URL from a different thread raises ValueError.
+         Same URL from the same thread is a retry after a partial failure and is allowed.
       3. Build full input list = existing rows + new entry
       4. Fetch RPH data for all entries (with retries per call)
       5. Validate fetched event count matches expected input count
-      6. Write all sheets atomically — nothing is written if any step above fails
+      6. Write standings first, then events — if a crash occurs between the two,
+         the event row won't exist so /recheck can safely retry the thread.
     """
     print(f"  → process_event_data: reading existing events from sheet...")
     existing_data = _gs.get_values(LEAGUE_SPREADSHEET_ID, EVENTS_RANGE_NAME)
     existing_rows = existing_data.get('values', [])
 
     # ── Step 1: Duplicate check ───────────────────────────────
+    # Same URL + different thread = true duplicate, reject.
+    # Same URL + same thread = retry after a failure, allow it to overwrite.
     for row in existing_rows:
         if row[0] == rph_url:
             existing_thread_id = row[1] if len(row) > 1 else None
+            if str(existing_thread_id) == str(thread_id):
+                print(f"  ↩ Same thread retry detected for {rph_url} — overwriting previous partial write")
+                break
             thread_url = RESULTS_REPORTING_CHANNEL_URL + str(existing_thread_id) if existing_thread_id else "unknown"
             raise ValueError(
                 f"Play Hub link is already reported.\n"
@@ -130,11 +137,14 @@ def process_event_data(rph_url, thread_id):
     print(f"  ✓ RPH data validated: {len(event_rows)} event(s), {len(standing_rows)} standings rows")
 
     # ── Step 5: Write all sheets ──────────────────────────────
-    print(f"  → Writing {len(event_rows)} event rows to sheet...")
-    _gs.update_values(LEAGUE_SPREADSHEET_ID, EVENTS_RANGE_NAME, "USER_ENTERED", event_rows)
-
+    # Standings are written first intentionally — if an OOM or crash occurs
+    # mid-write, the event row won't exist yet so the duplicate check won't
+    # trigger and the thread can be safely retried via /recheck.
     print(f"  → Writing {len(standing_rows)} standings rows to sheet...")
     _gs.update_values(LEAGUE_SPREADSHEET_ID, STANDINGS_RANGE_NAME, "USER_ENTERED", standing_rows)
+
+    print(f"  → Writing {len(event_rows)} event rows to sheet...")
+    _gs.update_values(LEAGUE_SPREADSHEET_ID, EVENTS_RANGE_NAME, "USER_ENTERED", event_rows)
 
     utc_dt   = datetime.now(timezone.utc)
     local_dt = utc_dt.astimezone().isoformat()

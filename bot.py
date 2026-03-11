@@ -48,7 +48,7 @@ from discord.ext import commands, tasks
 from datetime import datetime, timezone, date, timedelta
 
 from results import process_event_data, remove_event_data
-from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, refresh_set_champs
+from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, refresh_set_champs, set_bot_state_key, delete_bot_state_key
 
 from constants import (
     DISCORD_BOT_TOKEN,
@@ -419,6 +419,21 @@ async def on_ready():
         set_champs_daily.start()
         print(f"  ♻ Set Champs daily task started (fires 7AM ET, {SET_CHAMPS_START_DATE} → {SET_CHAMPS_END_DATE})")
 
+    # Auto-recheck any unprocessed results threads from the last 3 days.
+    # Catches threads that were mid-flight when the bot last crashed or restarted.
+    # startup=True enables crash-loop prevention — see _find_and_reprocess_missed_threads.
+    after_date = datetime.now(timezone.utc) - timedelta(days=3)
+    print(f"  🔄 Startup recheck: scanning threads since {after_date.date()}...")
+    for guild in bot.guilds:
+        try:
+            missed, total = await _find_and_reprocess_missed_threads(guild, after_date, startup=True)
+            if missed:
+                print(f"  ✓ Startup recheck: reprocessed {missed} missed thread(s) out of {total} scanned")
+            else:
+                print(f"  ✓ Startup recheck: all {total} thread(s) already processed")
+        except Exception as e:
+            print(f"  ⚠ Startup recheck failed for {guild.name}: {e}")
+
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -530,10 +545,14 @@ async def run_results_reporting_pipeline(
     - is_retry:   True when triggered by a user edit (changes wording slightly)
     - auto_retry: True when triggered by the bot's internal retry loop (suppresses
                   the initial status message since one already exists in the thread)
+
+    Returns True if processing completed successfully, False otherwise.
+    Used by the startup recheck to decide whether to clear the crash-loop guard.
     """
     # Transient status messages sent during this run — deleted in finally.
     # Success/error messages are NOT added here and are intentionally kept.
     transient_msgs: list[discord.Message] = []
+    success = False
 
     # Clear any previous result reactions, then add the running indicator.
     try:
@@ -578,6 +597,7 @@ async def run_results_reporting_pipeline(
         except Exception:
             pass
         print(f"  ✓ Results processed OK: '{thread.name}'")
+        success = True
 
     except ValueError as e:
         # ── Validation error — user needs to fix their URL ────
@@ -613,6 +633,8 @@ async def run_results_reporting_pipeline(
                 await msg.delete()
             except Exception:
                 pass
+
+    return success
 
 
 async def _schedule_auto_retry(
@@ -1014,6 +1036,99 @@ async def welcome(interaction: discord.Interaction, member: discord.Member):
 
 
 # ── /recheck ──────────────────────────────────────────────────
+
+async def _find_and_reprocess_missed_threads(
+        guild: discord.Guild,
+        after_date: datetime = None,
+        startup: bool = False,
+) -> tuple[int, int]:
+    """
+    Scan all threads in #results-reporting and reprocess any without a ✅ reaction.
+    Returns (found, total) — number of missed threads and total threads scanned.
+
+    startup=True enables crash-loop prevention:
+      - Threads already attempted this boot (tracked in Bot State as
+        'recheck:<thread_id>') are skipped, the bot adds ❌ and pings the admin
+        instead of retrying indefinitely.
+      - On success, the Bot State entry is cleared.
+      - On failure, the entry is left so the next restart also skips it.
+
+    # TODO: When white-labelling, replace Bot State sheet tracking with a proper
+    # database (per-guild, per-thread retry counters). The sheet works for a
+    # single server but won't handle concurrent multi-server writes safely.
+    """
+    forum = discord.utils.get(guild.forums, name=RESULTS_REPORTING_CHANNEL)
+    if not forum:
+        return 0, 0
+
+    threads = list(forum.threads)
+    async for thread in forum.archived_threads(limit=None):
+        if thread not in threads:
+            threads.append(thread)
+
+    if after_date:
+        threads = [t for t in threads if t.created_at and t.created_at >= after_date]
+
+    # Load startup-recheck state once up front
+    loop = asyncio.get_running_loop()
+    attempted_keys: set[str] = set()
+    if startup:
+        state = await loop.run_in_executor(None, load_bot_state)
+        attempted_keys = {k for k in state if k.startswith('recheck:')}
+
+    missed = []
+    for thread in threads:
+        try:
+            starter_msg = await thread.fetch_message(thread.id)
+        except Exception:
+            continue
+        bot_reactions = {r.emoji for r in starter_msg.reactions if r.me}
+        if "✅" not in bot_reactions:
+            missed.append((thread, starter_msg))
+
+    for thread, starter_msg in missed:
+        state_key = f'recheck:{thread.id}'
+
+        if startup and state_key in attempted_keys:
+            # Already tried this thread on a previous boot and it crashed us.
+            # Skip it, add ❌, ping the admin — don't retry.
+            print(f"  ⛔ Startup recheck: skipping '{thread.name}' — previously caused a crash, pinging admin")
+            try:
+                await starter_msg.add_reaction("❌")
+            except Exception:
+                pass
+            try:
+                await thread.send(
+                    embed=make_embed(
+                        title="❌ Processing Failed",
+                        description=(
+                            f"This thread failed to process on a previous bot restart and was skipped "
+                            f"to prevent a crash loop.\n"
+                            f"<@{ADMIN_USER_ID}> Manual intervention required."
+                        ),
+                        colour=discord.Colour.red()
+                    )
+                )
+            except Exception:
+                pass
+            continue
+
+        if startup:
+            # Mark as attempted before trying — if we OOM mid-process the key
+            # will already be set when the bot restarts, preventing a loop.
+            await loop.run_in_executor(None, set_bot_state_key, state_key, '1')
+
+        print(f"  🔄 {'Startup recheck' if startup else 'Rechecking'} missed thread: '{thread.name}'")
+        await thread.join()
+        success = await run_results_reporting_pipeline(thread, starter_msg, is_retry=False)
+
+        if startup and success:
+            # Completed cleanly — remove the marker so it doesn't linger
+            await loop.run_in_executor(None, delete_bot_state_key, state_key)
+
+    return len(missed), len(threads)
+
+
 @tree.command(name="recheck",
               description=f"Reprocess any unhandled threads in #{RESULTS_REPORTING_CHANNEL} (admins only)")
 @app_commands.describe(
@@ -1046,65 +1161,35 @@ async def recheck(interaction: discord.Interaction, after: str = ""):
         )
         return
 
-    threads = list(forum.threads)
-    async for thread in forum.archived_threads(limit=None):
-        if thread not in threads:
-            threads.append(thread)
-
-    if after_date:
-        threads = [t for t in threads if t.created_at and t.created_at >= after_date]
-
-    if not threads:
-        date_note = f" after {after}" if after_date else ""
-        await interaction.followup.send(f"No threads found{date_note}.", ephemeral=True)
-        return
-
-    missed = []
-    for thread in threads:
-        try:
-            starter_msg = await thread.fetch_message(thread.id)
-        except Exception:
-            continue
-
-        bot_reactions = {r.emoji for r in starter_msg.reactions if r.me}
-        already_handled = "✅" in bot_reactions
-
-        if not already_handled:
-            missed.append((thread, starter_msg))
-
-    if not missed:
-        await interaction.followup.send(
-            embed=make_embed(
-                title="✅ All caught up!",
-                description=f"All {len(threads)} thread(s) in `#{RESULTS_REPORTING_CHANNEL}` have already been processed.",
-                colour=discord.Colour.green()
-            ),
-            ephemeral=True
-        )
-        return
-
     await interaction.followup.send(
         embed=make_embed(
-            title="🔄 Rechecking missed threads...",
-            description=f"Found {len(missed)} unprocessed thread(s) out of {len(threads)} total. Processing now...",
+            title="🔄 Rechecking...",
+            description="Scanning for unprocessed threads...",
             colour=discord.Colour.blurple()
         ),
         ephemeral=True
     )
 
-    for thread, starter_msg in missed:
-        print(f"  🔄 Rechecking missed thread: '{thread.name}'")
-        await thread.join()
-        await run_results_reporting_pipeline(thread, starter_msg, is_retry=False)
+    missed, total = await _find_and_reprocess_missed_threads(interaction.guild, after_date)
 
-    await interaction.followup.send(
-        embed=make_embed(
-            title="✦ Recheck Complete",
-            description=f"Finished processing {len(missed)} missed thread(s).",
-            colour=discord.Colour.gold()
-        ),
-        ephemeral=True
-    )
+    if missed == 0:
+        await interaction.followup.send(
+            embed=make_embed(
+                title="✅ All caught up!",
+                description=f"All {total} thread(s) in `#{RESULTS_REPORTING_CHANNEL}` have already been processed.",
+                colour=discord.Colour.green()
+            ),
+            ephemeral=True
+        )
+    else:
+        await interaction.followup.send(
+            embed=make_embed(
+                title="✦ Recheck Complete",
+                description=f"Finished processing {missed} missed thread(s) out of {total} total.",
+                colour=discord.Colour.gold()
+            ),
+            ephemeral=True
+        )
 
 
 # ── /help ─────────────────────────────────────────────────────
