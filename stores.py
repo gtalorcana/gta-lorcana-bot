@@ -131,6 +131,7 @@ def _build_event_type_map(events: list) -> dict:
     event_map = defaultdict(lambda: {
         'store_id':       '',
         'store_name':     '',
+        'full_address':   '',
         'day':            '',
         'floored_time':   '',
         'raw_times':      [],
@@ -141,9 +142,10 @@ def _build_event_type_map(events: list) -> dict:
     })
 
     for event in events:
-        store_id   = event['store']['id']
-        store_name = event['store']['name']
-        format_str = event['gameplay_format']['name']
+        store_id     = event['store']['id']
+        store_name   = event['store']['name']
+        full_address = event['store'].get('full_address', '')
+        format_str   = event['gameplay_format']['name']
 
         raw_time, floored_time, dt_toronto = _parse_event_time_toronto(event['start_datetime'])
         if not dt_toronto:
@@ -155,6 +157,7 @@ def _build_event_type_map(events: list) -> dict:
         key = (store_id, day_str, floored_time, format_str)
         event_map[key]['store_id']     = store_id
         event_map[key]['store_name']   = store_name
+        event_map[key]['full_address'] = full_address
         event_map[key]['day']          = day_str
         event_map[key]['floored_time'] = floored_time
         event_map[key]['format']       = format_str
@@ -202,7 +205,23 @@ def _display_time(raw_times: list) -> str:
     return f"~{most_common}" if has_variance else most_common
 
 
-def _compute_streaks(week_starts: set, reference_date: date) -> tuple[int, int]:
+def _parse_city(full_address: str) -> str:
+    """
+    Extract city from a full_address string.
+
+    RPH address format: "<street>[, <unit>], <city>, <province>, <postal>, CA"
+    City is always 3rd from the end (before province, postal+CA).
+
+    Examples:
+      "55 Saint Clair Street, Chatham, ON, N7L 3H8, CA"        → "Chatham"
+      "1700 Dundas Street, Unit 7, London, ON, N5W 3C9, CA"    → "London"
+    """
+    if not full_address:
+        return ''
+    parts = [p.strip() for p in full_address.split(',')]
+    if len(parts) >= 4:
+        return parts[-3]
+    return ''
     """
     Compute streak metrics for an event type given its week-start dates.
 
@@ -264,13 +283,15 @@ def _classify_event_types(event_map: dict, reference_date: date) -> dict:
         ran_recently = (ref_week in info['week_starts'] or prev_week in info['week_starts'])
 
         entry = {
-            'store_id':    info['store_id'],
-            'store_name':  info['store_name'],
-            'streak':      current_streak,
-            'event_count': event_count,
-            'day':         info['day'],
-            'time':        display_time,
-            'format':      info['format'],
+            'store_id':     info['store_id'],
+            'store_name':   info['store_name'],
+            'city':         _parse_city(info['full_address']),
+            'full_address': info['full_address'],
+            'streak':       current_streak,
+            'event_count':  event_count,
+            'day':          info['day'],
+            'time':         display_time,
+            'format':       info['format'],
         }
 
         if current_streak >= WHOS_GOING_MIN_CONSECUTIVE_WEEKS:
@@ -297,7 +318,7 @@ def _classify_event_types(event_map: dict, reference_date: date) -> dict:
 
 # ── Sheet persistence ─────────────────────────────────────────────────────────
 
-_SHEET_HEADER = ['store_id', 'store_name', 'status', 'day', 'time', 'format', 'override']
+_SHEET_HEADER = ['store_id', 'store_name', 'city', 'status', 'day', 'time', 'format', 'override']
 
 
 def _store_analysis_to_rows(store_analysis: dict) -> list:
@@ -307,6 +328,7 @@ def _store_analysis_to_rows(store_analysis: dict) -> list:
         rows.append([
             entry['store_id'],
             entry['store_name'],
+            entry.get('city', ''),
             entry['status'],
             entry['day'],
             entry['time'],
@@ -325,17 +347,18 @@ def _rows_to_store_analysis(rows: list) -> dict:
     semi_regular = []
 
     for row in rows[1:]:  # skip header
-        if len(row) < 6:  # override column is optional
+        if len(row) < 7:  # override column is optional
             continue
         entry = {
             'store_id':   row[0],
             'store_name': row[1],
-            'status':     row[2],
-            'day':        row[3],
-            'time':       row[4],
-            'format':     row[5],
+            'city':       row[2],
+            'status':     row[3],
+            'day':        row[4],
+            'time':       row[5],
+            'format':     row[6],
         }
-        if row[2] == 'Regular':
+        if row[3] == 'Regular':
             regular.append(entry)
         else:
             semi_regular.append(entry)
@@ -478,6 +501,7 @@ def _apply_overrides(analysis: dict, overrides: list) -> dict:
         entry = {
             'store_id':   ov['store_id'],
             'store_name': ov['store_name'],
+            'city':       '',  # manually added — no RPH address available
             'status':     'Regular',
             'day':        ov['override_day'],
             'time':       ov['override_time'],
@@ -562,7 +586,7 @@ def save_debug_sheet(event_map: dict, analysis: dict, reference_date: date) -> N
             k = (str(entry['store_id']), entry['day'], entry['time'], entry['format'])
             status_lookup[k] = 'Semi-Regular'
 
-        fixed_headers = ['store_name', 'day', 'floored_time', 'format', 'status', 'streak']
+        fixed_headers = ['store_id', 'store_name', 'city', 'full_address', 'day', 'floored_time', 'format', 'status', 'streak']
         header_row    = fixed_headers + week_hdrs + ['event_ids']
 
         rows = [header_row]
@@ -572,6 +596,7 @@ def save_debug_sheet(event_map: dict, analysis: dict, reference_date: date) -> N
         ):
             display_time = _display_time(info['raw_times'])
             streak, _    = _compute_streaks(info['week_starts'], reference_date)
+            city         = _parse_city(info['full_address'])
 
             status_key = (str(store_id), day, display_time, fmt)
             status     = status_lookup.get(status_key, '')
@@ -589,7 +614,10 @@ def save_debug_sheet(event_map: dict, analysis: dict, reference_date: date) -> N
             event_ids = ', '.join(str(eid) for eid in sorted(info.get('event_ids', [])))
 
             rows.append([
+                info['store_id'],
                 info['store_name'],
+                city,
+                info['full_address'],
                 day,
                 floored_time,
                 fmt,

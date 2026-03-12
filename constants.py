@@ -28,7 +28,7 @@ LEAGUE_SPREADSHEET_ID = "1dSv5lzVwhot1DR0e2FghyS7R1Vm1ODZtH3d8e3C55Zo"
 STORE_SPREADSHEET_ID  = "1cKiZqVu88_umUbrGPXk-dmZhHEzx1uL-pGR6dQOJyaU"
 
 STORE_CLASSIFICATIONS_SHEET_NAME  = "Store Classifications"
-STORE_CLASSIFICATIONS_RANGE_NAME  = STORE_CLASSIFICATIONS_SHEET_NAME + "!A1:G"
+STORE_CLASSIFICATIONS_RANGE_NAME  = STORE_CLASSIFICATIONS_SHEET_NAME + "!A1:H"
 
 # Overrides tab — manually maintained, never overwritten by the bot
 # Columns: store_id | store_name | day | time | format | override_status | reason
