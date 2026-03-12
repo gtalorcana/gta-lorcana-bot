@@ -167,10 +167,11 @@ def _grouped_by_day(entries: list) -> str:
         groups.setdefault(e['day'], []).append(e)
     lines = []
     for day, day_entries in groups.items():
-        lines.append(f"__**{day}**__")
+        lines.append(f"__{day}__")
         for e in day_entries:
+            city = f" ({e['city']})" if e.get('city') else ''
             time = f" @ {e['time']}" if e.get('time') else ''
-            lines.append(f"• **{e['store_name']}**{time} · {e['format']}")
+            lines.append(f"• **{e['store_name']}**{city}{time} · {e['format']}")
     return "\n".join(lines)
 
 
@@ -184,23 +185,23 @@ def _build_where_to_play_messages(store_analysis: dict, as_of: date) -> tuple[st
     regular_msg = "\n".join([
         f"📍 **Where to Play — GTA Lorcana** — *Updated {date_str}*",
         "",
-        "✅ **Regular Events** — *ran every week for 2+ weeks*",
+        "✅ Regular Events — *ran every week for 2+ weeks*",
         _grouped_by_day(store_analysis['regular']),
     ])
 
     semi_regular_msg = "\n".join([
         "\u200b",
-        "🔄 **Semi-Regular Events** — *ran at least twice in the last 4 weeks*",
+        "🔄 Semi-Regular Events — *ran at least twice in the last 4 weeks*",
         _grouped_by_day(store_analysis.get('semi_regular', [])),
     ])
 
     info_msg = "\n".join([
         "\u200b",
-        "🏪 **Don't see your store?**",
+        "🏪 Don't see your store?",
         "Ask them to run the same event (same day, same time) at least twice in the last 4 weeks and it'll appear here automatically!",
         "*If something looks off, DM <@904550642213875723> and we'll manually fix it.*",
         "",
-        "ℹ️ **How this works**",
+        "ℹ️ How this works",
         "Ratings are based on historical RPH event data and update every Sunday.",
         "*~ before a time means the start time varies slightly week to week — e.g. ~7:00 PM could mean anywhere from 7:00–7:30 PM. Arrive a few minutes early to be safe.*",
     ])
