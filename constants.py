@@ -43,6 +43,9 @@ BOT_STATE_RANGE_NAME  = BOT_STATE_SHEET_NAME + "!A1:B"
 STORE_RAW_DATA_SHEET_NAME  = "Bootstrap Raw Data"
 STORE_RAW_DATA_RANGE_NAME  = STORE_RAW_DATA_SHEET_NAME + "!A1:G"
 
+STORE_DEBUG_SHEET_NAME = "Store Debug"
+STORE_DEBUG_RANGE_NAME = STORE_DEBUG_SHEET_NAME + "!A1:Z"  # wide enough for 4 week columns + fixed cols
+
 STANDINGS_SHEET_NAME        = CURRENT_SEASON + " Standings - User Reported"
 EVENTS_SHEET_NAME           = CURRENT_SEASON + " Events - User Reported"
 STANDINGS_RANGE_NAME        = STANDINGS_SHEET_NAME + "!" + "A3:F"

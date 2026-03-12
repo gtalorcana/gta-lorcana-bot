@@ -44,6 +44,8 @@ from constants import (
     SET_CHAMPS_END_DT,
     SET_CHAMPS_SPREADSHEET_ID,
     SET_CHAMPS_EVENTS_RANGE_NAME,
+    STORE_DEBUG_SHEET_NAME,
+    STORE_DEBUG_RANGE_NAME,
 )
 
 _TZ_TORONTO = ZoneInfo("America/Toronto")
@@ -106,30 +108,36 @@ def _build_event_type_map(events: list) -> dict:
     organizer creates a new event with a slightly adjusted start time.
 
     Each entry accumulates:
-      - week_starts: the Monday dates on which this event type ran (for streaks)
-      - raw_times:   all exact start times seen (to derive displayed time + variance)
+      - week_starts:     the Monday dates on which this event type ran (for streaks)
+      - raw_times:       all exact start times seen (to derive displayed time + variance)
+      - event_ids:       RPH event IDs for all events in this group (for debug URLs)
+      - week_raw_times:  {week_start_date: raw_time} — the start time for each specific week
 
     Returns:
         {
             (store_id, day_str, floored_time_str, format_str): {
-                'store_id':    str,
-                'store_name':  str,
-                'day':         str,        # e.g. 'Saturday'
-                'floored_time': str,       # e.g. '7:00 PM' (key only)
-                'raw_times':   [str, ...], # e.g. ['7:00 PM', '7:30 PM']
-                'format':      str,        # e.g. 'Core Constructed'
-                'week_starts': {date, ...},
+                'store_id':      str,
+                'store_name':    str,
+                'day':           str,        # e.g. 'Saturday'
+                'floored_time':  str,        # e.g. '7:00 PM' (key only)
+                'raw_times':     [str, ...], # e.g. ['7:00 PM', '7:30 PM']
+                'format':        str,        # e.g. 'Core Constructed'
+                'week_starts':   {date, ...},
+                'event_ids':     [int, ...],
+                'week_raw_times': {date: str},
             }
         }
     """
     event_map = defaultdict(lambda: {
-        'store_id':     '',
-        'store_name':   '',
-        'day':          '',
-        'floored_time': '',
-        'raw_times':    [],
-        'format':       '',
-        'week_starts':  set(),
+        'store_id':       '',
+        'store_name':     '',
+        'day':            '',
+        'floored_time':   '',
+        'raw_times':      [],
+        'format':         '',
+        'week_starts':    set(),
+        'event_ids':      [],
+        'week_raw_times': {},
     })
 
     for event in events:
@@ -151,8 +159,10 @@ def _build_event_type_map(events: list) -> dict:
         event_map[key]['floored_time'] = floored_time
         event_map[key]['format']       = format_str
         event_map[key]['week_starts'].add(week_start)
+        event_map[key]['event_ids'].append(event['id'])
         if raw_time:
             event_map[key]['raw_times'].append(raw_time)
+            event_map[key]['week_raw_times'][week_start] = raw_time
 
     return event_map
 
@@ -525,6 +535,83 @@ def save_raw_event_map(event_map: dict) -> None:
         print(f"  ⚠ Could not save raw event map: {e}")
 
 
+def save_debug_sheet(event_map: dict, analysis: dict, reference_date: date) -> None:
+    """
+    Write a human-readable debug sheet showing raw RPH classification and
+    a calendar of the last 4 weeks. No overrides applied — this is pure
+    algorithm output so you can see exactly why a store was classified the
+    way it was before any manual intervention.
+
+    Store Classifications is the post-override version of this data.
+
+    Columns:
+      store_name | day | floored_time | format | status | streak |
+      <week_monday> | <week_monday> | <week_monday> | <week_monday> |
+      event_ids
+
+    Each week column shows the raw start time if the store ran that week,
+    blank if they didn't. Gaps in streaks are immediately visible.
+    Event IDs are rightmost for reference without cluttering the calendar.
+    """
+    try:
+        # Build the 4 week column headers (oldest → newest)
+        ref_week  = _get_week_start(reference_date)
+        week_cols = [ref_week - timedelta(weeks=i) for i in range(3, -1, -1)]  # oldest first
+        week_hdrs = [str(w) for w in week_cols]
+
+        # Build status lookup from pre-override analysis
+        status_lookup: dict[tuple, str] = {}
+        for entry in analysis['regular']:
+            k = (str(entry['store_id']), entry['day'], entry['time'], entry['format'])
+            status_lookup[k] = 'Regular'
+        for entry in analysis['semi_regular']:
+            k = (str(entry['store_id']), entry['day'], entry['time'], entry['format'])
+            status_lookup[k] = 'Semi-Regular'
+
+        fixed_headers = ['store_name', 'day', 'floored_time', 'format', 'status', 'streak']
+        header_row    = fixed_headers + week_hdrs + ['event_ids']
+
+        rows = [header_row]
+
+        for (store_id, day, floored_time, fmt), info in sorted(
+            event_map.items(), key=lambda x: (x[1]['store_name'], x[0][1])
+        ):
+            display_time = _display_time(info['raw_times'])
+            streak, _    = _compute_streaks(info['week_starts'], reference_date)
+
+            status_key = (str(store_id), day, display_time, fmt)
+            status     = status_lookup.get(status_key, '')
+
+            # Week columns — raw start time if ran that week, blank if not
+            week_times: list[str] = []
+            for w in week_cols:
+                if w in info['week_starts']:
+                    week_raw = info.get('week_raw_times', {}).get(w)
+                    week_times.append(week_raw if week_raw else display_time)
+                else:
+                    week_times.append('')
+
+            # Event IDs rightmost — comma-separated for all events in this group
+            event_ids = ', '.join(str(eid) for eid in sorted(info.get('event_ids', [])))
+
+            rows.append([
+                info['store_name'],
+                day,
+                floored_time,
+                fmt,
+                status,
+                streak,
+            ] + week_times + [event_ids])
+
+        _gs.update_values(STORE_SPREADSHEET_ID, STORE_DEBUG_RANGE_NAME, "USER_ENTERED", rows)
+        print(f"  ✓ Store Debug sheet updated ({len(rows) - 1} rows, weeks: {week_hdrs})")
+    except Exception as e:
+        print(f"  ⚠ Could not save debug sheet: {e}")
+
+
+# ── Bot state persistence ─────────────────────────────────────────────────────
+
+
 # ── Bot state persistence ─────────────────────────────────────────────────────
 
 def load_bot_state() -> dict:
@@ -602,14 +689,17 @@ def analyse_stores(reference_date: date = None) -> dict:
         # Mid-week or Sunday — current week is in progress, use its Monday as ref
         reference_date = ref_week
 
-    events    = _fetch_current_season_events()
-    event_map = _build_event_type_map(events)
-    analysis  = _classify_event_types(event_map, reference_date)
-    overrides = _load_overrides()
-    analysis  = _apply_overrides(analysis, overrides)
+    events         = _fetch_current_season_events()
+    event_map      = _build_event_type_map(events)
+    raw_analysis   = _classify_event_types(event_map, reference_date)
 
     save_raw_event_map(event_map)
-    save_store_analysis(analysis)
+    save_debug_sheet(event_map, raw_analysis, reference_date)  # raw — before overrides
+
+    overrides = _load_overrides()
+    analysis  = _apply_overrides(raw_analysis, overrides)
+
+    save_store_analysis(analysis)  # final — after overrides
     print(f"  ✓ {len(analysis['regular'])} regular, {len(analysis['semi_regular'])} semi-regular event type(s)")
     return analysis
 

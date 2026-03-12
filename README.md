@@ -83,7 +83,7 @@ Every Sunday, `analyse_stores()` in `stores.py`:
 2. Groups events by `(store_id, day_of_week, floored_hour, format)` — events within the same clock hour are merged to handle organizers adjusting start times slightly week to week
 3. Classifies each group based on streak
 4. Applies manual overrides from the `Overrides` sheet tab
-5. Saves results to `Store Classifications` and `Bootstrap Raw Data`
+5. Saves results to `Store Classifications` and `Store Debug`
 
 **Classification rules:**
 
@@ -160,7 +160,7 @@ Manually add a store missing from RPH entirely:
 | Tab | Columns | Written by |
 |-----|---------|------------|
 | `Store Classifications` | store_id, store_name, status, streak, event_count, day, time, format, override | `analyse_stores()` every Sunday + `/wheretoplay` |
-| `Bootstrap Raw Data` | store_id, store_name, day, floored_time, format, week_starts, raw_times | `analyse_stores()` every run |
+| `Store Debug` | store_name, day, floored_time, format, status, streak, event_count, last_seen, week of \<date\> ×4, urls | `analyse_stores()` every run — replaces Bootstrap Raw Data |
 | `Overrides` | store_id, store_name, day, time, format, override_status, override_day, override_time, reason | Manual — never touched by bot |
 | `Bot State` | key, value | Bot — see below |
 
