@@ -297,7 +297,7 @@ def _classify_event_types(event_map: dict, reference_date: date) -> dict:
 
 # ── Sheet persistence ─────────────────────────────────────────────────────────
 
-_SHEET_HEADER = ['store_id', 'store_name', 'status', 'streak', 'event_count', 'day', 'time', 'format', 'override']
+_SHEET_HEADER = ['store_id', 'store_name', 'status', 'day', 'time', 'format', 'override']
 
 
 def _store_analysis_to_rows(store_analysis: dict) -> list:
@@ -308,8 +308,6 @@ def _store_analysis_to_rows(store_analysis: dict) -> list:
             entry['store_id'],
             entry['store_name'],
             entry['status'],
-            entry['streak'],
-            entry['event_count'],
             entry['day'],
             entry['time'],
             entry['format'],
@@ -323,21 +321,19 @@ def _rows_to_store_analysis(rows: list) -> dict:
     Convert sheet rows back into a store analysis dict.
     Expects a header row first; skips malformed rows.
     """
-    regular    = []
+    regular      = []
     semi_regular = []
 
     for row in rows[1:]:  # skip header
-        if len(row) < 8:  # override column is optional
+        if len(row) < 6:  # override column is optional
             continue
         entry = {
-            'store_id':    row[0],
-            'store_name':  row[1],
-            'status':      row[2],
-            'streak':      int(row[3]),
-            'event_count': int(row[4]),
-            'day':         row[5],
-            'time':        row[6],
-            'format':      row[7],
+            'store_id':   row[0],
+            'store_name': row[1],
+            'status':     row[2],
+            'day':        row[3],
+            'time':       row[4],
+            'format':     row[5],
         }
         if row[2] == 'Regular':
             regular.append(entry)
@@ -480,15 +476,13 @@ def _apply_overrides(analysis: dict, overrides: list) -> dict:
             print(f"  ⚠ Add override for {ov['store_name']} missing override_day or override_time — skipping")
             continue
         entry = {
-            'store_id':    ov['store_id'],
-            'store_name':  ov['store_name'],
-            'status':      'Regular',
-            'streak':      0,
-            'event_count': 0,
-            'day':         ov['override_day'],
-            'time':        ov['override_time'],
-            'format':      ov['format'],
-            'override':    ov['reason'] or 'manually added',
+            'store_id':   ov['store_id'],
+            'store_name': ov['store_name'],
+            'status':     'Regular',
+            'day':        ov['override_day'],
+            'time':       ov['override_time'],
+            'format':     ov['format'],
+            'override':   ov['reason'] or 'manually added',
         }
         print(f"  ↪ Add override: {entry['store_name']} {entry['day']} {entry['time']} · {entry['format']} ({ov['reason']})")
         regular.append(entry)
