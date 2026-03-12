@@ -9,6 +9,9 @@ Features:
   - /rank            — self-assign a player role (Casual / Competitive / Judge)
   - /welcome         — manually welcome a member (admins only)
   - /recheck         — reprocess missed results threads (admins only)
+  - /watch-rph-event — subscribe to DM alerts when a spot opens at a full event
+  - /unwatch-rph-event — unsubscribe from a watched event
+  - /list-watches    — see all currently watched events
   - /help            — list all commands
   - on_member_join   — auto-greets new members (currently disabled)
   - whos_going_daily — posts #whos_going polls at 7AM ET for stores expected to run today
@@ -38,6 +41,7 @@ Environment variables (optional — override via .env for local dev):
 """
 
 import asyncio
+import json
 import os
 import re
 
@@ -48,7 +52,7 @@ from discord.ext import commands, tasks
 from datetime import datetime, timezone, date, timedelta
 
 from results import process_event_data, remove_event_data
-from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, refresh_set_champs, set_bot_state_key, delete_bot_state_key
+from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, refresh_set_champs, set_bot_state_key, delete_bot_state_key, fetch_event_status
 
 from constants import (
     DISCORD_BOT_TOKEN,
@@ -386,6 +390,242 @@ async def set_champs_daily():
         print(f"  ✗ set_champs_daily failed: {e}")
 
 
+
+
+# ═══════════════════════════════════════════════════════════════
+# RPH EVENT WATCHER
+# ═══════════════════════════════════════════════════════════════
+
+_RPH_WATCH_KEY_PREFIX = "rph_watch:"
+
+
+def _watch_key(event_id: int) -> str:
+    return f"{_RPH_WATCH_KEY_PREFIX}{event_id}"
+
+
+def _load_watches(state: dict) -> dict[str, dict]:
+    """Return all active rph_watch entries from bot state as {key: data}."""
+    return {
+        k: json.loads(v)
+        for k, v in state.items()
+        if k.startswith(_RPH_WATCH_KEY_PREFIX)
+    }
+
+
+@tasks.loop(minutes=15)
+async def rph_watcher():
+    """
+    Every 15 minutes: check each watched RPH event for open spots.
+    DMs all subscribers if spots are available.
+    Cleans up expired watches automatically.
+    """
+    loop = asyncio.get_running_loop()
+    try:
+        state = await loop.run_in_executor(None, load_bot_state)
+    except Exception as e:
+        print(f"  ⚠ rph_watcher: could not load bot state: {e}")
+        return
+
+    watches = _load_watches(state)
+    if not watches:
+        return
+
+    today = _now_et().date().isoformat()
+
+    for key, watch in watches.items():
+        event_id  = int(key.removeprefix(_RPH_WATCH_KEY_PREFIX))
+        end_date  = watch.get('end_date', '')
+        name      = watch.get('name', f'Event {event_id}')
+        subs      = watch.get('subscribers', [])
+
+        # Auto-expire past end_date
+        if end_date and today > end_date:
+            print(f"  🗑 rph_watcher: {name} (id={event_id}) past end_date {end_date} — removing")
+            await loop.run_in_executor(None, delete_bot_state_key, key)
+            continue
+
+        if not subs:
+            await loop.run_in_executor(None, delete_bot_state_key, key)
+            continue
+
+        # Fetch live event status
+        status = await loop.run_in_executor(None, fetch_event_status, event_id)
+        if status is None:
+            print(f"  ⚠ rph_watcher: could not fetch status for {name} (id={event_id})")
+            continue
+
+        available = status['available']
+        print(f"  👁 rph_watcher: {name} — {status['registered']}/{status['capacity']} "
+              f"({'OPEN' if available else 'FULL'})")
+
+        if available:
+            cap_str = f"{status['registered']}/{status['capacity']}" if status['capacity'] else str(status['registered'])
+            dm_msg  = (
+                f"🎟️ **Spot available at {name}!**\n"
+                f"📅 {status['start_date']}\n"
+                f"👥 Registered: {cap_str}\n"
+                f"🔗 {status['url']}"
+            )
+            for uid in subs:
+                try:
+                    user = await bot.fetch_user(int(uid))
+                    await user.send(dm_msg)
+                except Exception as e:
+                    print(f"  ⚠ rph_watcher: could not DM user {uid}: {e}")
+
+
+@tree.command(name="watch-rph-event", description="Get DMs when a spot opens at a full RPH event")
+@app_commands.describe(
+    event_id="RPH event ID (from the event URL)",
+    end_date="Stop watching after this date (YYYY-MM-DD)",
+)
+async def watch_rph_event(
+    interaction: discord.Interaction,
+    event_id: int,
+    end_date: str,
+):
+    await interaction.response.defer(ephemeral=True)
+    loop = asyncio.get_running_loop()
+
+    # Validate end_date format
+    try:
+        date.fromisoformat(end_date)
+    except ValueError:
+        await interaction.followup.send("❌ Invalid end_date — use YYYY-MM-DD format.", ephemeral=True)
+        return
+
+    # Load current state for this watch key
+    try:
+        state = await loop.run_in_executor(None, load_bot_state)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Could not load bot state: {e}", ephemeral=True)
+        return
+
+    key       = _watch_key(event_id)
+    uid       = str(interaction.user.id)
+    watch     = json.loads(state[key]) if key in state else {}
+    subs      = watch.get('subscribers', [])
+
+    if uid in subs:
+        await interaction.followup.send(
+            f"ℹ️ You're already watching **{watch.get('name', f'Event {event_id}')}**.",
+            ephemeral=True
+        )
+        return
+
+    # Fetch event to validate the ID and get a name if not provided
+    status = await loop.run_in_executor(None, fetch_event_status, event_id)
+    if status is None:
+        await interaction.followup.send(
+            f"❌ Could not find RPH event `{event_id}`. Double-check the ID.",
+            ephemeral=True
+        )
+        return
+
+    event_name = status['name']
+    subs.append(uid)
+    watch = {
+        'name':       event_name,
+        'end_date':   end_date,
+        'subscribers': subs,
+    }
+
+    try:
+        await loop.run_in_executor(None, set_bot_state_key, key, json.dumps(watch))
+    except Exception as e:
+        await interaction.followup.send(f"❌ Could not save watch: {e}", ephemeral=True)
+        return
+
+    cap_str = (f"{status['registered']}/{status['capacity']}"
+               if status['capacity'] else f"{status['registered']} registered")
+    avail_str = "✅ Spots are open right now!" if status['available'] else f"🔴 Currently full ({cap_str})"
+
+    await interaction.followup.send(
+        f"✅ Watching **{event_name}** (id={event_id}) until {end_date}.\n"
+        f"{avail_str}\n"
+        f"I'll DM you every 15 min while spots are open.",
+        ephemeral=True
+    )
+
+
+@tree.command(name="unwatch-rph-event", description="Stop watching an RPH event for open spots")
+@app_commands.describe(event_id="RPH event ID to stop watching")
+async def unwatch_rph_event(interaction: discord.Interaction, event_id: int):
+    await interaction.response.defer(ephemeral=True)
+    loop = asyncio.get_running_loop()
+
+    try:
+        state = await loop.run_in_executor(None, load_bot_state)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Could not load bot state: {e}", ephemeral=True)
+        return
+
+    key = _watch_key(event_id)
+    if key not in state:
+        await interaction.followup.send(f"ℹ️ No active watch found for event `{event_id}`.", ephemeral=True)
+        return
+
+    watch = json.loads(state[key])
+    uid   = str(interaction.user.id)
+    subs  = watch.get('subscribers', [])
+
+    if uid not in subs:
+        await interaction.followup.send(
+            f"ℹ️ You're not subscribed to **{watch.get('name', f'Event {event_id}')}**.",
+            ephemeral=True
+        )
+        return
+
+    subs.remove(uid)
+
+    if subs:
+        watch['subscribers'] = subs
+        await loop.run_in_executor(None, set_bot_state_key, key, json.dumps(watch))
+    else:
+        # Last subscriber — remove the whole key
+        await loop.run_in_executor(None, delete_bot_state_key, key)
+
+    await interaction.followup.send(
+        f"✅ Stopped watching **{watch.get('name', f'Event {event_id}')}**.",
+        ephemeral=True
+    )
+
+
+@tree.command(name="list-watches", description="Show all currently watched RPH events")
+async def list_watches(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    loop = asyncio.get_running_loop()
+
+    try:
+        state = await loop.run_in_executor(None, load_bot_state)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Could not load bot state: {e}", ephemeral=True)
+        return
+
+    watches = _load_watches(state)
+    uid     = str(interaction.user.id)
+
+    if not watches:
+        await interaction.followup.send("ℹ️ No events are currently being watched.", ephemeral=True)
+        return
+
+    lines = []
+    for key, watch in watches.items():
+        event_id   = key.removeprefix(_RPH_WATCH_KEY_PREFIX)
+        subs       = watch.get('subscribers', [])
+        you        = " *(you're subscribed)*" if uid in subs else ""
+        lines.append(
+            f"• **{watch.get('name', f'Event {event_id}')}** (id={event_id}) "
+            f"— until {watch.get('end_date', '?')} "
+            f"— {len(subs)} subscriber(s){you}"
+        )
+
+    await interaction.followup.send(
+        "👁️ **Active RPH event watches:**\n" + "\n".join(lines),
+        ephemeral=True
+    )
+
+
 @bot.event
 async def on_ready():
     global _where_to_play_msg_ids
@@ -419,6 +659,9 @@ async def on_ready():
     if not set_champs_daily.is_running():
         set_champs_daily.start()
         print(f"  ♻ Set Champs daily task started (fires 7AM ET, {SET_CHAMPS_START_DATE} → {SET_CHAMPS_END_DATE})")
+    if not rph_watcher.is_running():
+        rph_watcher.start()
+        print(f"  ♻ RPH event watcher started (polls every 15 min)")
 
     # Auto-recheck any unprocessed results threads from the last 3 days.
     # Catches threads that were mid-flight when the bot last crashed or restarted.

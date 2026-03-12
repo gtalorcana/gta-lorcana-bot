@@ -758,7 +758,50 @@ def analyse_stores(reference_date: date = None) -> dict:
     return analysis
 
 
-def get_expected_stores_for_date(target_date: date, store_analysis: dict = None) -> list:
+def fetch_event_status(event_id: int) -> dict | None:
+    """
+    Fetch live status for a single RPH event by ID.
+    Returns a dict with availability info, or None on failure.
+
+    Does NOT filter by country/player_count — works for future events too.
+
+    Returns:
+        {
+            'event_id':    int,
+            'name':        str,
+            'registered':  int,
+            'capacity':    int,
+            'available':   bool,   # registered < capacity AND queue_status == ACCEPTING_SIGNUPS
+            'queue_status': str,
+            'start_date':  str,    # e.g. "2026-03-29"
+            'url':         str,
+        }
+    """
+    try:
+        pages = list(_rph_api.fetch_event_by_id(event_id))
+        results = [e for page in pages for e in page]
+        if not results:
+            return None
+        event = results[0]
+        registered = event.get('registered_user_count', 0)
+        capacity   = event.get('capacity', 0)
+        queue      = event.get('queue_status', '')
+        start_raw  = event.get('start_datetime', '')
+        start_date = start_raw[:10] if start_raw else ''
+        available  = (capacity == 0 or registered < capacity) and queue == 'ACCEPTING_SIGNUPS'
+        return {
+            'event_id':    event_id,
+            'name':        event.get('name', f'Event {event_id}'),
+            'registered':  registered,
+            'capacity':    capacity,
+            'available':   available,
+            'queue_status': queue,
+            'start_date':  start_date,
+            'url':         f"https://tcg.ravensburgerplay.com/events/{event_id}",
+        }
+    except Exception as e:
+        print(f"  ⚠ fetch_event_status({event_id}): {e}")
+        return None
     """
     Return Regular event types expected to run on target_date based on their day.
 
