@@ -484,7 +484,7 @@ def _load_overrides() -> list:
         return []
 
 
-def _apply_overrides(analysis: dict, overrides: list) -> dict:
+def _apply_overrides(analysis: dict, overrides: list, event_map: dict = None) -> dict:
     """
     Apply manual overrides to a store analysis dict.
 
@@ -494,14 +494,25 @@ def _apply_overrides(analysis: dict, overrides: list) -> dict:
       - override_status 'Add': injects a brand new entry using override_day/override_time
         (no match key needed — store_id, store_name, format, override_day, override_time, reason required)
 
+    event_map is optional — if provided, city is looked up from RPH data for Add overrides
+    whose store appears in the season data (e.g. stores with bad RPH event data).
+
     Returns a new analysis dict with overrides applied.
     """
     if not overrides:
         return analysis
 
+    # Build store_id → city lookup from event_map for Add override city population
+    store_city: dict[str, str] = {}
+    if event_map:
+        for (store_id, *_), info in event_map.items():
+            city = _parse_city(info.get('full_address', ''))
+            if city:
+                store_city[str(store_id)] = city
+
     # Separate Add overrides from match-based overrides
-    add_overrides    = [o for o in overrides if o['override_status'] == 'Add']
-    match_overrides  = {
+    add_overrides   = [o for o in overrides if o['override_status'] == 'Add']
+    match_overrides = {
         (o['store_id'], o['day'], o['time'], o['format']): o
         for o in overrides if o['override_status'] != 'Add'
     }
@@ -547,7 +558,7 @@ def _apply_overrides(analysis: dict, overrides: list) -> dict:
         entry = {
             'store_id':   ov['store_id'],
             'store_name': ov['store_name'],
-            'city':       '',  # manually added — no RPH address available
+            'city':       store_city.get(str(ov['store_id']), ''),
             'status':     'Regular',
             'day':        ov['override_day'],
             'time':       ov['override_time'],
@@ -740,7 +751,7 @@ def analyse_stores(reference_date: date = None) -> dict:
     save_debug_sheet(event_map, raw_analysis, reference_date)  # raw — before overrides
 
     overrides = _load_overrides()
-    analysis  = _apply_overrides(raw_analysis, overrides)
+    analysis  = _apply_overrides(raw_analysis, overrides, event_map)
 
     save_store_analysis(analysis)  # final — after overrides
     print(f"  ✓ {len(analysis['regular'])} regular, {len(analysis['semi_regular'])} semi-regular event type(s)")
