@@ -6,24 +6,26 @@ Discord bot for the Greater Toronto Area Lorcana community.
 - Auto-syncs `#announcements` posts to the community website via Cloudflare Worker
 - Classifies Ontario stores by how regularly they run events and posts a weekly `#where-to-play` digest
 - Posts daily who's-going polls in `#whos-going` for stores expected to run that day
+- DMs subscribers when a spot opens at a full RPH event
 
 ---
 
 ## Project Structure
 
 ```
-bot.py                              # Main bot — events, slash commands, scheduled tasks
-results.py                          # Results reporting — processes RPH URLs, writes league standings
-stores.py                           # Store classification — RPH analysis, who's-going logic, set champs refresh
-constants.py                        # All config — IDs, channel names, env var defaults
+bot.py                                      # Main bot — events, slash commands, scheduled tasks
+results.py                                  # Results reporting — processes RPH URLs, writes league standings
+stores.py                                   # Store classification — RPH analysis, who's-going logic, set champs refresh
+clients.py                                  # Shared API singletons (GoogleSheetsApi, RphApi) — instantiated once to avoid OOM
+constants.py                                # All config — IDs, channel names, env var defaults
 util/
-  google_sheets_api_utils.py        # Google Sheets API wrapper (singleton)
-  rph_api_utils.py                  # RPH API wrapper with pagination + retry
+  google_sheets_api_utils.py               # Google Sheets API wrapper (singleton)
+  rph_api_utils.py                         # RPH API wrapper with pagination + retry
 scripts/
-  bootstrap_where_to_play.py        # One-time season-start script — seeds store classifications
-  rph_get_set_championship_events.py  # Manual run script — inspect/write set champs events
-  sync_commands.py                  # Syncs slash commands to guild (runs as Fly.io release_command)
-  clear_global_commands.py          # One-time script — clears legacy global Discord commands
+  sync_commands.py                         # Syncs slash commands to guild (runs as Fly.io release_command)
+  clear_global_commands.py                 # One-time script — clears legacy global Discord commands
+  rph_get_set_championship_events.py       # Manual run script — inspect/write set champs events
+  test_debug_sheet.py                      # Local test script — runs analyse_stores() against a test spreadsheet
 ```
 
 ---
@@ -35,6 +37,9 @@ scripts/
 | `/schedule` | Everyone | Upcoming events from the website |
 | `/decklist` | Everyone | Submit a decklist to `#decklists` |
 | `/rank` | Everyone | Self-assign Casual / Competitive / Judge role |
+| `/watch-rph-event` | Everyone | Subscribe to DM alerts when a spot opens at a full RPH event |
+| `/unwatch-rph-event` | Everyone | Unsubscribe from a watched event |
+| `/list-watches` | Everyone | Show all currently watched events and subscriber counts |
 | `/results` | Manage Events | Post tournament results to `#results` and sync to website |
 | `/welcome @member` | Manage Guild | Manually welcome a member in `#general` |
 | `/recheck` | Manage Guild | Reprocess any unhandled threads in `#results-reporting` |
@@ -51,7 +56,29 @@ scripts/
 | `whos_going_daily` | Daily at 7 AM ET | Posts a who's-going poll per Regular store expected today |
 | `where_to_play_weekly` | Sundays at 11 PM ET | Edits (or posts) the 3 `#where-to-play` messages |
 | `set_champs_daily` | Daily at 7 AM ET, 2 weeks before `SET_CHAMPS_START_DATE` through `SET_CHAMPS_END_DATE` | Refreshes the Set Champs sheet from RPH |
+| `rph_watcher` | Every 15 min | Checks watched events for open spots and DMs subscribers |
 | `keepalive` | Every 30 min | Heartbeat log |
+
+---
+
+## RPH Event Watcher
+
+Users can subscribe to DM alerts for any RPH event that is full or filling up.
+
+**Commands:**
+- `/watch-rph-event event_id:413990 end_date:2026-03-29` — subscribe; bot confirms current registration status immediately
+- `/unwatch-rph-event event_id:413990` — unsubscribe (other subscribers unaffected)
+- `/list-watches` — see all active watches on the server
+
+**How it works:**
+Every 15 minutes, `rph_watcher` fetches each watched event from RPH and DMs all subscribers if `registered_user_count < capacity` and `queue_status == ACCEPTING_SIGNUPS`. Watches expire automatically after `end_date`.
+
+**Finding the event ID:** it's the number at the end of the RPH event URL:
+`https://tcg.ravensburgerplay.com/events/`**`413990`**
+
+**Bot State:** each watch is stored as `rph_watch:<event_id>` → `{"name": "...", "end_date": "YYYY-MM-DD", "subscribers": [user_id, ...]}`.
+
+> To restrict these commands to specific roles, use Discord's server settings: **Server Settings → Integrations → GTA Lorcana Bot** — no code changes needed.
 
 ---
 
@@ -83,7 +110,7 @@ Every Sunday, `analyse_stores()` in `stores.py`:
 2. Groups events by `(store_id, day_of_week, floored_hour, format)` — events within the same clock hour are merged to handle organizers adjusting start times slightly week to week
 3. Classifies each group based on streak
 4. Applies manual overrides from the `Overrides` sheet tab
-5. Saves results to `Store Classifications` and `Store Debug`
+5. Saves results to `Store Classifications` (post-override) and `Store Debug` (pre-override, raw RPH data)
 
 **Classification rules:**
 
@@ -96,6 +123,8 @@ Every Sunday, `analyse_stores()` in `stores.py`:
 **Reference date:** Streaks are always evaluated against the last *completed* week, not the current in-progress one. This prevents a store from being demoted mid-week just because this week's event hasn't happened yet.
 
 **Display time:** The most common raw start time across all events in the group. A `~` prefix is added when times vary (e.g. `~6:30 PM`). On a tie, the earliest time is shown — better to arrive early.
+
+**City parsing:** City is extracted from the RPH `full_address` field by anchoring on the 2-letter province code (e.g. `ON`, `QC`) and taking the token immediately before it. Handles edge cases like missing commas before postal codes, lowercase city names, and multi-word cities (e.g. `Old Toronto`, `Greater Sudbury`).
 
 ---
 
@@ -119,7 +148,7 @@ store_id | store_name | day | time | format | override_status | override_day | o
 
 Match-based overrides (`Regular`, `Semi-Regular`, `Exclude`) match on exact `(store_id, day, time, format)`. These must match what's in the `Store Classifications` tab exactly.
 
-`Add` overrides don't need a match — the `day` and `time` columns can be left blank.
+`Add` overrides don't need a match — the `day` and `time` columns can be left blank. City is automatically looked up from the RPH event data if the store appears anywhere in the season.
 
 **Examples:**
 
@@ -139,11 +168,13 @@ Manually add a store missing from RPH entirely:
 
 1. Organizer creates a thread in `#results-reporting` with an RPH event URL as the first message
 2. Bot validates the URL format, fetches event data and standings from RPH
-3. Writes event rows and standings to the League Sheet
+3. Writes standings rows first, then the event row — so if a crash occurs mid-write, the missing event row signals a safe retry rather than a false duplicate
 4. On validation error: posts feedback and waits for the organizer to edit — `on_message_edit` re-triggers automatically
 5. On API error: schedules auto-retries (up to `RPH_RETRY_ATTEMPTS`, spaced `RPH_RETRY_DELAY` seconds apart)
 6. If all retries fail: pings `ADMIN_USER_ID` in the thread
 7. Deleting a thread removes its event data from the sheet via `on_thread_delete`
+
+**Duplicate vs retry detection:** same URL + same thread = retry (allowed, overwrites). Same URL + different thread = true duplicate (rejected).
 
 ---
 
@@ -152,15 +183,15 @@ Manually add a store missing from RPH entirely:
 | Spreadsheet | Purpose |
 |------------|---------|
 | League Sheet | Standings and events — written by the bot on each results submission |
-| Store Sheet | Store classifications, raw event data, overrides, bot state |
+| Store Sheet | Store classifications, debug data, overrides, bot state |
 | Set Champs Sheet | Set Championship events — written daily by `set_champs_daily` during the window |
 
 **Store Sheet tabs:**
 
 | Tab | Columns | Written by |
 |-----|---------|------------|
-| `Store Classifications` | store_id, store_name, status, streak, event_count, day, time, format, override | `analyse_stores()` every Sunday + `/wheretoplay` |
-| `Store Debug` | store_name, day, floored_time, format, status, streak, event_count, last_seen, week of \<date\> ×4, urls | `analyse_stores()` every run — replaces Bootstrap Raw Data |
+| `Store Classifications` | store_id, store_name, city, status, day, time, format, override | `analyse_stores()` every Sunday + `/wheretoplay` — post-override |
+| `Store Debug` | store_id, store_name, city, full_address, day, floored_time, format, status, streak, week of \<date\> ×4, event_ids | `analyse_stores()` every run — pre-override, raw RPH data |
 | `Overrides` | store_id, store_name, day, time, format, override_status, override_day, override_time, reason | Manual — never touched by bot |
 | `Bot State` | key, value | Bot — see below |
 
@@ -169,7 +200,8 @@ Manually add a store missing from RPH entirely:
 | Key | Value | Purpose |
 |-----|-------|---------|
 | `wtp_msg_0` / `wtp_msg_1` / `wtp_msg_2` | Discord message ID | Persists `#where-to-play` message IDs across restarts so the bot edits in-place rather than reposting |
-| `recheck:<thread_id>` | `1` | Crash-loop guard — set before a startup recheck attempt, cleared on success. If the bot crashes mid-processing and restarts, this key prevents the same thread from being retried indefinitely (see below) |
+| `recheck:<thread_id>` | `1` | Crash-loop guard — set before a startup recheck attempt, cleared on success |
+| `rph_watch:<event_id>` | JSON `{name, end_date, subscribers: [user_id, ...]}` | Active event spot watchers — one key per watched event |
 
 > **Tech debt:** Bot State in Google Sheets works fine for a single-server bot but won't scale to concurrent multi-server writes. When white-labelling, replace with a proper per-guild database (Postgres, SQLite, or Redis).
 
@@ -187,8 +219,6 @@ To prevent a bad thread from causing an infinite crash loop, the bot tracks each
 4. If processing completes successfully, the key is cleared
 
 This means a bad thread will be attempted exactly once on startup. After that it requires manual intervention via `/recheck` or by deleting and resubmitting the thread.
-
-**Duplicate vs retry detection** (`process_event_data`): if the same RPH URL is submitted from the same thread (retry), it's allowed to overwrite. If it comes from a different thread, it's rejected as a true duplicate.
 
 ---
 
@@ -255,6 +285,12 @@ python bot.py
 
 Use `/testwhosgoing` and `/wheretoplay` in Discord to trigger tasks manually without waiting for the schedule.
 
+To test store debug sheet writes against a copy of the spreadsheet without touching production:
+```bash
+python scripts/test_debug_sheet.py
+```
+Set `TEST_STORE_SPREADSHEET_ID` in the script to a spreadsheet ID with a blank `Store Debug` tab.
+
 ---
 
 ## Optional Environment Variables
@@ -277,10 +313,4 @@ Use `/testwhosgoing` and `/wheretoplay` in Discord to trigger tasks manually wit
 
 1. Update `SEASON_START_DATE`, `SEASON_END_DATE`, `CURRENT_SEASON`, `SET_CHAMPS_START_DATE`, and `SET_CHAMPS_END_DATE` in `constants.py`
 2. Create new `S## Standings - User Reported`, `S## Events - User Reported`, and `S## Set Champs` tabs in the relevant sheets
-3. Run the bootstrap script to seed store classifications:
-   ```bash
-   python scripts/bootstrap_where_to_play.py
-   ```
-4. Deploy: `fly deploy`
-
-> **Do not re-run the bootstrap mid-season** — it overwrites the current classifications.
+3. Deploy: `fly deploy`
