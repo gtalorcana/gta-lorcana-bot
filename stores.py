@@ -758,6 +758,36 @@ def analyse_stores(reference_date: date = None) -> dict:
     return analysis
 
 
+def get_expected_stores_for_date(target_date: date, store_analysis: dict = None) -> list:
+    """
+    Return Regular event types expected to run on target_date based on their day.
+
+    Loads from the Google Sheet if store_analysis is not provided.
+    Falls back to a fresh RPH analysis if the sheet is empty.
+
+    Args:
+        target_date:    The date to check (typically today).
+        store_analysis: Pre-loaded result of analyse_stores() or load_store_analysis().
+
+    Returns:
+        List of Regular event type dicts whose day matches target_date's weekday name.
+    """
+    if store_analysis is None:
+        store_analysis = load_store_analysis()
+    if store_analysis is None:
+        print(f"  ⚠ No store classifications found — running fresh analysis")
+        store_analysis = analyse_stores(reference_date=target_date)
+
+    target_day_name = _DAY_NAMES[target_date.weekday()]
+    expected = [
+        e for e in store_analysis['regular']
+        if e['day'] == target_day_name
+    ]
+
+    print(f"  ✓ {len(expected)} event type(s) expected on {target_day_name} ({target_date})")
+    return expected
+
+
 def fetch_event_status(event_id: int) -> dict | None:
     """
     Fetch live status for a single RPH event by ID.
