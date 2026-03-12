@@ -29,6 +29,7 @@ Times:
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
+import re
 
 from clients import gs as _gs, rph_api as _rph_api
 from constants import (
@@ -37,7 +38,6 @@ from constants import (
     STORE_SPREADSHEET_ID,
     STORE_CLASSIFICATIONS_RANGE_NAME,
     STORE_OVERRIDES_RANGE_NAME,
-    STORE_RAW_DATA_RANGE_NAME,
     BOT_STATE_RANGE_NAME,
     WHOS_GOING_MIN_CONSECUTIVE_WEEKS,
     SET_CHAMPS_START_DT,
@@ -207,21 +207,67 @@ def _display_time(raw_times: list) -> str:
 
 def _parse_city(full_address: str) -> str:
     """
-    Extract city from a full_address string.
+    Extract city from an RPH full_address string by anchoring on the
+    2-letter province code (ON, QC, etc.) and taking the token before it.
 
-    RPH address format: "<street>[, <unit>], <city>, <province>, <postal>, CA"
-    City is always 3rd from the end (before province, postal+CA).
+    Handles edge cases seen in real RPH data:
+      - "Canada" vs "CA" as country
+      - No comma before postal code (e.g. "ON L6H 4L3")
+      - Lowercase city names (e.g. "ottawa") — normalised with .title()
+      - Extra unit/suite tokens before the city
+      - Unusual street prefixes
 
     Examples:
-      "55 Saint Clair Street, Chatham, ON, N7L 3H8, CA"        → "Chatham"
-      "1700 Dundas Street, Unit 7, London, ON, N5W 3C9, CA"    → "London"
+      "55 Saint Clair Street, Chatham, ON, N7L 3H8, CA"           → "Chatham"
+      "1700 Dundas Street, Unit 7, London, ON, N5W 3C9, CA"       → "London"
+      "607 Somerset St W, Ottawa, ON K1R 6C6, Canada"             → "Ottawa"
+      "1615 Orléans Boulevard, 108, ottawa, ON, K1C7E2, CA"       → "Ottawa"
+      "1398 Danforth Avenue, Old Toronto, ON, M4J 1M9, CA"        → "Old Toronto"
     """
     if not full_address:
         return ''
-    parts = [p.strip() for p in full_address.split(',')]
-    if len(parts) >= 4:
-        return parts[-3]
+    # Normalise "Canada" → "CA" so the split is consistent
+    normalised = full_address.replace(', Canada', ', CA').replace(',Canada', ', CA')
+    parts = [p.strip() for p in normalised.split(',')]
+    for i, part in enumerate(parts):
+        if re.match(r'^[A-Z]{2}(\s|$)', part) and i > 0:
+            # Province found — city is the token immediately before it
+            return parts[i - 1].title()
     return ''
+    """
+    Compute streak metrics for an event type given its week-start dates.
+
+    Args:
+        week_starts:    Set of Monday dates on which this event type ran.
+        reference_date: Evaluate streaks as of this date (typically today).
+
+    Returns:
+        (current_streak, current_miss_streak) where:
+          current_streak      — consecutive weeks WITH events ending at reference_date
+          current_miss_streak — consecutive weeks WITHOUT events ending at reference_date
+    """
+    if not week_starts:
+        return 0, 0
+
+    ref_week = _get_week_start(reference_date)
+    min_week = min(week_starts)
+
+    current_streak = 0
+    check = ref_week
+    while check in week_starts:
+        current_streak += 1
+        check -= timedelta(weeks=1)
+
+    current_miss_streak = 0
+    check = ref_week
+    while check not in week_starts and check >= min_week:
+        current_miss_streak += 1
+        check -= timedelta(weeks=1)
+
+    return current_streak, current_miss_streak
+
+
+def _compute_streaks(week_starts: set, reference_date: date) -> tuple[int, int]:
     """
     Compute streak metrics for an event type given its week-start dates.
 
@@ -528,30 +574,6 @@ def _apply_overrides(analysis: dict, overrides: list) -> dict:
 
 # ── Raw event map persistence ─────────────────────────────────────────────────
 
-_RAW_DATA_HEADER = ['store_id', 'store_name', 'day', 'floored_time', 'format', 'week_starts', 'raw_times']
-
-def save_raw_event_map(event_map: dict) -> None:
-    """
-    Write raw event map data to the Bootstrap Raw Data tab for debugging.
-    Called by analyse_stores() on every run (bootstrap and Sunday weekly).
-    """
-    try:
-        raw_rows = [_RAW_DATA_HEADER]
-        for (store_id, day, floored_time, fmt), info in sorted(event_map.items(), key=lambda x: x[1]['store_name']):
-            raw_rows.append([
-                store_id,
-                info['store_name'],
-                day,
-                floored_time,
-                fmt,
-                ", ".join(sorted(str(w) for w in info['week_starts'])),
-                ", ".join(info['raw_times']),
-            ])
-        _gs.update_values(STORE_SPREADSHEET_ID, STORE_RAW_DATA_RANGE_NAME, "USER_ENTERED", raw_rows)
-        print(f"  ✓ Bootstrap Raw Data sheet updated ({len(raw_rows) - 1} rows)")
-    except Exception as e:
-        print(f"  ⚠ Could not save raw event map: {e}")
-
 
 def save_debug_sheet(event_map: dict, analysis: dict, reference_date: date) -> None:
     """
@@ -715,7 +737,6 @@ def analyse_stores(reference_date: date = None) -> dict:
     event_map      = _build_event_type_map(events)
     raw_analysis   = _classify_event_types(event_map, reference_date)
 
-    save_raw_event_map(event_map)
     save_debug_sheet(event_map, raw_analysis, reference_date)  # raw — before overrides
 
     overrides = _load_overrides()
