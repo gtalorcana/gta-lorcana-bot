@@ -614,10 +614,11 @@ async def list_watches(interaction: discord.Interaction):
         event_id   = key.removeprefix(_RPH_WATCH_KEY_PREFIX)
         subs       = watch.get('subscribers', [])
         you        = " *(you're subscribed)*" if uid in subs else ""
+        sub_str    = f"{len(subs)} subscriber" + ("s" if len(subs) != 1 else "")
         lines.append(
             f"• **{watch.get('name', f'Event {event_id}')}** (id={event_id}) "
             f"— until {watch.get('end_date', '?')} "
-            f"— {len(subs)} subscriber(s){you}"
+            f"— {sub_str}{you}"
         )
 
     await interaction.followup.send(

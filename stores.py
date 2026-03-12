@@ -690,11 +690,13 @@ def load_bot_state() -> dict:
 def save_bot_state(state: dict) -> None:
     """
     Write persistent bot state to the Bot State tab in STORE_SPREADSHEET_ID.
-    Overwrites all existing rows.
+    Clears the range first so deleted keys don't linger as stale rows.
     """
     try:
-        rows = [[k, v] for k, v in state.items()]
-        _gs.update_values(STORE_SPREADSHEET_ID, BOT_STATE_RANGE_NAME, "USER_ENTERED", rows)
+        _gs.clear_values(STORE_SPREADSHEET_ID, BOT_STATE_RANGE_NAME)
+        if state:
+            rows = [[k, v] for k, v in state.items()]
+            _gs.update_values(STORE_SPREADSHEET_ID, BOT_STATE_RANGE_NAME, "USER_ENTERED", rows)
     except Exception as e:
         print(f"  ⚠ Could not save bot state: {e}")
 

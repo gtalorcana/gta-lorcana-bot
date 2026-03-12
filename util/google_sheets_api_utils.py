@@ -125,6 +125,21 @@ class GoogleSheetsApi:
         except HttpError as error:
             raise
 
+    def clear_values(self, spreadsheet_id, range_name):
+        try:
+            result = (
+                self.service.spreadsheets()
+                .values()
+                .clear(
+                    spreadsheetId=spreadsheet_id,
+                    range=range_name,
+                )
+                .execute()
+            )
+            return result
+        except HttpError as error:
+            raise
+
     def update_values(self, spreadsheet_id, range_name, value_input_option, _values):
         try:
             body = {"values": _values}
