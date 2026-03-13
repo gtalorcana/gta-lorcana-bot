@@ -41,6 +41,7 @@ Environment variables (optional — override via .env for local dev):
 """
 
 import asyncio
+import gc
 import json
 import os
 import re
@@ -256,6 +257,7 @@ async def _post_whos_going_polls(target_date, interaction: discord.Interaction =
         expected_stores = await loop.run_in_executor(
             None, get_expected_stores_for_date, target_date, store_analysis
         )
+        gc.collect()  # TODO: remove when upgraded to 1GB RAM — analyse_stores holds a full season of RPH events
     except Exception as e:
         msg = f"Failed to fetch store analysis: {e}"
         print(f"  ✗ _post_whos_going_polls: {msg}")
@@ -329,6 +331,7 @@ async def where_to_play_weekly():
         print(f"  ✗ where_to_play_weekly: failed to fetch store analysis: {e}")
         return
 
+    gc.collect()  # TODO: remove when upgraded to 1GB RAM — analyse_stores holds a full season of RPH events
     messages = _build_where_to_play_messages(store_analysis, now_et.date())
 
     for guild in bot.guilds:
@@ -385,6 +388,7 @@ async def set_champs_daily():
     loop = asyncio.get_running_loop()
     try:
         count = await loop.run_in_executor(None, refresh_set_champs)
+        gc.collect()  # TODO: remove when upgraded to 1GB RAM — refresh_set_champs fetches a date range of RPH events
         print(f"  ✓ Set Champs sheet refreshed ({count} event(s))")
     except Exception as e:
         print(f"  ✗ set_champs_daily failed: {e}")
@@ -472,6 +476,8 @@ async def rph_watcher():
                     await user.send(dm_msg)
                 except Exception as e:
                     print(f"  ⚠ rph_watcher: could not DM user {uid}: {e}")
+
+        gc.collect()  # TODO: remove when upgraded to 1GB RAM — belt-and-suspenders after each RPH fetch
 
 
 @tree.command(name="watch-rph-event", description="Get DMs when a spot opens at a full RPH event")
@@ -1476,6 +1482,7 @@ async def wheretoplay_command(interaction: discord.Interaction):
     try:
         loop = asyncio.get_running_loop()
         store_analysis = await loop.run_in_executor(None, analyse_stores, date.today())
+        gc.collect()  # TODO: remove when upgraded to 1GB RAM — analyse_stores holds a full season of RPH events
 
         channel = get_channel(interaction.guild, WHERE_TO_PLAY_CHANNEL)
         if not channel:
