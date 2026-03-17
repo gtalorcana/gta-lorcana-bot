@@ -55,11 +55,16 @@ EVENTS_TIMESTAMP_RANGE_NAME = EVENTS_SHEET_NAME + "!" + "J1:K1"
 ANNOUNCEMENTS_CHANNEL     = os.getenv("ANNOUNCEMENTS_CHANNEL", "announcements")
 RESULTS_REPORTING_CHANNEL = os.getenv("RESULTS_REPORTING_CHANNEL", "results-reporting")
 RESULTS_REPORTING_CHANNEL_URL = "https://discord.com/channels/1253915141716578314/"
+## TODO: Update all the channels to use Channel ID instead.
 RESULTS_CHANNEL           = "results"
 DECKLISTS_CHANNEL         = "decklists"
 WELCOME_CHANNEL           = "general"
 WHERE_TO_PLAY_CHANNEL     = os.getenv("WHERE_TO_PLAY_CHANNEL", "where-to-play")
 WHOS_GOING_CHANNEL              = os.getenv("WHOS_GOING_CHANNEL", "whos-going")
+
+CHANNELS = {
+    "where_to_play": 1479988278164852746
+}
 
 # Who's-Going & Where-to-Play settings
 # Override via .env for local testing, e.g. WHOS_GOING_POST_HOUR_ET=9

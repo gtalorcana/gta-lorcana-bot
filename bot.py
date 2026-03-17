@@ -78,7 +78,7 @@ from constants import (
     SET_CHAMPS_START_DATE,
     SET_CHAMPS_END_DATE,
     SET_CHAMPS_SPREADSHEET_ID,
-    SET_CHAMPS_EVENTS_RANGE_NAME,
+    SET_CHAMPS_EVENTS_RANGE_NAME, CHANNELS,
 )
 
 # ── Bot setup ─────────────────────────────────────────────────
@@ -161,6 +161,11 @@ def make_embed(
 def get_channel(guild: discord.Guild, name: str):
     """Find a text channel by name."""
     return discord.utils.get(guild.text_channels, name=name)
+
+# TODO: replace get_channel with get_channel_by_id
+def get_channel_by_id(guild: discord.Guild, channel_id: int):
+    """Find a text channel by name."""
+    return guild.get_channel(channel_id)
 
 
 def _grouped_by_day(entries: list) -> str:
@@ -335,7 +340,7 @@ async def where_to_play_weekly():
     messages = _build_where_to_play_messages(store_analysis, now_et.date())
 
     for guild in bot.guilds:
-        wtp_ch = get_channel(guild, WHERE_TO_PLAY_CHANNEL)
+        wtp_ch = get_channel_by_id(guild, CHANNELS["where_to_play"])
         if not wtp_ch:
             print(f"  ⚠ where_to_play_weekly: #{WHERE_TO_PLAY_CHANNEL} not found in {guild.name}")
             continue
