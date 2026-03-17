@@ -23,6 +23,8 @@ import os
 import sys
 from zoneinfo import ZoneInfo
 
+from stores import _parse_city
+
 # Allow running from project root or scripts/
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -39,7 +41,7 @@ from constants import (
 _TZ_TORONTO = ZoneInfo("America/Toronto")
 
 # Set to True once you've verified the printed output looks correct
-WRITE_TO_SHEET = False
+WRITE_TO_SHEET = FALSE
 
 # Only include events whose name contains this string (case-insensitive).
 # Set to None to include all events and inspect names first.
@@ -61,7 +63,7 @@ def _format_event_row(event: dict) -> list:
     date_str     = dt_toronto.strftime('%Y-%m-%d')
     time_str     = dt_toronto.strftime('%I:%M %p').lstrip('0')
     store_name   = event['store']['name']
-    full_address = event['store'].get('full_address', '')
+    full_address = _parse_city(event['store'].get('full_address'))
     player_cap   = event.get('capacity', '')
     format_str   = event['gameplay_format']['name']
     rph_link     = RPH_EVENT_BASE_URL + str(event['id'])
@@ -120,7 +122,7 @@ if __name__ == '__main__':
     rows = [_format_event_row(e) for e in filtered]
     rows.sort(key=lambda r: (r[0], r[1]))  # sort by date then time
 
-    print(f"  {'#':<4} {'Date':<12} {'Time':<10} {'Cap':<5} {'Format':<22} {'Store':<35} {'RPH Link':<50} Address")
+    print(f"  {'#':<4} {'Date':<12} {'Time':<10} {'Cap':<5} {'Format':<22} {'Store':<35} {'RPH Link':<50} City")
     print(f"  {'-'*4} {'-'*12} {'-'*10} {'-'*5} {'-'*22} {'-'*35} {'-'*50} {'-'*40}")
     for i, row in enumerate(rows, 1):
         print(f"  {i:<4} {row[0]:<12} {row[1]:<10} {str(row[4]):<5} {row[5]:<22} {row[2]:<35} {row[6]:<50} {row[3]}")

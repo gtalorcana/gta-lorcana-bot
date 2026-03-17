@@ -71,7 +71,7 @@ CHANNELS = {
 WHOS_GOING_POST_HOUR_ET             = int(os.getenv("WHOS_GOING_POST_HOUR_ET", 7))   # 7AM ET daily
 WHERE_TO_PLAY_POST_DAY        = 6   # Sunday (0=Mon … 6=Sun)
 WHERE_TO_PLAY_POST_HOUR_ET    = int(os.getenv("WHERE_TO_PLAY_POST_HOUR_ET", 23))  # 11PM ET Sunday
-WHOS_GOING_MIN_CONSECUTIVE_WEEKS    = 2   # weeks in a row to become Regular
+WHERE_TO_PLAY_MIN_CONSECUTIVE_WEEKS    = 2   # weeks in a row to become Regular
 
 # Roles members can self-assign via /rank
 SELF_ASSIGN_ROLES = ["Casual", "Competitive", "Judge"]

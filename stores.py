@@ -39,7 +39,7 @@ from constants import (
     STORE_CLASSIFICATIONS_RANGE_NAME,
     STORE_OVERRIDES_RANGE_NAME,
     BOT_STATE_RANGE_NAME,
-    WHOS_GOING_MIN_CONSECUTIVE_WEEKS,
+    WHERE_TO_PLAY_MIN_CONSECUTIVE_WEEKS,
     SET_CHAMPS_START_DT,
     SET_CHAMPS_END_DT,
     SET_CHAMPS_SPREADSHEET_ID,
@@ -340,7 +340,7 @@ def _classify_event_types(event_map: dict, reference_date: date) -> dict:
             'format':       info['format'],
         }
 
-        if current_streak >= WHOS_GOING_MIN_CONSECUTIVE_WEEKS:
+        if current_streak >= WHERE_TO_PLAY_MIN_CONSECUTIVE_WEEKS:
             entry['status'] = 'Regular'
             regular.append(entry)
         elif ran_recently and event_count >= 2:
@@ -909,7 +909,7 @@ def refresh_set_champs() -> int:
             dt_toronto.strftime('%Y-%m-%d'),
             dt_toronto.strftime('%I:%M %p').lstrip('0'),
             e['store']['name'],
-            e['store'].get('full_address', ''),
+            _parse_city(['store'].get('full_address', '')),
             e.get('capacity', ''),
             e['gameplay_format']['name'],
             e.get('name', ''),
