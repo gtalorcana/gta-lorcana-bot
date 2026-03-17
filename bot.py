@@ -10,7 +10,7 @@ Features:
   - /welcome         — manually welcome a member (admins only)
   - /recheck         — reprocess missed results threads (admins only)
   - /watch-rph-event — subscribe to DM alerts when a spot opens at a full event
-  - /unwatch-rph-event — unsubscribe from a watched event
+  - /unwatch-rph-event — unsubscribe from a watched event:q
   - /list-watches    — see all currently watched events
   - /help            — list all commands
   - on_member_join   — auto-greets new members (currently disabled)
@@ -231,19 +231,19 @@ async def keepalive():
 _where_to_play_msg_ids: list[int | None] = [None, None, None]  # regular, semi-regular, info
 
 
-@tasks.loop(minutes=1)
-async def whos_going_daily():
-    """
-    Posts one #Whos-Going poll per Regular store expected to run today.
-    Fires once daily at WHOS_GOING_POST_HOUR_ET (ET).
-    Skips if no stores are expected today.
-    """
-    now_et = _now_et()
-    if now_et.hour != WHOS_GOING_POST_HOUR_ET or now_et.minute != 0:
-        return
-
-    print(f"  🗓 whos_going_daily: checking expected stores for {now_et.date()}...")
-    await _post_whos_going_polls(now_et.date())
+# @tasks.loop(minutes=1)
+# async def whos_going_daily():
+#     """
+#     Posts one #Whos-Going poll per Regular store expected to run today.
+#     Fires once daily at WHOS_GOING_POST_HOUR_ET (ET).
+#     Skips if no stores are expected today.
+#     """
+#     now_et = _now_et()
+#     if now_et.hour != WHOS_GOING_POST_HOUR_ET or now_et.minute != 0:
+#         return
+#
+#     print(f"  🗓 whos_going_daily: checking expected stores for {now_et.date()}...")
+#     await _post_whos_going_polls(now_et.date())
 
 
 async def _post_whos_going_polls(target_date, interaction: discord.Interaction = None):
@@ -657,9 +657,9 @@ async def on_ready():
     if not keepalive.is_running():
         keepalive.start()
         print(f"  ♻ Keepalive task started")
-    if not whos_going_daily.is_running():
-        whos_going_daily.start()
-        print(f"  ♻ Whos-going daily task started (fires at {WHOS_GOING_POST_HOUR_ET}AM ET)")
+    # if not whos_going_daily.is_running():
+    #     whos_going_daily.start()
+    #     print(f"  ♻ Whos-going daily task started (fires at {WHOS_GOING_POST_HOUR_ET}AM ET)")
     if not where_to_play_weekly.is_running():
         where_to_play_weekly.start()
         print(f"  ♻ Where-to-play weekly task started (fires Sundays at {WHERE_TO_PLAY_POST_HOUR_ET}:00 ET)")
