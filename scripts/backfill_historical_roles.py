@@ -187,7 +187,18 @@ async def _post_next():
             return
 
         else:
-            print(f"  [NONE] {player_name} — no confident match (best: {best_member.display_name if best_member else 'n/a'} {score:.0%}) — skipped")
+            embed = discord.Embed(
+                title=f"No Match — {role_name}",
+                description=(
+                    f"**RPH name:** {player_name}\n"
+                    f"**Seasons:** {seasons_str}\n"
+                    f"**Best guess:** {best_member.display_name if best_member else 'n/a'} ({score:.0%})\n\n"
+                    f"Assign manually in Discord roles, then re-run to skip."
+                ),
+                colour=discord.Colour.red()
+            )
+            await _mod_ch.send(embed=embed)
+            print(f"  [NONE] {player_name} — no confident match (best: {best_member.display_name if best_member else 'n/a'} {score:.0%})")
 
     if not _pending:
         print("\nAll done — closing.")
