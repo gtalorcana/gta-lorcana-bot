@@ -1438,6 +1438,8 @@ async def link_command(interaction: discord.Interaction, member: discord.Member,
     mapping = await loop.run_in_executor(None, get_player_mapping)
 
     for entry in mapping:
+        if not entry['discord_id']:
+            continue  # skip placeholder rows written by backfill (skipped/unmatched)
         if entry['playhub_id'] == playhub_id:
             await interaction.followup.send(
                 f"⚠️ Playhub ID `{playhub_id}` is already linked to <@{entry['discord_id']}>.",
