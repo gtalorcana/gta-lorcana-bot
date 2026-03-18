@@ -38,7 +38,6 @@ scripts/
 | Command | Who | Description |
 |---------|-----|-------------|
 | `/schedule` | Everyone | Upcoming events from the website |
-| `/rank` | Everyone | Self-assign Casual / Competitive / Judge role |
 | `/watch-rph-event` | Everyone | Subscribe to DM alerts when a spot opens at a full RPH event |
 | `/unwatch-rph-event` | Everyone | Unsubscribe from a watched event |
 | `/list-watches` | Everyone | Show all currently watched events and subscriber counts |
@@ -283,6 +282,8 @@ LEGENDARY_ROLE_ID
 ```
 
 Role IDs and `MOD_CHANNEL_ID` have hardcoded defaults in `constants.py` matching the production server — only need to be set as secrets if deploying to a different server.
+
+Admin commands are accessible to anyone with Manage Guild permission, or any Discord user ID listed in `ADMIN_USER_IDS` in `constants.py`.
 
 ### Deploy
 
