@@ -1521,23 +1521,18 @@ async def sync_roles(interaction: discord.Interaction):
         return
 
     applied = []
-    for member, roles_to_remove, new_role in changes:
+    for member, new_role in changes:
         try:
             await member.add_roles(new_role, reason="sync-roles")
-            for old_role in roles_to_remove:
-                await member.remove_roles(old_role, reason="sync-roles")
-            applied.append((member, roles_to_remove, new_role))
+            applied.append((member, new_role))
         except discord.HTTPException as e:
             print(f"  ⚠ sync-roles: failed to assign {new_role.name} to {member.display_name}: {e}")
 
     mod_ch = get_channel_by_id(interaction.guild, MOD_CHANNEL_ID)
     if mod_ch and applied:
-        lines = []
-        for member, old_roles, new_role in applied:
-            old_names = ", ".join(r.name for r in old_roles) if old_roles else "None"
-            lines.append(f"{member.mention}: {old_names} → **{new_role.name}**")
+        lines = [f"{member.mention}: +**{new_role.name}**" for member, new_role in applied]
         await mod_ch.send(embed=make_embed(
-            title=f"✦ Role Sync — {len(applied)} change(s)",
+            title=f"Role Sync — {len(applied)} change(s)",
             description="\n".join(lines),
             colour=discord.Colour.gold()
         ))

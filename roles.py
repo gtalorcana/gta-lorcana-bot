@@ -145,13 +145,15 @@ def get_unlinked_players(standing_rows: list[list]) -> list[tuple[str, str]]:
 
 def compute_role_assignments(guild, leaderboard_rows: list[list]) -> list[tuple]:
     """
-    For each player in the leaderboard, compute whether they've earned a higher
-    rarity role than they currently hold.
+    For each player in the leaderboard, independently check whether they've earned
+    Rare (top 32) and/or Uncommon (10+ events) and don't yet have those roles.
+
+    Roles are additive — assigning Rare does not remove Uncommon.
 
     Leaderboard row columns: rank(0) | player_name(1) | points(2) | events_played(3)
 
     Matches players to Discord members via display_name in the player mapping sheet.
-    Returns list of (member, roles_to_remove, new_role) — upgrades only, never downgrades.
+    Returns list of (member, new_role) for each missing role.
     """
     mapping = get_player_mapping()
     name_to_discord = {
@@ -183,27 +185,16 @@ def compute_role_assignments(guild, leaderboard_rows: list[list]) -> list[tuple]
         if not member:
             continue
 
-        if rank <= RARE_RANK_THRESHOLD:
-            earned_id = RARE_ROLE_ID
-        elif events_played >= UNCOMMON_EVENT_THRESHOLD:
-            earned_id = UNCOMMON_ROLE_ID
-        else:
-            earned_id = COMMON_ROLE_ID
+        current_role_ids = {r.id for r in member.roles if r.id in rarity_id_set}
 
-        earned_idx = RARITY_ROLE_IDS.index(earned_id)
+        if rank <= RARE_RANK_THRESHOLD and RARE_ROLE_ID not in current_role_ids:
+            role = guild.get_role(RARE_ROLE_ID)
+            if role:
+                changes.append((member, role))
 
-        current_rarity_roles = [r for r in member.roles if r.id in rarity_id_set]
-        current_max_idx = max(
-            (RARITY_ROLE_IDS.index(r.id) for r in current_rarity_roles),
-            default=-1
-        )
-
-        if earned_idx <= current_max_idx:
-            continue  # no upgrade needed
-
-        new_role        = guild.get_role(earned_id)
-        roles_to_remove = [r for r in current_rarity_roles if RARITY_ROLE_IDS.index(r.id) < earned_idx]
-        if new_role:
-            changes.append((member, roles_to_remove, new_role))
+        if events_played >= UNCOMMON_EVENT_THRESHOLD and UNCOMMON_ROLE_ID not in current_role_ids:
+            role = guild.get_role(UNCOMMON_ROLE_ID)
+            if role:
+                changes.append((member, role))
 
     return changes

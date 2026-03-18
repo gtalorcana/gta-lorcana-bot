@@ -87,18 +87,15 @@ def _load_leaderboard(spreadsheet_id: str, range_name: str, season: str) -> list
 def _build_queue() -> list[tuple]:
     """
     Read all season leaderboards, aggregate per player, return sorted queue.
-    Each entry: (player_name, earned_role_id, seasons_str)
-    Rare > Uncommon — only the highest earned role is included.
+    Each entry: (player_name, role_ids: set, seasons_str)
+    Roles are additive — a player can earn both Rare and Uncommon.
     """
-    # player_name -> {'best_role': role_id, 'seasons': []}
-    player_best: dict[str, dict] = {}
+    # player_name -> {'role_ids': set, 'seasons': list}
+    player_data: dict[str, dict] = {}
 
     def _update(player_name: str, role_id: int, season: str):
-        key = player_name.lower()
-        entry = player_best.setdefault(player_name, {'best_role_idx': -1, 'seasons': [], 'display_name': player_name})
-        idx = RARITY_ROLE_IDS.index(role_id)
-        if idx > entry['best_role_idx']:
-            entry['best_role_idx'] = idx
+        entry = player_data.setdefault(player_name, {'role_ids': set(), 'seasons': []})
+        entry['role_ids'].add(role_id)
         if season not in entry['seasons']:
             entry['seasons'].append(season)
 
@@ -110,52 +107,52 @@ def _build_queue() -> list[tuple]:
         for r in rows:
             if r['rank'] <= RARE_RANK_THRESHOLD:
                 _update(r['player_name'], RARE_ROLE_ID, r['season'])
-            elif r['events_played'] >= UNCOMMON_EVENT_THRESHOLD:
+            if r['events_played'] >= UNCOMMON_EVENT_THRESHOLD:  # not elif — additive
                 _update(r['player_name'], UNCOMMON_ROLE_ID, r['season'])
 
-    # Build sorted queue: Rare first, then Uncommon
-    queue = []
-    for display_name, entry in player_best.items():
-        if entry['best_role_idx'] < 0:
-            continue
-        role_id = RARITY_ROLE_IDS[entry['best_role_idx']]
-        seasons_str = ", ".join(sorted(entry['seasons']))
-        queue.append((display_name, role_id, seasons_str))
-
-    queue.sort(key=lambda x: RARITY_ROLE_IDS.index(x[1]), reverse=True)
+    queue = [
+        (name, entry['role_ids'], ", ".join(sorted(entry['seasons'])))
+        for name, entry in player_data.items()
+        if entry['role_ids']
+    ]
+    # Rare-only or Rare+Uncommon players first, then Uncommon-only
+    queue.sort(key=lambda x: max(RARITY_ROLE_IDS.index(r) for r in x[1]), reverse=True)
     return queue
 
 
+_ROLE_NAMES = {RARE_ROLE_ID: "Rare", UNCOMMON_ROLE_ID: "Uncommon"}
+
+
 async def _post_next():
-    """Post the next match suggestion, skipping members who already have the role."""
+    """Post the next match suggestion, skipping members who already have all earned roles."""
     while _queue:
-        player_name, role_id, seasons_str = _queue.pop(0)
-        role_name = {RARE_ROLE_ID: "Rare", UNCOMMON_ROLE_ID: "Uncommon"}.get(role_id, "Unknown")
+        player_name, role_ids, seasons_str = _queue.pop(0)
 
         available = [m for m in _members if m.id not in _matched_discord_ids]
         best_member, score = fuzzy_match_member(player_name, available)
 
-        # Skip if this member already has this role or higher
+        # Skip if best_member already has every role this player earned
         if best_member and score >= FUZZY_LOW_CONFIDENCE:
-            rarity_id_set = set(RARITY_ROLE_IDS)
-            current_max_idx = max(
-                (RARITY_ROLE_IDS.index(r.id) for r in best_member.roles if r.id in rarity_id_set),
-                default=-1
-            )
-            if current_max_idx >= RARITY_ROLE_IDS.index(role_id):
-                print(f"  [SKIP] {player_name} -> {best_member.display_name} already has {role_name} or higher")
+            already_has = {r.id for r in best_member.roles}
+            roles_needed = role_ids - already_has
+            if not roles_needed:
+                print(f"  [SKIP] {player_name} -> {best_member.display_name} already has all earned roles")
                 continue
+            role_ids = roles_needed  # only assign what's missing
 
+        role_names_str = " + ".join(_ROLE_NAMES.get(r, "?") for r in
+                                    sorted(role_ids, key=lambda r: RARITY_ROLE_IDS.index(r), reverse=True))
         remaining = len(_queue)
 
         if score >= FUZZY_HIGH_CONFIDENCE or score >= FUZZY_LOW_CONFIDENCE:
             high = score >= FUZZY_HIGH_CONFIDENCE
             embed = discord.Embed(
-                title=f"{'Suggested' if high else 'Low-Confidence'} Match — {role_name}",
+                title=f"{'Suggested' if high else 'Low-Confidence'} Match — {role_names_str}",
                 description=(
                     f"**RPH name:** {player_name}\n"
                     f"**Discord:** {best_member.mention} (`{best_member.display_name}`)\n"
                     f"**Confidence:** {score:.0%}\n"
+                    f"**Roles to assign:** {role_names_str}\n"
                     f"**Seasons:** {seasons_str}\n\n"
                     f"React to confirm or skip. ({remaining} remaining after this)"
                 ),
@@ -165,20 +162,21 @@ async def _post_next():
             await msg.add_reaction("✅")
             await msg.add_reaction("❌")
             _pending[msg.id] = {
-                'player_name': player_name,
-                'discord_id':  best_member.id,
+                'player_name':  player_name,
+                'discord_id':   best_member.id,
                 'discord_name': best_member.display_name,
-                'role_id':     role_id,
-                'role_name':   role_name,
+                'role_ids':     role_ids,
+                'role_names':   role_names_str,
             }
-            print(f"  [{'HIGH' if high else 'LOW '}] {player_name} -> {best_member.display_name} ({score:.0%}) — {role_name}  ({remaining} left)")
+            print(f"  [{'HIGH' if high else 'LOW '}] {player_name} -> {best_member.display_name} ({score:.0%}) — {role_names_str}  ({remaining} left)")
             return
 
         else:
             embed = discord.Embed(
-                title=f"No Match — {role_name}",
+                title=f"No Match — {role_names_str}",
                 description=(
                     f"**RPH name:** {player_name}\n"
+                    f"**Roles:** {role_names_str}\n"
                     f"**Seasons:** {seasons_str}\n"
                     f"**Best guess:** {best_member.display_name if best_member else 'n/a'} ({score:.0%})\n\n"
                     f"Assign manually in Discord roles, then re-run to skip."
@@ -210,13 +208,13 @@ async def on_ready():
     _members[:] = [m for m in guild.members if not m.bot]
     rarity_id_set = set(RARITY_ROLE_IDS)
 
-    # Seed already-matched IDs: members who already have Rare or higher
+    # Seed already-matched IDs: members who already have both Rare and Uncommon
+    # (per-player skip logic handles partial cases during the queue)
     _matched_discord_ids = {
         m.id for m in _members
-        if any(r.id in rarity_id_set and RARITY_ROLE_IDS.index(r.id) >= RARITY_ROLE_IDS.index(UNCOMMON_ROLE_ID)
-               for r in m.roles)
+        if RARE_ROLE_ID in {r.id for r in m.roles} and UNCOMMON_ROLE_ID in {r.id for r in m.roles}
     }
-    print(f"  {len(_members)} members loaded, {len(_matched_discord_ids)} already have Uncommon or higher")
+    print(f"  {len(_members)} members loaded, {len(_matched_discord_ids)} already have both Rare and Uncommon")
 
     print("\nLoading leaderboard data from all seasons...")
     queue = _build_queue()
@@ -243,17 +241,19 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
     if emoji == "✅":
         member = guild.get_member(suggestion['discord_id'])
-        role   = guild.get_role(suggestion['role_id'])
-        if member and role:
-            try:
-                await member.add_roles(role, reason="historical-backfill")
-                _matched_discord_ids.add(suggestion['discord_id'])
-                print(f"  Assigned {suggestion['role_name']} to {suggestion['discord_name']}")
-            except discord.HTTPException as e:
-                print(f"  Failed to assign role: {e}")
+        if member:
+            for role_id in suggestion['role_ids']:
+                role = guild.get_role(role_id)
+                if role:
+                    try:
+                        await member.add_roles(role, reason="historical-backfill")
+                    except discord.HTTPException as e:
+                        print(f"  Failed to assign {_ROLE_NAMES.get(role_id, role_id)}: {e}")
+            _matched_discord_ids.add(suggestion['discord_id'])
+            print(f"  Assigned {suggestion['role_names']} to {suggestion['discord_name']}")
 
         new_embed = discord.Embed(
-            title=f"Assigned — {suggestion['role_name']}",
+            title=f"Assigned — {suggestion['role_names']}",
             description=f"**{suggestion['player_name']}** -> <@{suggestion['discord_id']}>",
             colour=discord.Colour.green()
         )
