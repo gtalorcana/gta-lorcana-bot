@@ -149,28 +149,31 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             suggestion['display_name'],
             'fuzzy-confirmed',
         )
-        print(f"  ✅ Linked: {suggestion['display_name']} → {suggestion['discord_name']}")
-        if mod_ch:
-            await mod_ch.send(embed=discord.Embed(
-                title="✅ Link Confirmed",
-                description=(
-                    f"**{suggestion['display_name']}** (Playhub `{suggestion['playhub_id']}`)"
-                    f" → <@{suggestion['discord_id']}>"
-                ),
-                colour=discord.Colour.green()
-            ))
+        print(f"  Linked: {suggestion['display_name']} -> {suggestion['discord_name']}")
+        new_embed = discord.Embed(
+            title="✅ Linked",
+            description=(
+                f"**{suggestion['display_name']}** (Playhub `{suggestion['playhub_id']}`)"
+                f" → <@{suggestion['discord_id']}>"
+            ),
+            colour=discord.Colour.green()
+        )
     else:
-        print(f"  ❌ Skipped: {suggestion['display_name']}")
-        if mod_ch:
-            await mod_ch.send(embed=discord.Embed(
-                title="❌ Link Skipped",
-                description=(
-                    f"Skipped **{suggestion['display_name']}** "
-                    f"(Playhub `{suggestion['playhub_id']}`). "
-                    f"Use `/link` to resolve manually."
-                ),
-                colour=discord.Colour.red()
-            ))
+        print(f"  Skipped: {suggestion['display_name']}")
+        new_embed = discord.Embed(
+            title="❌ Skipped — use /link to resolve",
+            description=(
+                f"**{suggestion['display_name']}** (Playhub `{suggestion['playhub_id']}`)"
+            ),
+            colour=discord.Colour.greyple()
+        )
+
+    try:
+        msg = await mod_ch.fetch_message(payload.message_id)
+        await msg.edit(embed=new_embed)
+        await msg.clear_reactions()
+    except Exception:
+        pass
 
     if not _pending:
         print("\nAll suggestions resolved — closing.")

@@ -50,7 +50,7 @@ EVENTS_TIMESTAMP_RANGE_NAME = EVENTS_SHEET_NAME + "!" + "J1:K1"
 
 # Discord channel IDs
 RESULTS_REPORTING_CHANNEL_URL = "https://discord.com/channels/1253915141716578314/"
-MOD_CHANNEL_ID = int(os.getenv("MOD_CHANNEL_ID", 0))
+MOD_CHANNEL_ID = int(os.getenv("MOD_CHANNEL_ID", 1253935616178131036))
 CHANNELS = {
     "announcements": 1256090387978784778,
     "results_reporting": 1253943193519784028,
@@ -58,11 +58,11 @@ CHANNELS = {
 }
 
 # League rarity role IDs — set as env vars or Fly.io secrets
-COMMON_ROLE_ID     = int(os.getenv("COMMON_ROLE_ID",     0))
-UNCOMMON_ROLE_ID   = int(os.getenv("UNCOMMON_ROLE_ID",   0))
-RARE_ROLE_ID       = int(os.getenv("RARE_ROLE_ID",       0))
-SUPER_RARE_ROLE_ID = int(os.getenv("SUPER_RARE_ROLE_ID", 0))
-LEGENDARY_ROLE_ID  = int(os.getenv("LEGENDARY_ROLE_ID",  0))
+COMMON_ROLE_ID     = int(os.getenv("COMMON_ROLE_ID",     1347683977040891966))
+UNCOMMON_ROLE_ID   = int(os.getenv("UNCOMMON_ROLE_ID",   1347683778318827656))
+RARE_ROLE_ID       = int(os.getenv("RARE_ROLE_ID",       1347683773256568964))
+SUPER_RARE_ROLE_ID = int(os.getenv("SUPER_RARE_ROLE_ID", 1347683770815479819))
+LEGENDARY_ROLE_ID  = int(os.getenv("LEGENDARY_ROLE_ID",  1347683767367503953))
 
 # Player mapping sheet (STORE_SPREADSHEET_ID — internal, not the public league sheet)
 PLAYER_MAPPING_SHEET_NAME = "Playhub <-> Discord IDs"
