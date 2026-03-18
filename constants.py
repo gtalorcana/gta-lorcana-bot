@@ -10,6 +10,9 @@ WORKER_SECRET     = os.getenv("WORKER_SECRET")
 # League Variables
 # Discord user ID of the bot admin (pinged when all auto-retries fail)
 ADMIN_USER_ID = 904550642213875723
+
+# All accounts authorised to run admin/mod bot commands
+ADMIN_USER_IDS = {904550642213875723, 361716209324130305}
 CURRENT_SEASON = os.getenv("CURRENT_SEASON", "S11")
 SEASON_START_DATE   = "2026-02-13"
 SEASON_END_DATE     = "2026-04-24"
@@ -50,7 +53,7 @@ EVENTS_TIMESTAMP_RANGE_NAME = EVENTS_SHEET_NAME + "!" + "J1:K1"
 
 # Discord channel IDs
 RESULTS_REPORTING_CHANNEL_URL = "https://discord.com/channels/1253915141716578314/"
-MOD_CHANNEL_ID = int(os.getenv("MOD_CHANNEL_ID", 1253935616178131036))
+MOD_CHANNEL_ID = int(os.getenv("MOD_CHANNEL_ID", 1483753550960922717))
 CHANNELS = {
     "announcements": 1256090387978784778,
     "results_reporting": 1253943193519784028,

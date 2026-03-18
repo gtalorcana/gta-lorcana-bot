@@ -2,15 +2,17 @@
 GTA Lorcana — Discord Bot
 =========================
 Features:
-  - Auto-syncs #announcements to the website via Cloudflare Worker
   - /schedule        — shows upcoming events
-  - /rank            — self-assign a player role (Casual / Competitive / Judge)
-  - /recheck         — reprocess missed results threads (admins only)
   - /watch-rph-event — subscribe to DM alerts when a spot opens at a full event
   - /unwatch-rph-event — unsubscribe from a watched event
   - /list-watches    — see all currently watched events
   - /help            — list all commands
-  - on_member_join   — auto-greets new members (currently disabled)
+  - /recheck         — reprocess missed results threads (admins only)
+  - /link            — manually link a Discord member to a Playhub ID (admins only)
+  - /sync-roles      — apply Uncommon/Rare upgrades from standings (admins only)
+  - /assign-roles-from-invitational — assign Legendary/Super Rare (admins only)
+  - /wheretoplay     — manually push the where-to-play post (admins only)
+  - on_member_join   — auto-assigns Common rarity role to new members
   - where_to_play_weekly — refreshes #where-to-play every Sunday evening
 
 Requirements:
@@ -57,8 +59,8 @@ from constants import (
     RPH_RETRY_DELAY,
     RPH_RETRY_ATTEMPTS,
     ADMIN_USER_ID,
+    ADMIN_USER_IDS,
     UPCOMING_EVENTS_JSON_URL,
-    SELF_ASSIGN_ROLES,
     WHERE_TO_PLAY_POST_DAY,
     WHERE_TO_PLAY_POST_HOUR_ET,
     SET_CHAMPS_START_DATE,
@@ -168,6 +170,11 @@ def _ch(key: str) -> str:
     """Return '#channel-name' for a CHANNELS key, resolved live from Discord's cache."""
     ch = bot.get_channel(CHANNELS[key])
     return f"#{ch.name}" if ch else f"#{key.replace('_', '-')}"
+
+
+def _is_admin(interaction: discord.Interaction) -> bool:
+    """True if the user is in ADMIN_USER_IDS or has Manage Guild permission."""
+    return interaction.user.id in ADMIN_USER_IDS or interaction.user.guild_permissions.manage_guild
 
 
 def _grouped_by_day(entries: list) -> str:
@@ -1230,43 +1237,6 @@ async def schedule(interaction: discord.Interaction):
 
 
 
-# ── /rank ─────────────────────────────────────────────────────
-@tree.command(name="rank", description="Self-assign your player role")
-@app_commands.describe(role="Choose the role that best describes you")
-@app_commands.choices(role=[
-    app_commands.Choice(name="Casual — I play for fun", value="Casual"),
-    app_commands.Choice(name="Competitive — I play to win", value="Competitive"),
-    app_commands.Choice(name="Judge — I know the rules well", value="Judge"),
-])
-async def rank(interaction: discord.Interaction, role: app_commands.Choice[str]):
-    guild = interaction.guild
-    member = interaction.user
-
-    for role_name in SELF_ASSIGN_ROLES:
-        existing = discord.utils.get(guild.roles, name=role_name)
-        if existing and existing in member.roles:
-            await member.remove_roles(existing)
-
-    target_role = discord.utils.get(guild.roles, name=role.value)
-    if not target_role:
-        role_colours = {
-            "Casual": discord.Colour.green(),
-            "Competitive": discord.Colour.red(),
-            "Judge": discord.Colour.gold(),
-        }
-        target_role = await guild.create_role(
-            name=role.value,
-            colour=role_colours.get(role.value, discord.Colour.default()),
-            reason="GTA Lorcana self-assign"
-        )
-
-    await member.add_roles(target_role)
-    await interaction.response.send_message(
-        f"✦ You've been assigned the **{role.value}** role! Welcome to your rank, Illumineer. ✨",
-        ephemeral=True
-    )
-
-
 
 # ── /recheck ──────────────────────────────────────────────────
 
@@ -1373,7 +1343,7 @@ async def recheck(interaction: discord.Interaction, after: str = ""):
     """
     await interaction.response.defer(ephemeral=True)
 
-    if not interaction.user.guild_permissions.manage_guild:
+    if not _is_admin(interaction):
         await interaction.followup.send("⚠️ Admins only.", ephemeral=True)
         return
 
@@ -1429,7 +1399,7 @@ async def recheck(interaction: discord.Interaction, after: str = ""):
 @tree.command(name="link", description="Link a Discord member to their Playhub ID (mods only)")
 @app_commands.describe(member="Discord member", playhub_id="Ravensburger Playhub numeric ID")
 async def link_command(interaction: discord.Interaction, member: discord.Member, playhub_id: str):
-    if not interaction.user.guild_permissions.manage_guild:
+    if not _is_admin(interaction):
         await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
         return
 
@@ -1476,7 +1446,7 @@ async def link_command(interaction: discord.Interaction, member: discord.Member,
 # ── /sync-roles ────────────────────────────────────────────────
 @tree.command(name="sync-roles", description="Sync rarity roles for all linked players (mods only)")
 async def sync_roles(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.manage_guild:
+    if not _is_admin(interaction):
         await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
         return
 
@@ -1528,7 +1498,7 @@ async def sync_roles(interaction: discord.Interaction):
               description="Preview and assign Legendary/Super Rare from an invitational (mods only)")
 @app_commands.describe(event_url="RPH event URL or bare event ID")
 async def assign_roles_from_invitational(interaction: discord.Interaction, event_url: str):
-    if not interaction.user.guild_permissions.manage_guild:
+    if not _is_admin(interaction):
         await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
         return
 
@@ -1623,20 +1593,24 @@ async def assign_roles_from_invitational(interaction: discord.Interaction, event
 @tree.command(name="help", description="Show all GTA Lorcana bot commands")
 async def help_command(interaction: discord.Interaction):
     embed = make_embed(
-        title="✦ GTA Lorcana Bot — Commands",
-        description="Here's everything I can do:"
+        title="GTA Lorcana Bot — Commands",
+        description="**Everyone**"
     )
     embed.add_field(name="/schedule", value="Show upcoming events", inline=False)
-    embed.add_field(name="/rank", value="Self-assign Casual / Competitive / Judge role", inline=False)
-    embed.add_field(name="🔁 Auto-sync",
-                    value=f"Posts in `{_ch('announcements')}` appear on the website automatically", inline=False)
+    embed.add_field(name="/watch-rph-event", value="Subscribe to DM alerts when a spot opens at a full RPH event", inline=False)
+    embed.add_field(name="/unwatch-rph-event", value="Unsubscribe from a watched event", inline=False)
+    embed.add_field(name="/list-watches", value="Show all active event watches", inline=False)
     embed.add_field(name="🧵 Results Threads",
                     value=f"New threads in `{_ch('results_reporting')}` are processed automatically. Edit to retry on bad URL.",
                     inline=False)
+    embed.add_field(name="\u200b", value="**Admins only**", inline=False)
     embed.add_field(name="/recheck",
-                    value=f"Reprocess any missed threads in `{_ch('results_reporting')}` *(admins only)*",
+                    value=f"Reprocess any missed threads in `{_ch('results_reporting')}`",
                     inline=False)
-    embed.add_field(name="/wheretoplay", value="Manually push the Where to Play post *(admins only)*", inline=False)
+    embed.add_field(name="/link", value="Manually link a Discord member to a Playhub ID", inline=False)
+    embed.add_field(name="/sync-roles", value="Compute and apply Uncommon/Rare role upgrades from current standings", inline=False)
+    embed.add_field(name="/assign-roles-from-invitational", value="Assign Legendary/Super Rare from an invitational event", inline=False)
+    embed.add_field(name="/wheretoplay", value="Manually push the Where to Play post", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
@@ -1646,7 +1620,7 @@ async def help_command(interaction: discord.Interaction):
 
 @tree.command(name="wheretoplay", description="Manually push the Where to Play post (admins only)")
 async def wheretoplay_command(interaction: discord.Interaction):
-    if interaction.user.id != ADMIN_USER_ID:
+    if not _is_admin(interaction):
         await interaction.response.send_message("❌ Admins only.", ephemeral=True)
         return
 
