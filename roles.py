@@ -65,13 +65,34 @@ def get_mapped_playhub_ids() -> set[str]:
 
 
 def add_player_mapping(discord_id: int, playhub_id: str, display_name: str, linked_by: str):
-    """Append a new link row to the player mapping sheet."""
+    """Write a link row to the player mapping sheet.
+
+    If a row with the same playhub_id already exists, overwrite it in place.
+    Otherwise append a new row.
+    """
     now = datetime.now(timezone.utc).isoformat()
+    row = [str(discord_id), playhub_id, display_name, now, linked_by]
+
+    data = _gs.get_values(STORE_SPREADSHEET_ID, PLAYER_MAPPING_RANGE_NAME)
+    rows = data.get('values', [])
+    for i, existing in enumerate(rows):
+        if len(existing) > 1 and existing[1] == playhub_id:
+            # Row i in the data = sheet row (i + 2) because the range starts at A2
+            sheet_row = i + 2
+            sheet_name = PLAYER_MAPPING_RANGE_NAME.split('!')[0]
+            _gs.update_values(
+                STORE_SPREADSHEET_ID,
+                f"{sheet_name}!A{sheet_row}:E{sheet_row}",
+                "USER_ENTERED",
+                [row],
+            )
+            return
+
     _gs.append_values(
         STORE_SPREADSHEET_ID,
         PLAYER_MAPPING_RANGE_NAME,
         "USER_ENTERED",
-        [[str(discord_id), playhub_id, display_name, now, linked_by]],
+        [row],
     )
 
 
