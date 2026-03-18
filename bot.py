@@ -177,6 +177,11 @@ def _is_admin(interaction: discord.Interaction) -> bool:
     return interaction.user.id in ADMIN_USER_IDS or interaction.user.guild_permissions.manage_guild
 
 
+def _fmt(format_str: str) -> str:
+    """Shorten format label — strip ' Constructed' suffix to save characters."""
+    return format_str.replace(' Constructed', '')
+
+
 def _grouped_by_day(entries: list) -> str:
     """Format a list of event entries grouped by day with day headers."""
     if not entries:
@@ -190,14 +195,18 @@ def _grouped_by_day(entries: list) -> str:
         for e in day_entries:
             city = f" ({e['city']})" if e.get('city') else ''
             time = f" @ {e['time']}" if e.get('time') else ''
-            lines.append(f"• **{e['store_name']}**{city}{time} · {e['format']}")
+            lines.append(f"• **{e['store_name']}**{city}{time} · {_fmt(e['format'])}")
     return "\n".join(lines)
 
 
-def _build_where_to_play_messages(store_analysis: dict, as_of: date) -> tuple[str, str, str]:
+_WTP_CHAR_LIMIT = 1950  # leave headroom below Discord's 2000-char limit
+
+
+def _build_where_to_play_messages(store_analysis: dict, as_of: date) -> list[str]:
     """
-    Build three #where-to-play messages from a store analysis result.
-    Returns (regular_msg, semi_regular_msg, info_msg).
+    Build #where-to-play messages from a store analysis result.
+    Returns 3 messages normally, or 4 if the semi-regular section is too long
+    to fit in one Discord message (split at a day boundary).
     """
     date_str = as_of.strftime('%B %d, %Y').replace(' 0', ' ')
 
@@ -208,11 +217,37 @@ def _build_where_to_play_messages(store_analysis: dict, as_of: date) -> tuple[st
         _grouped_by_day(store_analysis['regular']),
     ])
 
-    semi_regular_msg = "\n".join([
-        "\u200b",
-        "🔄 Semi-Regular Events — *ran at least twice in the last 4 weeks*",
-        _grouped_by_day(store_analysis.get('semi_regular', [])),
-    ])
+    # Build semi-regular day blocks individually so we can split if needed
+    semi_header = "\u200b\n🔄 Semi-Regular Events — *ran at least twice in the last 4 weeks*"
+    semi_entries = store_analysis.get('semi_regular', [])
+
+    if not semi_entries:
+        semi_msgs = [semi_header + "\n*None yet this season*"]
+    else:
+        groups = {}
+        for e in semi_entries:
+            groups.setdefault(e['day'], []).append(e)
+
+        day_blocks = []
+        for day, day_entries in groups.items():
+            lines = [f"__{day}__"]
+            for e in day_entries:
+                city = f" ({e['city']})" if e.get('city') else ''
+                time = f" @ {e['time']}" if e.get('time') else ''
+                lines.append(f"• **{e['store_name']}**{city}{time} · {_fmt(e['format'])}")
+            day_blocks.append("\n".join(lines))
+
+        # Greedily pack day blocks into message 1; overflow goes to message 2
+        msg1 = semi_header
+        msg2 = ""
+        for block in day_blocks:
+            candidate = msg1 + "\n" + block
+            if len(candidate) <= _WTP_CHAR_LIMIT:
+                msg1 = candidate
+            else:
+                msg2 = (msg2 + "\n" + block) if msg2 else ("\u200b\n" + block)
+
+        semi_msgs = [msg1, msg2] if msg2 else [msg1]
 
     info_msg = "\n".join([
         "\u200b",
@@ -225,7 +260,7 @@ def _build_where_to_play_messages(store_analysis: dict, as_of: date) -> tuple[st
         "*~ before a time means the start time varies slightly week to week — e.g. ~7:00 PM could mean anywhere from 7:00–7:30 PM. Arrive a few minutes early to be safe.*",
     ])
 
-    return regular_msg, semi_regular_msg, info_msg
+    return [regular_msg] + semi_msgs + [info_msg]
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -242,7 +277,39 @@ async def keepalive():
 
 # Stores the message ID of the current #where-to-play post so we can edit it
 # in-place each Sunday rather than posting a new one.
-_where_to_play_msg_ids: list[int | None] = [None, None, None]  # regular, semi-regular, info
+_where_to_play_msg_ids: list[int | None] = [None, None, None, None]  # regular, semi-regular (×1-2), info
+
+
+async def _post_where_to_play(channel, messages: list[str], loop) -> None:
+    """Edit existing where-to-play messages in place, post new ones, delete orphans."""
+    global _where_to_play_msg_ids
+    new_ids = []
+    for i, content in enumerate(messages):
+        msg_id = _where_to_play_msg_ids[i] if i < len(_where_to_play_msg_ids) else None
+        if msg_id:
+            try:
+                existing = await channel.fetch_message(msg_id)
+                await existing.edit(content=content)
+                new_ids.append(msg_id)
+                continue
+            except discord.NotFound:
+                pass
+        msg = await channel.send(content)
+        new_ids.append(msg.id)
+
+    # Delete any previously-tracked messages beyond the new count (e.g. split collapsed)
+    for old_id in _where_to_play_msg_ids[len(messages):]:
+        if old_id:
+            try:
+                old_msg = await channel.fetch_message(old_id)
+                await old_msg.delete()
+            except discord.NotFound:
+                pass
+
+    _where_to_play_msg_ids = new_ids + [None] * (4 - len(new_ids))
+    await loop.run_in_executor(None, save_bot_state,
+        {f'wtp_msg_{i}': str(new_ids[i]) if i < len(new_ids) else '' for i in range(4)}
+    )
 
 # Pending mod-channel reaction prompts keyed by message ID.
 # link suggestions: playhub_id, display_name, discord_id, discord_name
@@ -282,26 +349,7 @@ async def where_to_play_weekly():
             continue
 
         try:
-            new_ids = []
-            for i, content in enumerate(messages):
-                msg_id = _where_to_play_msg_ids[i]
-                if msg_id:
-                    try:
-                        existing = await wtp_ch.fetch_message(msg_id)
-                        await existing.edit(content=content)
-                        new_ids.append(msg_id)
-                        continue
-                    except discord.NotFound:
-                        pass
-                msg = await wtp_ch.send(content)
-                new_ids.append(msg.id)
-            _where_to_play_msg_ids = new_ids
-            # Persist message IDs so edits survive restarts
-            await loop.run_in_executor(None, save_bot_state, {
-                'wtp_msg_0': str(new_ids[0]) if new_ids[0] else '',
-                'wtp_msg_1': str(new_ids[1]) if new_ids[1] else '',
-                'wtp_msg_2': str(new_ids[2]) if new_ids[2] else '',
-            })
+            await _post_where_to_play(wtp_ch, messages, loop)
             print(f"  ✓ {_ch('where_to_play')} updated ({len(messages)} messages)")
         except Exception as e:
             print(f"  ✗ Failed to update {_ch('where_to_play')}: {e}")
@@ -586,9 +634,8 @@ async def on_ready():
         loop = asyncio.get_running_loop()
         state = await loop.run_in_executor(None, load_bot_state)
         ids = [
-            int(state['wtp_msg_0']) if 'wtp_msg_0' in state else None,
-            int(state['wtp_msg_1']) if 'wtp_msg_1' in state else None,
-            int(state['wtp_msg_2']) if 'wtp_msg_2' in state else None,
+            int(state[f'wtp_msg_{i}']) if f'wtp_msg_{i}' in state and state[f'wtp_msg_{i}'] else None
+            for i in range(4)
         ]
         _where_to_play_msg_ids = ids
         print(f"  ✓ Restored where-to-play message IDs: {ids}")
@@ -1637,28 +1684,8 @@ async def wheretoplay_command(interaction: discord.Interaction):
             return
 
         messages = _build_where_to_play_messages(store_analysis, date.today())
-
-        global _where_to_play_msg_ids
-        new_ids = []
-        for i, content in enumerate(messages):
-            msg_id = _where_to_play_msg_ids[i]
-            if msg_id:
-                try:
-                    existing = await channel.fetch_message(msg_id)
-                    await existing.edit(content=content)
-                    new_ids.append(msg_id)
-                    continue
-                except discord.NotFound:
-                    pass
-            msg = await channel.send(content)
-            new_ids.append(msg.id)
-        _where_to_play_msg_ids = new_ids
-        await loop.run_in_executor(None, save_bot_state, {
-            'wtp_msg_0': str(new_ids[0]) if new_ids[0] else '',
-            'wtp_msg_1': str(new_ids[1]) if new_ids[1] else '',
-            'wtp_msg_2': str(new_ids[2]) if new_ids[2] else '',
-        })
-        await interaction.followup.send(f"✅ {_ch('where_to_play')} updated.", ephemeral=True)
+        await _post_where_to_play(channel, messages, loop)
+        await interaction.followup.send(f"✅ {_ch('where_to_play')} updated ({len(messages)} messages).", ephemeral=True)
 
     except Exception as e:
         await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
