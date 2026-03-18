@@ -1628,7 +1628,15 @@ async def assign_roles_from_invitational(interaction: discord.Interaction, event
         description="\n".join(lines) + "\n\nReact ✅ to confirm or ❌ to cancel.",
         colour=discord.Colour.gold()
     )
-    msg = await mod_ch.send(embed=embed)
+    try:
+        msg = await mod_ch.send(embed=embed)
+    except discord.Forbidden:
+        await interaction.followup.send(
+            f"❌ Bot lacks permission to send messages in the mod channel (ID: `{MOD_CHANNEL_ID}`). "
+            f"Check channel permissions.", ephemeral=True
+        )
+        return
+
     await msg.add_reaction("✅")
     await msg.add_reaction("❌")
     _pending_invitational_assignments[msg.id] = {
