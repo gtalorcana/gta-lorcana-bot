@@ -72,6 +72,7 @@ from constants import (
     SUPER_RARE_ROLE_ID,
     LEAGUE_SPREADSHEET_ID,
     STANDINGS_RANGE_NAME,
+    LEADERBOARD_RANGE_NAME,
 )
 from roles import (
     fuzzy_match_member,
@@ -1506,13 +1507,13 @@ async def sync_roles(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     loop = asyncio.get_running_loop()
 
-    standings_data = await loop.run_in_executor(
-        None, _gs.get_values, LEAGUE_SPREADSHEET_ID, STANDINGS_RANGE_NAME
+    lb_data = await loop.run_in_executor(
+        None, _gs.get_values, LEAGUE_SPREADSHEET_ID, LEADERBOARD_RANGE_NAME
     )
-    standing_rows = standings_data.get('values', [])
+    leaderboard_rows = lb_data.get('values', [])
 
     changes = await loop.run_in_executor(
-        None, compute_role_assignments, interaction.guild, standing_rows
+        None, compute_role_assignments, interaction.guild, leaderboard_rows
     )
 
     if not changes:

@@ -143,47 +143,49 @@ def get_unlinked_players(standing_rows: list[list]) -> list[tuple[str, str]]:
 
 # ── Role Calculation ───────────────────────────────────────────────────────────
 
-def compute_role_assignments(guild, standing_rows: list[list]) -> list[tuple]:
+def compute_role_assignments(guild, leaderboard_rows: list[list]) -> list[tuple]:
     """
-    For each player in player_mapping who is a guild member and has standings data,
-    compute whether they've earned a higher rarity role than they currently hold.
+    For each player in the leaderboard, compute whether they've earned a higher
+    rarity role than they currently hold.
 
-    Returns list of (member, roles_to_remove, new_role) — only where an upgrade
-    is needed. Roles are never downgraded.
+    Leaderboard row columns: rank(0) | player_name(1) | points(2) | events_played(3)
+
+    Matches players to Discord members via display_name in the player mapping sheet.
+    Returns list of (member, roles_to_remove, new_role) — upgrades only, never downgrades.
     """
     mapping = get_player_mapping()
-    playhub_to_discord = {
-        m['playhub_id']: m['discord_id']
-        for m in mapping if m['playhub_id'] and m['discord_id']
+    name_to_discord = {
+        m['display_name'].lower(): m['discord_id']
+        for m in mapping if m['discord_id']  # skip skipped/unmatched rows (discord_id=0)
     }
-
-    # Group standing rows by discord_id
-    discord_to_rows: dict[int, list] = {}
-    for row in standing_rows:
-        if len(row) < 7:
-            continue
-        pid        = str(row[6])
-        discord_id = playhub_to_discord.get(pid)
-        if discord_id:
-            discord_to_rows.setdefault(discord_id, []).append(row)
 
     rarity_id_set = set(RARITY_ROLE_IDS)
     changes = []
 
-    for discord_id, rows in discord_to_rows.items():
+    for row in leaderboard_rows:
+        if len(row) < 2:
+            continue
+        try:
+            rank = int(row[0])
+        except (ValueError, IndexError):
+            continue
+        player_name   = row[1].strip()
+        try:
+            events_played = int(row[3]) if len(row) > 3 and row[3] else 0
+        except ValueError:
+            events_played = 0
+
+        discord_id = name_to_discord.get(player_name.lower())
+        if not discord_id:
+            continue  # not yet linked — run backfill_player_linking first
+
         member = guild.get_member(discord_id)
         if not member:
             continue
 
-        distinct_events = len({(r[0], r[1]) for r in rows})
-        try:
-            best_rank = min(int(r[2]) for r in rows)
-        except (ValueError, IndexError):
-            best_rank = 9999
-
-        if best_rank <= RARE_RANK_THRESHOLD:
+        if rank <= RARE_RANK_THRESHOLD:
             earned_id = RARE_ROLE_ID
-        elif distinct_events >= UNCOMMON_EVENT_THRESHOLD:
+        elif events_played >= UNCOMMON_EVENT_THRESHOLD:
             earned_id = UNCOMMON_ROLE_ID
         else:
             earned_id = COMMON_ROLE_ID

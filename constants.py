@@ -47,9 +47,14 @@ STORE_DEBUG_RANGE_NAME = STORE_DEBUG_SHEET_NAME + "!A1:Z"  # wide enough for 4 w
 
 STANDINGS_SHEET_NAME        = CURRENT_SEASON + " Standings - User Reported"
 EVENTS_SHEET_NAME           = CURRENT_SEASON + " Events - User Reported"
+LEADERBOARD_SHEET_NAME      = CURRENT_SEASON + " Leaderboard"
 STANDINGS_RANGE_NAME        = STANDINGS_SHEET_NAME + "!" + "A3:G"
 EVENTS_RANGE_NAME           = EVENTS_SHEET_NAME + "!" + "A2:G"
 EVENTS_TIMESTAMP_RANGE_NAME = EVENTS_SHEET_NAME + "!" + "J1:K1"
+LEADERBOARD_RANGE_NAME      = LEADERBOARD_SHEET_NAME + "!A2:D"  # Rank, Player, Points, Events Played
+
+# Archive spreadsheet — historical seasons (S1–S10)
+ARCHIVE_SPREADSHEET_ID = "1382ddPYx3dRKDTvSd60jiu4Yd_-SwkBTRy0djt84F2o"
 
 # Discord channel IDs
 RESULTS_REPORTING_CHANNEL_URL = "https://discord.com/channels/1253915141716578314/"
