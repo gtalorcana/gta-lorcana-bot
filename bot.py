@@ -43,6 +43,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 from datetime import datetime, timezone, date, timedelta
 
+from clients import gs as _gs, rph_api as _rph_api
 from results import process_event_data, remove_event_data
 from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, refresh_set_champs, set_bot_state_key, delete_bot_state_key, fetch_event_status
 
@@ -51,6 +52,7 @@ from constants import (
     WORKER_URL,
     WORKER_SECRET,
     CHANNELS,
+    MOD_CHANNEL_ID,
     EVENTS_URL_RE,
     RPH_RETRY_DELAY,
     RPH_RETRY_ATTEMPTS,
@@ -63,6 +65,21 @@ from constants import (
     SET_CHAMPS_END_DATE,
     SET_CHAMPS_SPREADSHEET_ID,
     SET_CHAMPS_EVENTS_RANGE_NAME,
+    COMMON_ROLE_ID,
+    LEGENDARY_ROLE_ID,
+    SUPER_RARE_ROLE_ID,
+    LEAGUE_SPREADSHEET_ID,
+    STANDINGS_RANGE_NAME,
+)
+from roles import (
+    fuzzy_match_member,
+    get_unlinked_players,
+    get_player_mapping,
+    add_player_mapping,
+    compute_role_assignments,
+    RARITY_ROLE_IDS,
+    FUZZY_HIGH_CONFIDENCE,
+    FUZZY_LOW_CONFIDENCE,
 )
 
 # ── Bot setup ─────────────────────────────────────────────────
@@ -219,6 +236,12 @@ async def keepalive():
 # Stores the message ID of the current #where-to-play post so we can edit it
 # in-place each Sunday rather than posting a new one.
 _where_to_play_msg_ids: list[int | None] = [None, None, None]  # regular, semi-regular, info
+
+# Pending mod-channel reaction prompts keyed by message ID.
+# link suggestions: playhub_id, display_name, discord_id, discord_name
+_pending_link_suggestions: dict[int, dict] = {}
+# invitational assignments: legendary/super_rare candidate lists, event_name
+_pending_invitational_assignments: dict[int, dict] = {}
 
 @tasks.loop(minutes=1)
 async def where_to_play_weekly():
@@ -636,9 +659,10 @@ async def on_message(message: discord.Message):
 _seen_threads: set[int] = set()
 
 
-async def _run_process_event_data(thread: discord.Thread, rph_url: str) -> None:
+async def _run_process_event_data(thread: discord.Thread, rph_url: str) -> list[list]:
     """
     Acquire the sheet lock and run process_event_data in a thread executor.
+    Returns the full standing_rows written this run.
     Raises on any error — caller is responsible for handling.
     """
     async with _sheet_lock:
@@ -646,12 +670,13 @@ async def _run_process_event_data(thread: discord.Thread, rph_url: str) -> None:
             waiter_count = len(_sheet_lock._waiters)
             print(f"  ⏳ Sheet lock acquired for '{thread.name}' ({waiter_count} thread(s) were waiting)")
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, process_event_data, rph_url, thread.id)
+        return await loop.run_in_executor(None, process_event_data, rph_url, thread.id)
 
 
-async def process_results_reporting_thread(thread: discord.Thread) -> None:
+async def process_results_reporting_thread(thread: discord.Thread) -> list[list]:
     """
     Validate the thread starter message URL and run the results processing pipeline.
+    Returns the full standing_rows written this run.
     Raises ValueError on bad URL, RuntimeError on API/sheet failure.
     """
     starter = await thread.fetch_message(thread.id)
@@ -667,7 +692,7 @@ async def process_results_reporting_thread(thread: discord.Thread) -> None:
         )
 
     print(f"  → URL validated: {rph_url}")
-    await _run_process_event_data(thread, rph_url)
+    return await _run_process_event_data(thread, rph_url)
 
 
 async def run_results_reporting_pipeline(
@@ -719,7 +744,7 @@ async def run_results_reporting_pipeline(
             pass
 
     try:
-        await process_results_reporting_thread(thread)
+        standing_rows = await process_results_reporting_thread(thread)
 
         # ── Success ───────────────────────────────────────────
         await thread.send(
@@ -735,6 +760,15 @@ async def run_results_reporting_pipeline(
             pass
         print(f"  ✓ Results processed OK: '{thread.name}'")
         success = True
+
+        # Trigger linking flow for any new Playhub IDs in this event
+        try:
+            loop = asyncio.get_running_loop()
+            new_players = await loop.run_in_executor(None, get_unlinked_players, standing_rows or [])
+            if new_players:
+                asyncio.create_task(_post_linking_suggestions(thread.guild, new_players))
+        except Exception as link_err:
+            print(f"  ⚠ Linking flow failed after results import: {link_err}")
 
     except ValueError as e:
         # ── Validation error — user needs to fix their URL ────
@@ -827,7 +861,7 @@ async def _schedule_auto_retry(
     print(f"  🔄 Auto-retry {attempt}/{RPH_RETRY_ATTEMPTS} for '{thread.name}'...")
 
     try:
-        await _run_process_event_data(thread, starter_msg.content.strip())
+        standing_rows = await _run_process_event_data(thread, starter_msg.content.strip())
 
         await thread.send(
             embed=make_embed(
@@ -842,6 +876,14 @@ async def _schedule_auto_retry(
         except Exception:
             pass
         print(f"  ✓ Auto-retry {attempt} succeeded for '{thread.name}'")
+
+        try:
+            loop = asyncio.get_running_loop()
+            new_players = await loop.run_in_executor(None, get_unlinked_players, standing_rows or [])
+            if new_players:
+                asyncio.create_task(_post_linking_suggestions(thread.guild, new_players))
+        except Exception as link_err:
+            print(f"  ⚠ Linking flow failed after auto-retry: {link_err}")
 
     except Exception as retry_error:
         print(f"  ✗ Auto-retry {attempt} failed for '{thread.name}': {retry_error}")
@@ -926,6 +968,189 @@ async def on_thread_delete(thread: discord.Thread):
         print(f"  ↩ No event data to remove for thread '{thread.name}': {e}")
     except Exception as e:
         print(f"  ✗ Failed to remove event data for thread '{thread.name}': {e}")
+
+
+# ═══════════════════════════════════════════════════════════════
+# MEMBER JOIN — auto-assign Common role
+# ═══════════════════════════════════════════════════════════════
+
+@bot.event
+async def on_member_join(member: discord.Member):
+    """Auto-assign Common rarity role to every new member."""
+    if not COMMON_ROLE_ID:
+        return
+    common_role = member.guild.get_role(COMMON_ROLE_ID)
+    if common_role and common_role not in member.roles:
+        try:
+            await member.add_roles(common_role, reason="auto-assign Common on join")
+            print(f"  ✦ Assigned Common role to new member {member.display_name}")
+        except discord.HTTPException as e:
+            print(f"  ⚠ Failed to assign Common role to {member.display_name}: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════
+# PLAYER LINKING — fuzzy match helpers and reaction handler
+# ═══════════════════════════════════════════════════════════════
+
+async def _post_linking_suggestions(guild: discord.Guild, new_players: list[tuple[str, str]]):
+    """
+    For each (playhub_id, display_name) not yet in player_mapping:
+      - High confidence (≥75%) → post ✅/❌ reaction prompt to mod channel
+      - Low confidence (50–74%) → post notice, require /link
+      - No match → post unmatched notice, require /link
+    """
+    if not MOD_CHANNEL_ID:
+        print("  ⚠ MOD_CHANNEL_ID not set — skipping linking suggestions")
+        return
+    mod_ch = get_channel_by_id(guild, MOD_CHANNEL_ID)
+    if not mod_ch:
+        print("  ⚠ Mod channel not found — skipping linking suggestions")
+        return
+
+    members = [m for m in guild.members if not m.bot]
+
+    for playhub_id, display_name in new_players:
+        best_member, score = fuzzy_match_member(display_name, members)
+
+        if score >= FUZZY_HIGH_CONFIDENCE:
+            embed = make_embed(
+                title="🔗 Suggested Player Link",
+                description=(
+                    f"**Playhub:** {display_name} (ID: `{playhub_id}`)\n"
+                    f"**Discord:** {best_member.mention} (`{best_member.display_name}`)\n"
+                    f"**Confidence:** {score:.0%}\n\n"
+                    f"React ✅ to confirm or ❌ to skip."
+                ),
+                colour=discord.Colour.yellow()
+            )
+            msg = await mod_ch.send(embed=embed)
+            await msg.add_reaction("✅")
+            await msg.add_reaction("❌")
+            _pending_link_suggestions[msg.id] = {
+                'playhub_id':   playhub_id,
+                'display_name': display_name,
+                'discord_id':   best_member.id,
+                'discord_name': best_member.display_name,
+            }
+
+        elif score >= FUZZY_LOW_CONFIDENCE and best_member:
+            embed = make_embed(
+                title="🔗 Low-Confidence Match",
+                description=(
+                    f"**Playhub:** {display_name} (ID: `{playhub_id}`)\n"
+                    f"**Closest Discord match:** {best_member.mention} "
+                    f"(`{best_member.display_name}`) — {score:.0%}\n\n"
+                    f"Use `/link @member {playhub_id}` to confirm manually."
+                ),
+                colour=discord.Colour.orange()
+            )
+            await mod_ch.send(embed=embed)
+
+        else:
+            embed = make_embed(
+                title="❓ Unmatched Player",
+                description=(
+                    f"**Playhub:** {display_name} (ID: `{playhub_id}`)\n"
+                    f"No confident Discord match found.\n\n"
+                    f"Use `/link @member {playhub_id}` to link manually."
+                ),
+                colour=discord.Colour.red()
+            )
+            await mod_ch.send(embed=embed)
+
+
+@bot.event
+async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+    """Handle ✅/❌ reactions on pending link suggestions and invitational assignments."""
+    if payload.user_id == bot.user.id:
+        return
+
+    emoji = str(payload.emoji)
+    if emoji not in ("✅", "❌"):
+        return
+
+    guild   = bot.get_guild(payload.guild_id)
+    mod_ch  = guild.get_channel(payload.channel_id) if guild else None
+    loop    = asyncio.get_running_loop()
+
+    # ── Link suggestion confirmation ───────────────────────────
+    if payload.message_id in _pending_link_suggestions:
+        suggestion = _pending_link_suggestions.pop(payload.message_id)
+
+        if emoji == "✅":
+            await loop.run_in_executor(
+                None, add_player_mapping,
+                suggestion['discord_id'],
+                suggestion['playhub_id'],
+                suggestion['display_name'],
+                'fuzzy-confirmed',
+            )
+            if mod_ch:
+                await mod_ch.send(embed=make_embed(
+                    title="✅ Link Confirmed",
+                    description=(
+                        f"**{suggestion['display_name']}** (Playhub `{suggestion['playhub_id']}`)"
+                        f" → <@{suggestion['discord_id']}>"
+                    ),
+                    colour=discord.Colour.green()
+                ))
+        else:
+            if mod_ch:
+                await mod_ch.send(embed=make_embed(
+                    title="❌ Link Skipped",
+                    description=(
+                        f"Skipped **{suggestion['display_name']}** "
+                        f"(Playhub `{suggestion['playhub_id']}`). "
+                        f"Use `/link` to resolve manually."
+                    ),
+                    colour=discord.Colour.red()
+                ))
+
+    # ── Invitational assignment confirmation ───────────────────
+    elif payload.message_id in _pending_invitational_assignments:
+        assignment = _pending_invitational_assignments.pop(payload.message_id)
+
+        if emoji == "✅":
+            legendary_role = guild.get_role(LEGENDARY_ROLE_ID)
+            sr_role        = guild.get_role(SUPER_RARE_ROLE_ID)
+            rarity_id_set  = set(RARITY_ROLE_IDS)
+            assigned = []
+            skipped  = []
+
+            all_candidates = []
+            if assignment['legendary']:
+                pid, name, member = assignment['legendary']
+                all_candidates.append((pid, name, member, legendary_role, "Legendary"))
+            for pid, name, member in assignment['super_rare']:
+                all_candidates.append((pid, name, member, sr_role, "Super Rare"))
+
+            for pid, name, member, role, role_name in all_candidates:
+                if not member or not role:
+                    skipped.append(f"**{name}** (Playhub `{pid}`) — unlinked")
+                    continue
+                try:
+                    roles_to_remove = [r for r in member.roles if r.id in rarity_id_set and r.id != role.id]
+                    await member.add_roles(role, reason=f"/assign-roles-from-invitational: {assignment['event_name']}")
+                    for r in roles_to_remove:
+                        await member.remove_roles(r, reason=f"/assign-roles-from-invitational: {assignment['event_name']}")
+                    assigned.append(f"{member.mention} → **{role_name}**")
+                except discord.HTTPException as e:
+                    skipped.append(f"{member.mention} — error: {e}")
+
+            lines = assigned + (["\n**Could not assign (unlinked):**"] + skipped if skipped else [])
+            if mod_ch:
+                await mod_ch.send(embed=make_embed(
+                    title=f"🏆 Invitational Roles Assigned — {assignment['event_name']}",
+                    description="\n".join(lines) if lines else "No changes made.",
+                    colour=discord.Colour.gold()
+                ))
+        else:
+            if mod_ch:
+                await mod_ch.send(embed=make_embed(
+                    title="❌ Invitational Assignment Cancelled",
+                    description=f"Role assignment for **{assignment['event_name']}** was cancelled.",
+                    colour=discord.Colour.red()
+                ))
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1198,6 +1423,222 @@ async def recheck(interaction: discord.Interaction, after: str = ""):
             ),
             ephemeral=True
         )
+
+
+# ── /link ─────────────────────────────────────────────────────
+@tree.command(name="link", description="Link a Discord member to their Playhub ID (mods only)")
+@app_commands.describe(member="Discord member", playhub_id="Ravensburger Playhub numeric ID")
+async def link_command(interaction: discord.Interaction, member: discord.Member, playhub_id: str):
+    if not interaction.user.guild_permissions.manage_guild:
+        await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    loop = asyncio.get_running_loop()
+    mapping = await loop.run_in_executor(None, get_player_mapping)
+
+    for entry in mapping:
+        if entry['playhub_id'] == playhub_id:
+            await interaction.followup.send(
+                f"⚠️ Playhub ID `{playhub_id}` is already linked to <@{entry['discord_id']}>.",
+                ephemeral=True
+            )
+            return
+        if entry['discord_id'] == member.id:
+            await interaction.followup.send(
+                f"⚠️ {member.mention} is already linked to Playhub ID `{entry['playhub_id']}`.",
+                ephemeral=True
+            )
+            return
+
+    await loop.run_in_executor(
+        None, add_player_mapping,
+        member.id, playhub_id, member.display_name,
+        f'manual:{interaction.user.display_name}',
+    )
+    await interaction.followup.send(
+        f"✅ Linked **{member.display_name}** → Playhub `{playhub_id}`", ephemeral=True
+    )
+    mod_ch = get_channel_by_id(interaction.guild, MOD_CHANNEL_ID)
+    if mod_ch:
+        await mod_ch.send(embed=make_embed(
+            title="🔗 Manual Link Added",
+            description=(
+                f"{member.mention} → Playhub `{playhub_id}`\n"
+                f"Linked by {interaction.user.mention}"
+            ),
+            colour=discord.Colour.green()
+        ))
+
+
+# ── /sync-roles ────────────────────────────────────────────────
+@tree.command(name="sync-roles", description="Sync rarity roles for all linked players (mods only)")
+async def sync_roles(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.manage_guild:
+        await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    loop = asyncio.get_running_loop()
+
+    standings_data = await loop.run_in_executor(
+        None, _gs.get_values, LEAGUE_SPREADSHEET_ID, STANDINGS_RANGE_NAME
+    )
+    standing_rows = standings_data.get('values', [])
+
+    changes = await loop.run_in_executor(
+        None, compute_role_assignments, interaction.guild, standing_rows
+    )
+
+    if not changes:
+        await interaction.followup.send("✅ All roles are up to date — no changes needed.", ephemeral=True)
+        return
+
+    applied = []
+    for member, roles_to_remove, new_role in changes:
+        try:
+            await member.add_roles(new_role, reason="sync-roles")
+            for old_role in roles_to_remove:
+                await member.remove_roles(old_role, reason="sync-roles")
+            applied.append((member, roles_to_remove, new_role))
+        except discord.HTTPException as e:
+            print(f"  ⚠ sync-roles: failed to assign {new_role.name} to {member.display_name}: {e}")
+
+    mod_ch = get_channel_by_id(interaction.guild, MOD_CHANNEL_ID)
+    if mod_ch and applied:
+        lines = []
+        for member, old_roles, new_role in applied:
+            old_names = ", ".join(r.name for r in old_roles) if old_roles else "None"
+            lines.append(f"{member.mention}: {old_names} → **{new_role.name}**")
+        await mod_ch.send(embed=make_embed(
+            title=f"✦ Role Sync — {len(applied)} change(s)",
+            description="\n".join(lines),
+            colour=discord.Colour.gold()
+        ))
+
+    await interaction.followup.send(
+        f"✅ Sync complete — {len(applied)} role(s) updated.", ephemeral=True
+    )
+
+
+# ── /bootstrap-common ──────────────────────────────────────────
+@tree.command(name="bootstrap-common", description="Assign Common role to all members who don't have it (mods only)")
+async def bootstrap_common(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.manage_guild:
+        await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
+        return
+    if not COMMON_ROLE_ID:
+        await interaction.response.send_message("⚠️ COMMON_ROLE_ID is not configured.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    common_role = interaction.guild.get_role(COMMON_ROLE_ID)
+    if not common_role:
+        await interaction.followup.send("⚠️ Common role not found in this server.", ephemeral=True)
+        return
+
+    assigned = 0
+    for member in interaction.guild.members:
+        if member.bot:
+            continue
+        if common_role not in member.roles:
+            try:
+                await member.add_roles(common_role, reason="bootstrap-common")
+                assigned += 1
+            except discord.HTTPException:
+                pass
+
+    await interaction.followup.send(
+        f"✅ Bootstrap complete — assigned Common to {assigned} member(s).", ephemeral=True
+    )
+
+
+# ── /assign-roles-from-invitational ───────────────────────────
+@tree.command(name="assign-roles-from-invitational",
+              description="Preview and assign Legendary/Super Rare from an invitational (mods only)")
+@app_commands.describe(event_url="RPH event URL or bare event ID")
+async def assign_roles_from_invitational(interaction: discord.Interaction, event_url: str):
+    if not interaction.user.guild_permissions.manage_guild:
+        await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    event_id = event_url.strip().rstrip("/").split("/")[-1]
+
+    loop = asyncio.get_running_loop()
+    try:
+        events = await loop.run_in_executor(None, _rph_api.get_event_by_id, event_id)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Failed to fetch event: {e}", ephemeral=True)
+        return
+
+    if not events:
+        await interaction.followup.send(f"❌ No event found for ID `{event_id}`.", ephemeral=True)
+        return
+
+    event = events[0]
+    if not event.get('tournament_phases') or not event['tournament_phases'][-1].get('rounds'):
+        await interaction.followup.send("❌ Event has no tournament rounds.", ephemeral=True)
+        return
+
+    last_round_id = event['tournament_phases'][-1]['rounds'][-1]['id']
+    try:
+        standings = await loop.run_in_executor(
+            None, _rph_api.get_standings_from_tournament_round_id, str(last_round_id)
+        )
+    except Exception as e:
+        await interaction.followup.send(f"❌ Failed to fetch standings: {e}", ephemeral=True)
+        return
+
+    standings.sort(key=lambda s: s['rank'])
+    mapping_list      = await loop.run_in_executor(None, get_player_mapping)
+    playhub_to_discord = {m['playhub_id']: m['discord_id'] for m in mapping_list if m['playhub_id'] and m['discord_id']}
+
+    def resolve(s):
+        pid    = str(s['player']['id'])
+        name   = s['user_event_status']['best_identifier']
+        did    = playhub_to_discord.get(pid)
+        member = interaction.guild.get_member(did) if did else None
+        return pid, name, member
+
+    rank1 = next((s for s in standings if s['rank'] == 1), None)
+    top8  = [s for s in standings if 2 <= s['rank'] <= 8]
+
+    legendary_entry = resolve(rank1) if rank1 else None
+    sr_entries      = [resolve(s) for s in top8]
+
+    event_name = event.get('name', f"Event {event_id}")
+    lines = []
+    if legendary_entry:
+        pid, name, member = legendary_entry
+        mention = member.mention if member else f"**{name}** *(unlinked — use /link first)*"
+        lines.append(f"🏆 **Legendary** → {mention}")
+    for i, (pid, name, member) in enumerate(sr_entries, 2):
+        mention = member.mention if member else f"**{name}** *(unlinked)*"
+        lines.append(f"⭐ **Super Rare** (rank {i}) → {mention}")
+
+    mod_ch = get_channel_by_id(interaction.guild, MOD_CHANNEL_ID)
+    if not mod_ch:
+        await interaction.followup.send("⚠️ Mod channel not configured.", ephemeral=True)
+        return
+
+    embed = make_embed(
+        title=f"🏆 Invitational Role Assignment — {event_name}",
+        description="\n".join(lines) + "\n\nReact ✅ to confirm or ❌ to cancel.",
+        colour=discord.Colour.gold()
+    )
+    msg = await mod_ch.send(embed=embed)
+    await msg.add_reaction("✅")
+    await msg.add_reaction("❌")
+    _pending_invitational_assignments[msg.id] = {
+        'event_name': event_name,
+        'legendary':  legendary_entry,
+        'super_rare': sr_entries,
+    }
+    await interaction.followup.send(
+        f"Check {_ch('mod') if MOD_CHANNEL_ID else '#mod-channel'} to confirm.", ephemeral=True
+    )
 
 
 # ── /help ─────────────────────────────────────────────────────

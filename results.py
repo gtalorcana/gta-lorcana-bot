@@ -80,6 +80,7 @@ def _fetch_event_rows_and_standings(input_rows):
                     standing['user_event_status']['best_identifier'],
                     standing['record'],
                     standing['match_points'],
+                    str(standing['player']['id']),  # playhub_id — col G
                 ])
 
     return event_rows, standing_rows
@@ -151,6 +152,7 @@ def process_event_data(rph_url, thread_id):
     _gs.update_values(LEAGUE_SPREADSHEET_ID, EVENTS_TIMESTAMP_RANGE_NAME, "USER_ENTERED", [['Last updated', local_dt]])
 
     print(f"  ✓ All sheets updated successfully")
+    return standing_rows
 
 
 def remove_event_data(thread_id):

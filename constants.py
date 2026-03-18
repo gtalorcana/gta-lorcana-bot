@@ -44,17 +44,29 @@ STORE_DEBUG_RANGE_NAME = STORE_DEBUG_SHEET_NAME + "!A1:Z"  # wide enough for 4 w
 
 STANDINGS_SHEET_NAME        = CURRENT_SEASON + " Standings - User Reported"
 EVENTS_SHEET_NAME           = CURRENT_SEASON + " Events - User Reported"
-STANDINGS_RANGE_NAME        = STANDINGS_SHEET_NAME + "!" + "A3:F"
+STANDINGS_RANGE_NAME        = STANDINGS_SHEET_NAME + "!" + "A3:G"
 EVENTS_RANGE_NAME           = EVENTS_SHEET_NAME + "!" + "A2:G"
 EVENTS_TIMESTAMP_RANGE_NAME = EVENTS_SHEET_NAME + "!" + "J1:K1"
 
 # Discord channel IDs
 RESULTS_REPORTING_CHANNEL_URL = "https://discord.com/channels/1253915141716578314/"
+MOD_CHANNEL_ID = int(os.getenv("MOD_CHANNEL_ID", 0))
 CHANNELS = {
     "announcements": 1256090387978784778,
     "results_reporting": 1253943193519784028,
     "where_to_play": 1479988278164852746
 }
+
+# League rarity role IDs — set as env vars or Fly.io secrets
+COMMON_ROLE_ID     = int(os.getenv("COMMON_ROLE_ID",     0))
+UNCOMMON_ROLE_ID   = int(os.getenv("UNCOMMON_ROLE_ID",   0))
+RARE_ROLE_ID       = int(os.getenv("RARE_ROLE_ID",       0))
+SUPER_RARE_ROLE_ID = int(os.getenv("SUPER_RARE_ROLE_ID", 0))
+LEGENDARY_ROLE_ID  = int(os.getenv("LEGENDARY_ROLE_ID",  0))
+
+# Player mapping sheet (STORE_SPREADSHEET_ID — internal, not the public league sheet)
+PLAYER_MAPPING_SHEET_NAME = "Playhub <-> Discord IDs"
+PLAYER_MAPPING_RANGE_NAME = PLAYER_MAPPING_SHEET_NAME + "!A2:E"
 
 # Who's-Going & Where-to-Play settings
 # Override via .env for local testing, e.g. WHOS_GOING_POST_HOUR_ET=9
