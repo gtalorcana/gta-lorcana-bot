@@ -31,10 +31,14 @@ import discord
 from clients import gs as _gs
 from constants import (
     DISCORD_BOT_TOKEN,
+    STORE_SPREADSHEET_ID,
     ARCHIVE_SPREADSHEET_ID,
     RARE_ROLE_ID,
     UNCOMMON_ROLE_ID,
+    SUPER_RARE_ROLE_ID,
+    LEGENDARY_ROLE_ID,
     RARE_RANK_THRESHOLD,
+    INVITATIONAL_RESULTS_RANGE_NAME,
 )
 from roles import (
     RARITY_ROLE_IDS,
@@ -110,6 +114,26 @@ def _build_queue() -> list[tuple]:
             if r['events_played'] >= UNCOMMON_EVENT_THRESHOLD:  # not elif — additive
                 _update(r['player_name'], UNCOMMON_ROLE_ID, r['season'])
 
+    # Invitational results — finish 1 = Legendary + Super Rare, finish 2–8 = Super Rare
+    print("  Loading invitational results...")
+    try:
+        inv_data = _gs.get_values(STORE_SPREADSHEET_ID, INVITATIONAL_RESULTS_RANGE_NAME)
+        for row in inv_data.get('values', []):
+            if len(row) < 3:
+                continue
+            season      = row[0].strip()
+            player_name = row[1].strip()
+            try:
+                finish = int(row[2])
+            except ValueError:
+                continue
+            _update(player_name, SUPER_RARE_ROLE_ID, season)
+            if finish == 1:
+                _update(player_name, LEGENDARY_ROLE_ID, season)
+        print(f"  Invitational results loaded")
+    except Exception as e:
+        print(f"  [WARN] Could not load invitational results: {e}")
+
     queue = [
         (name, entry['role_ids'], ", ".join(sorted(entry['seasons'])))
         for name, entry in player_data.items()
@@ -120,7 +144,12 @@ def _build_queue() -> list[tuple]:
     return queue
 
 
-_ROLE_NAMES = {RARE_ROLE_ID: "Rare", UNCOMMON_ROLE_ID: "Uncommon"}
+_ROLE_NAMES = {
+    UNCOMMON_ROLE_ID:   "Uncommon",
+    RARE_ROLE_ID:       "Rare",
+    SUPER_RARE_ROLE_ID: "Super Rare",
+    LEGENDARY_ROLE_ID:  "Legendary",
+}
 
 
 async def _post_next():
@@ -208,13 +237,14 @@ async def on_ready():
     _members[:] = [m for m in guild.members if not m.bot]
     rarity_id_set = set(RARITY_ROLE_IDS)
 
-    # Seed already-matched IDs: members who already have both Rare and Uncommon
+    # Seed already-matched IDs: members who already have all four rarity roles
     # (per-player skip logic handles partial cases during the queue)
+    all_four = {UNCOMMON_ROLE_ID, RARE_ROLE_ID, SUPER_RARE_ROLE_ID, LEGENDARY_ROLE_ID}
     _matched_discord_ids = {
         m.id for m in _members
-        if RARE_ROLE_ID in {r.id for r in m.roles} and UNCOMMON_ROLE_ID in {r.id for r in m.roles}
+        if all_four.issubset({r.id for r in m.roles})
     }
-    print(f"  {len(_members)} members loaded, {len(_matched_discord_ids)} already have both Rare and Uncommon")
+    print(f"  {len(_members)} members loaded, {len(_matched_discord_ids)} already have all rarity roles")
 
     print("\nLoading leaderboard data from all seasons...")
     queue = _build_queue()

@@ -76,6 +76,10 @@ LEGENDARY_ROLE_ID  = int(os.getenv("LEGENDARY_ROLE_ID",  1347683767367503953))
 PLAYER_MAPPING_SHEET_NAME = "Playhub <-> Discord IDs"
 PLAYER_MAPPING_RANGE_NAME = PLAYER_MAPPING_SHEET_NAME + "!A2:E"
 
+# Historical invitational results (manually maintained)
+INVITATIONAL_RESULTS_SHEET_NAME = "Invitational Results"
+INVITATIONAL_RESULTS_RANGE_NAME = INVITATIONAL_RESULTS_SHEET_NAME + "!A2:C"  # Season, Player Name, Finish
+
 # Who's-Going & Where-to-Play settings
 # Override via .env for local testing, e.g. WHOS_GOING_POST_HOUR_ET=9
 WHERE_TO_PLAY_POST_DAY        = 6   # Sunday (0=Mon … 6=Sun)
@@ -106,3 +110,5 @@ SET_CHAMPS_START_DATE   = "2026-04-04"
 SET_CHAMPS_END_DATE     = "2026-04-24"
 SET_CHAMPS_START_DT     = SET_CHAMPS_START_DATE + START_OF_DAY
 SET_CHAMPS_END_DT       = SET_CHAMPS_END_DATE + END_OF_DAY
+
+RARE_RANK_THRESHOLD = 32
