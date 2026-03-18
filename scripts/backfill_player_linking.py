@@ -86,17 +86,8 @@ async def _post_next():
             return  # wait for reaction before continuing
 
         else:
-            embed = discord.Embed(
-                title="❓ Unmatched Player",
-                description=(
-                    f"**Playhub:** {display_name} (ID: `{playhub_id}`)\n"
-                    f"No confident Discord match found.\n\n"
-                    f"Use `/link @member {playhub_id}` to link manually."
-                ),
-                colour=discord.Colour.red()
-            )
-            await _mod_ch.send(embed=embed)
-            print(f"  [NONE] {display_name} (best: {best_member.display_name if best_member else 'n/a'} {score:.0%})")
+            add_player_mapping(0, playhub_id, display_name, 'skipped')
+            print(f"  [NONE] {display_name} (best: {best_member.display_name if best_member else 'n/a'} {score:.0%}) — written to sheet as skipped")
             # no reaction needed — fall through to next
 
     # Queue exhausted and no pending reaction
