@@ -31,8 +31,6 @@ import discord
 from clients import gs as _gs
 from constants import (
     DISCORD_BOT_TOKEN,
-    LEAGUE_SPREADSHEET_ID,
-    LEADERBOARD_RANGE_NAME,
     ARCHIVE_SPREADSHEET_ID,
     RARE_ROLE_ID,
     UNCOMMON_ROLE_ID,
@@ -104,17 +102,7 @@ def _build_queue() -> list[tuple]:
         if season not in entry['seasons']:
             entry['seasons'].append(season)
 
-    # Current season
-    from constants import CURRENT_SEASON
-    print(f"  Loading {CURRENT_SEASON} leaderboard (current)...")
-    current_rows = _load_leaderboard(LEAGUE_SPREADSHEET_ID, LEADERBOARD_RANGE_NAME, CURRENT_SEASON)
-    for r in current_rows:
-        if r['rank'] <= RARE_RANK_THRESHOLD:
-            _update(r['player_name'], RARE_ROLE_ID, r['season'])
-        elif r['events_played'] >= UNCOMMON_EVENT_THRESHOLD:
-            _update(r['player_name'], UNCOMMON_ROLE_ID, r['season'])
-
-    # Archive seasons
+    # Archive seasons only — current season (S11) is handled by /sync-roles
     for season in ARCHIVE_SEASONS:
         range_name = f"{season} Leaderboard!A2:D"
         print(f"  Loading {season} leaderboard (archive)...")
