@@ -177,6 +177,12 @@ def _is_admin(interaction: discord.Interaction) -> bool:
     return interaction.user.id in ADMIN_USER_IDS or interaction.user.guild_permissions.manage_guild
 
 
+def _last_sunday(d: date) -> date:
+    """Return the most recent Sunday on or before d — consistent reference date for store analysis."""
+    days_since_sunday = (d.weekday() + 1) % 7  # Mon=1 … Sat=6, Sun=0
+    return d - timedelta(days=days_since_sunday)
+
+
 def _fmt(format_str: str) -> str:
     """Shorten format label — strip ' Constructed' suffix to save characters."""
     return format_str.replace(' Constructed', '')
@@ -334,7 +340,7 @@ async def where_to_play_weekly():
 
     loop = asyncio.get_running_loop()
     try:
-        store_analysis = await loop.run_in_executor(None, analyse_stores, now_et.date())
+        store_analysis = await loop.run_in_executor(None, analyse_stores, _last_sunday(now_et.date()))
     except Exception as e:
         print(f"  ✗ where_to_play_weekly: failed to fetch store analysis: {e}")
         return
@@ -1675,7 +1681,8 @@ async def wheretoplay_command(interaction: discord.Interaction):
 
     try:
         loop = asyncio.get_running_loop()
-        store_analysis = await loop.run_in_executor(None, analyse_stores, date.today())
+        ref = _last_sunday(date.today())
+        store_analysis = await loop.run_in_executor(None, analyse_stores, ref)
         gc.collect()  # TODO: remove when upgraded to 1GB RAM — analyse_stores holds a full season of RPH events
 
         channel = get_channel_by_id(interaction.guild, CHANNELS["where_to_play"])
@@ -1683,7 +1690,7 @@ async def wheretoplay_command(interaction: discord.Interaction):
             await interaction.followup.send(f"⚠️ {_ch('where_to_play')} channel not found.", ephemeral=True)
             return
 
-        messages = _build_where_to_play_messages(store_analysis, date.today())
+        messages = _build_where_to_play_messages(store_analysis, ref)
         await _post_where_to_play(channel, messages, loop)
         await interaction.followup.send(f"✅ {_ch('where_to_play')} updated ({len(messages)} messages).", ephemeral=True)
 
