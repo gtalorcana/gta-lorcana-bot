@@ -59,17 +59,18 @@ async def _post_next():
         available_members = [m for m in _members if m.id not in _matched_discord_ids]
         best_member, score = fuzzy_match_member(display_name, available_members)
 
-        if score >= FUZZY_HIGH_CONFIDENCE:
+        if score >= FUZZY_HIGH_CONFIDENCE or (score >= FUZZY_LOW_CONFIDENCE and best_member):
             remaining = len(_queue)
+            high = score >= FUZZY_HIGH_CONFIDENCE
             embed = discord.Embed(
-                title="🔗 Suggested Player Link",
+                title="Suggested Player Link" if high else "Low-Confidence Match",
                 description=(
                     f"**Playhub:** {display_name} (ID: `{playhub_id}`)\n"
                     f"**Discord:** {best_member.mention} (`{best_member.display_name}`)\n"
                     f"**Confidence:** {score:.0%}\n\n"
-                    f"React ✅ to confirm or ❌ to skip.  ({remaining} remaining after this)"
+                    f"React to confirm or skip.  ({remaining} remaining after this)"
                 ),
-                colour=discord.Colour.yellow()
+                colour=discord.Colour.yellow() if high else discord.Colour.orange()
             )
             msg = await _mod_ch.send(embed=embed)
             await msg.add_reaction("✅")
@@ -80,23 +81,9 @@ async def _post_next():
                 'discord_id':   best_member.id,
                 'discord_name': best_member.display_name,
             }
-            print(f"  [HIGH] {display_name} → {best_member.display_name} ({score:.0%})  ({remaining} left)")
+            level = "HIGH" if high else "LOW "
+            print(f"  [{level}] {display_name} -> {best_member.display_name} ({score:.0%})  ({remaining} left)")
             return  # wait for reaction before continuing
-
-        elif score >= FUZZY_LOW_CONFIDENCE and best_member:
-            embed = discord.Embed(
-                title="🔗 Low-Confidence Match",
-                description=(
-                    f"**Playhub:** {display_name} (ID: `{playhub_id}`)\n"
-                    f"**Closest Discord match:** {best_member.mention} "
-                    f"(`{best_member.display_name}`) — {score:.0%}\n\n"
-                    f"Use `/link @member {playhub_id}` to confirm manually."
-                ),
-                colour=discord.Colour.orange()
-            )
-            await _mod_ch.send(embed=embed)
-            print(f"  [LOW ] {display_name} → {best_member.display_name} ({score:.0%})")
-            # no reaction needed — fall through to next
 
         else:
             embed = discord.Embed(
