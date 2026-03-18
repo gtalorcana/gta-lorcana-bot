@@ -32,6 +32,7 @@ from constants import (
 )
 from roles import (
     get_unlinked_players,
+    get_player_mapping,
     fuzzy_match_member,
     add_player_mapping,
     FUZZY_HIGH_CONFIDENCE,
@@ -43,10 +44,11 @@ intents.members = True
 client = discord.Client(intents=intents)
 
 # Module-level state
-_queue: list[tuple] = []        # (playhub_id, display_name) not yet posted
-_members: list = []             # cached non-bot guild members
-_mod_ch = None                  # cached mod channel
-_pending: dict[int, dict] = {}  # at most 1 entry at a time
+_queue: list[tuple] = []            # (playhub_id, display_name) not yet posted
+_members: list = []                 # cached non-bot guild members
+_matched_discord_ids: set[int] = {} # discord IDs already linked — excluded from fuzzy matching
+_mod_ch = None                      # cached mod channel
+_pending: dict[int, dict] = {}      # at most 1 entry at a time
 
 
 async def _post_next():
@@ -54,7 +56,8 @@ async def _post_next():
     # Skip LOW/NONE players automatically — post them but don't wait for a reaction
     while _queue:
         playhub_id, display_name = _queue.pop(0)
-        best_member, score = fuzzy_match_member(display_name, _members)
+        available_members = [m for m in _members if m.id not in _matched_discord_ids]
+        best_member, score = fuzzy_match_member(display_name, available_members)
 
         if score >= FUZZY_HIGH_CONFIDENCE:
             remaining = len(_queue)
@@ -117,7 +120,7 @@ async def _post_next():
 
 @client.event
 async def on_ready():
-    global _members, _mod_ch
+    global _members, _mod_ch, _matched_discord_ids
 
     print(f"Connected as {client.user}")
 
@@ -142,8 +145,12 @@ async def on_ready():
         return
 
     _members[:] = [m for m in guild.members if not m.bot]
+    _matched_discord_ids = {
+        m['discord_id'] for m in get_player_mapping()
+        if m['discord_id']  # excludes skipped rows (discord_id=0)
+    }
     _queue[:] = new_players
-    print(f"  Matching against {len(_members)} Discord members...")
+    print(f"  Matching against {len(_members)} Discord members ({len(_matched_discord_ids)} already linked, excluded)...")
     print(f"  Posting one at a time — react to each to advance.\n")
 
     await _post_next()
@@ -171,6 +178,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             suggestion['display_name'],
             'fuzzy-confirmed',
         )
+        _matched_discord_ids.add(suggestion['discord_id'])
         print(f"  Linked: {suggestion['display_name']} -> {suggestion['discord_name']}")
         new_embed = discord.Embed(
             title="Linked",
