@@ -9,6 +9,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy source
 COPY bot.py .
 COPY results.py .
+COPY roles.py .
 COPY stores.py .
 COPY clients.py .
 COPY constants.py .
