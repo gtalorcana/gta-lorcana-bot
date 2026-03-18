@@ -1523,41 +1523,6 @@ async def sync_roles(interaction: discord.Interaction):
     )
 
 
-# ── /bootstrap-common ──────────────────────────────────────────
-@tree.command(name="bootstrap-common", description="Assign Common role to all members who don't have it (mods only)")
-async def bootstrap_common(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.manage_guild:
-        await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
-        return
-    if not COMMON_ROLE_ID:
-        await interaction.response.send_message("⚠️ COMMON_ROLE_ID is not configured.", ephemeral=True)
-        return
-
-    await interaction.response.defer(ephemeral=True)
-    common_role = interaction.guild.get_role(COMMON_ROLE_ID)
-    if not common_role:
-        await interaction.followup.send("⚠️ Common role not found in this server.", ephemeral=True)
-        return
-
-    members = [m for m in interaction.guild.members if not m.bot]
-    print(f"[bootstrap-common] {len(members)} non-bot members found")
-
-    assigned = 0
-    for member in members:
-        if common_role not in member.roles:
-            try:
-                await member.add_roles(common_role, reason="bootstrap-common")
-                assigned += 1
-                print(f"[bootstrap-common] assigned to {member.display_name} ({assigned} so far)")
-            except discord.HTTPException as e:
-                print(f"[bootstrap-common] failed for {member.display_name}: {e}")
-
-    print(f"[bootstrap-common] done — {assigned}/{len(members)} assigned")
-    await interaction.followup.send(
-        f"✅ Bootstrap complete — assigned Common to {assigned} member(s).", ephemeral=True
-    )
-
-
 # ── /assign-roles-from-invitational ───────────────────────────
 @tree.command(name="assign-roles-from-invitational",
               description="Preview and assign Legendary/Super Rare from an invitational (mods only)")
