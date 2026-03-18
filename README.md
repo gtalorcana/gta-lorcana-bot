@@ -7,6 +7,7 @@ Discord bot for the Greater Toronto Area Lorcana community.
 - Classifies Ontario stores by how regularly they run events and posts a weekly `#where-to-play` digest
 - Posts daily who's-going polls in `#whos-going` for stores expected to run that day
 - DMs subscribers when a spot opens at a full RPH event
+- Assigns league rarity roles (Common → Uncommon → Rare → Super Rare → Legendary) based on participation and standings
 
 ---
 
@@ -16,6 +17,7 @@ Discord bot for the Greater Toronto Area Lorcana community.
 bot.py                                      # Main bot — events, slash commands, scheduled tasks
 results.py                                  # Results reporting — processes RPH URLs, writes league standings
 stores.py                                   # Store classification — RPH analysis, who's-going logic, set champs refresh
+roles.py                                    # League rarity role management — player mapping, fuzzy matching, role sync
 clients.py                                  # Shared API singletons (GoogleSheetsApi, RphApi) — instantiated once to avoid OOM
 constants.py                                # All config — IDs, channel names, env var defaults
 util/
@@ -24,6 +26,7 @@ util/
 scripts/
   sync_commands.py                         # Syncs slash commands to guild (runs as Fly.io release_command)
   clear_global_commands.py                 # One-time script — clears legacy global Discord commands
+  backfill_player_linking.py              # One-time script — post fuzzy-match suggestions for historical standings data
   rph_get_set_championship_events.py       # Manual run script — inspect/write set champs events
   test_debug_sheet.py                      # Local test script — runs analyse_stores() against a test spreadsheet
 ```
@@ -35,15 +38,15 @@ scripts/
 | Command | Who | Description |
 |---------|-----|-------------|
 | `/schedule` | Everyone | Upcoming events from the website |
-| `/decklist` | Everyone | Submit a decklist to `#decklists` |
 | `/rank` | Everyone | Self-assign Casual / Competitive / Judge role |
 | `/watch-rph-event` | Everyone | Subscribe to DM alerts when a spot opens at a full RPH event |
 | `/unwatch-rph-event` | Everyone | Unsubscribe from a watched event |
 | `/list-watches` | Everyone | Show all currently watched events and subscriber counts |
-| `/results` | Manage Events | Post tournament results to `#results` and sync to website |
-| `/welcome @member` | Manage Guild | Manually welcome a member in `#general` |
-| `/recheck` | Manage Guild | Reprocess any unhandled threads in `#results-reporting` |
 | `/help` | Everyone | List all commands |
+| `/recheck` | Manage Guild | Reprocess any unhandled threads in `#results-reporting` |
+| `/link @member playhub_id` | Manage Guild | Manually link a Discord member to a Playhub ID |
+| `/sync-roles` | Manage Guild | Compute and apply Uncommon/Rare upgrades from current standings |
+| `/assign-roles-from-invitational` | Manage Guild | Preview and assign Legendary/Super Rare from an invitational event |
 | `/wheretoplay` | Admin | Manually trigger a `#where-to-play` refresh |
 | `/testwhosgoing` | Admin | Manually post who's-going polls for a given date |
 
@@ -58,6 +61,42 @@ scripts/
 | `set_champs_daily` | Daily at 7 AM ET, 2 weeks before `SET_CHAMPS_START_DATE` through `SET_CHAMPS_END_DATE` | Refreshes the Set Champs sheet from RPH |
 | `rph_watcher` | Every 15 min | Checks watched events for open spots and DMs subscribers |
 | `keepalive` | Every 30 min | Heartbeat log |
+
+---
+
+## League Rarity Roles
+
+Members earn rarity roles based on league participation. Roles are additive — earning a higher tier does not remove the lower one.
+
+| Role | How earned |
+|------|------------|
+| Common | Assigned automatically on server join |
+| Uncommon | 10+ distinct events played in the season |
+| Rare | Finished top 32 on the season leaderboard |
+| Super Rare | Top finisher at an invitational event |
+| Legendary | Winner of an invitational event |
+
+**How it works:**
+
+1. Every time results are processed, the bot fuzzy-matches any new Playhub players against Discord members and posts suggestions to the mod channel. Mods react ✅/❌ to confirm or skip each match.
+2. At season end, run `/sync-roles` to compute and apply Uncommon/Rare upgrades based on the full standings.
+3. After an invitational, run `/assign-roles-from-invitational <event_url>` to assign Super Rare / Legendary.
+
+**Player mapping sheet (`Playhub <-> Discord IDs` in Store Sheet):**
+
+| Column | Value |
+|--------|-------|
+| A | Discord user ID (0 = skipped/unmatched) |
+| B | Playhub numeric ID |
+| C | Display name |
+| D | Linked timestamp (UTC ISO) |
+| E | How it was linked (`fuzzy-confirmed`, `manual:<mod>`, `skipped`) |
+
+**Backfill script** (run once after initial deploy to link historical data):
+```bash
+python scripts/backfill_player_linking.py
+```
+Posts suggestions one at a time to the mod channel. Safe to stop and restart — confirmed links are written immediately, so the script picks up where it left off.
 
 ---
 
@@ -173,6 +212,7 @@ Manually add a store missing from RPH entirely:
 5. On API error: schedules auto-retries (up to `RPH_RETRY_ATTEMPTS`, spaced `RPH_RETRY_DELAY` seconds apart)
 6. If all retries fail: pings `ADMIN_USER_ID` in the thread
 7. Deleting a thread removes its event data from the sheet via `on_thread_delete`
+8. After a successful write, the bot fuzzy-matches any new Playhub players and posts linking suggestions to the mod channel
 
 **Duplicate vs retry detection:** same URL + same thread = retry (allowed, overwrites). Same URL + different thread = true duplicate (rejected).
 
@@ -183,7 +223,7 @@ Manually add a store missing from RPH entirely:
 | Spreadsheet | Purpose |
 |------------|---------|
 | League Sheet | Standings and events — written by the bot on each results submission |
-| Store Sheet | Store classifications, debug data, overrides, bot state |
+| Store Sheet | Store classifications, debug data, overrides, bot state, player mapping |
 | Set Champs Sheet | Set Championship events — written daily by `set_champs_daily` during the window |
 
 **Store Sheet tabs:**
@@ -194,6 +234,7 @@ Manually add a store missing from RPH entirely:
 | `Store Debug` | store_id, store_name, city, full_address, day, floored_time, format, status, streak, week of \<date\> ×4, event_ids | `analyse_stores()` every run — pre-override, raw RPH data |
 | `Overrides` | store_id, store_name, day, time, format, override_status, override_day, override_time, reason | Manual — never touched by bot |
 | `Bot State` | key, value | Bot — see below |
+| `Playhub <-> Discord IDs` | discord_id, playhub_id, display_name, linked_at, linked_by | Bot — player linking |
 
 **Bot State keys:**
 
@@ -233,7 +274,15 @@ WORKER_URL
 WORKER_SECRET
 GOOGLE_CREDENTIALS_JSON
 GOOGLE_TOKEN_JSON
+MOD_CHANNEL_ID
+COMMON_ROLE_ID
+UNCOMMON_ROLE_ID
+RARE_ROLE_ID
+SUPER_RARE_ROLE_ID
+LEGENDARY_ROLE_ID
 ```
+
+Role IDs and `MOD_CHANNEL_ID` have hardcoded defaults in `constants.py` matching the production server — only need to be set as secrets if deploying to a different server.
 
 ### Deploy
 
@@ -266,17 +315,15 @@ pip install -r requirements.txt
 
 Place `var/token.json` and `var/credentials.json` in the `var/` directory (gitignored).
 
-Create a `.env` and point at test channels to avoid touching production:
+Create a `.env` for local overrides:
 
 ```env
 DISCORD_BOT_TOKEN=...
 WORKER_URL=...
 WORKER_SECRET=...
-ANNOUNCEMENTS_CHANNEL=test-announcements
-RESULTS_REPORTING_CHANNEL=test-results-reporting
-WHERE_TO_PLAY_CHANNEL=test-where-to-play
-WHOS_GOING_CHANNEL=test-whos-going
+MOD_CHANNEL_ID=...
 WHOS_GOING_POST_HOUR_ET=9
+WHERE_TO_PLAY_POST_HOUR_ET=23
 ```
 
 ```bash
@@ -297,10 +344,12 @@ Set `TEST_STORE_SPREADSHEET_ID` in the script to a spreadsheet ID with a blank `
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `ANNOUNCEMENTS_CHANNEL` | `announcements` | |
-| `RESULTS_REPORTING_CHANNEL` | `results-reporting` | |
-| `WHERE_TO_PLAY_CHANNEL` | `where-to-play` | |
-| `WHOS_GOING_CHANNEL` | `whos-going` | |
+| `MOD_CHANNEL_ID` | *(hardcoded)* | Mod channel for linking suggestions and role previews |
+| `COMMON_ROLE_ID` | *(hardcoded)* | |
+| `UNCOMMON_ROLE_ID` | *(hardcoded)* | |
+| `RARE_ROLE_ID` | *(hardcoded)* | |
+| `SUPER_RARE_ROLE_ID` | *(hardcoded)* | |
+| `LEGENDARY_ROLE_ID` | *(hardcoded)* | |
 | `WHOS_GOING_POST_HOUR_ET` | `7` | Hour (ET) to post daily polls |
 | `WHERE_TO_PLAY_POST_HOUR_ET` | `23` | Hour (ET) to post Sunday where-to-play |
 | `CURRENT_SEASON` | `S11` | Used in sheet tab names |
@@ -314,3 +363,5 @@ Set `TEST_STORE_SPREADSHEET_ID` in the script to a spreadsheet ID with a blank `
 1. Update `SEASON_START_DATE`, `SEASON_END_DATE`, `CURRENT_SEASON`, `SET_CHAMPS_START_DATE`, and `SET_CHAMPS_END_DATE` in `constants.py`
 2. Create new `S## Standings - User Reported`, `S## Events - User Reported`, and `S## Set Champs` tabs in the relevant sheets
 3. Deploy: `fly deploy`
+4. Run the backfill script to link any new players from historical data: `python scripts/backfill_player_linking.py`
+5. At season end, run `/sync-roles` to assign Uncommon/Rare based on final standings
