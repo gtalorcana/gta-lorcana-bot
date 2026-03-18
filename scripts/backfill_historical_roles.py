@@ -160,11 +160,12 @@ async def _post_next():
         available = [m for m in _members if m.id not in _matched_discord_ids]
         best_member, score = fuzzy_match_member(player_name, available)
 
-        # Skip if best_member already has every role this player earned
+        # At any confidence level: skip if best_member already has every role this player earned
         if best_member and score >= FUZZY_LOW_CONFIDENCE:
             already_has = {r.id for r in best_member.roles}
             roles_needed = role_ids - already_has
             if not roles_needed:
+                _matched_discord_ids.add(best_member.id)
                 print(f"  [SKIP] {player_name} -> {best_member.display_name} already has all earned roles")
                 continue
             role_ids = roles_needed  # only assign what's missing
@@ -201,6 +202,8 @@ async def _post_next():
             return
 
         else:
+            grant_cmds = "  ".join(f"`/grant-role @member {_ROLE_NAMES[r]}`" for r in
+                                   sorted(role_ids, key=lambda r: RARITY_ROLE_IDS.index(r), reverse=True))
             embed = discord.Embed(
                 title=f"No Match — {role_names_str}",
                 description=(
@@ -208,7 +211,7 @@ async def _post_next():
                     f"**Roles:** {role_names_str}\n"
                     f"**Seasons:** {seasons_str}\n"
                     f"**Best guess:** {best_member.display_name if best_member else 'n/a'} ({score:.0%})\n\n"
-                    f"Assign manually in Discord roles, then re-run to skip."
+                    f"If you know who this is:\n{grant_cmds}"
                 ),
                 colour=discord.Colour.red()
             )

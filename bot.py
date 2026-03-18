@@ -68,6 +68,8 @@ from constants import (
     SET_CHAMPS_SPREADSHEET_ID,
     SET_CHAMPS_EVENTS_RANGE_NAME,
     COMMON_ROLE_ID,
+    UNCOMMON_ROLE_ID,
+    RARE_ROLE_ID,
     LEGENDARY_ROLE_ID,
     SUPER_RARE_ROLE_ID,
     LEAGUE_SPREADSHEET_ID,
@@ -1542,6 +1544,35 @@ async def sync_roles(interaction: discord.Interaction):
     )
 
 
+# ── /grant-role ────────────────────────────────────────────────
+_GRANT_ROLE_MAP = {
+    "Common":     COMMON_ROLE_ID,
+    "Uncommon":   UNCOMMON_ROLE_ID,
+    "Rare":       RARE_ROLE_ID,
+    "Super Rare": SUPER_RARE_ROLE_ID,
+    "Legendary":  LEGENDARY_ROLE_ID,
+}
+
+@tree.command(name="grant-role", description="Manually grant a rarity role to a member (admins only)")
+@app_commands.describe(member="Discord member", role="Rarity role to grant")
+@app_commands.choices(role=[app_commands.Choice(name=n, value=n) for n in _GRANT_ROLE_MAP])
+async def grant_role(interaction: discord.Interaction, member: discord.Member, role: app_commands.Choice[str]):
+    if not _is_admin(interaction):
+        await interaction.response.send_message("⚠️ Admins only.", ephemeral=True)
+        return
+
+    role_id = _GRANT_ROLE_MAP[role.value]
+    discord_role = interaction.guild.get_role(role_id)
+    if not discord_role:
+        await interaction.response.send_message(f"⚠️ Role not found in server.", ephemeral=True)
+        return
+
+    await member.add_roles(discord_role, reason=f"grant-role by {interaction.user.display_name}")
+    await interaction.response.send_message(
+        f"✅ Granted **{role.value}** to {member.mention}.", ephemeral=True
+    )
+
+
 # ── /assign-roles-from-invitational ───────────────────────────
 @tree.command(name="assign-roles-from-invitational",
               description="Preview and assign Legendary/Super Rare from an invitational (mods only)")
@@ -1658,6 +1689,7 @@ async def help_command(interaction: discord.Interaction):
                     inline=False)
     embed.add_field(name="/link", value="Manually link a Discord member to a Playhub ID", inline=False)
     embed.add_field(name="/sync-roles", value="Compute and apply Uncommon/Rare role upgrades from current standings", inline=False)
+    embed.add_field(name="/grant-role", value="Manually grant a rarity role to a member", inline=False)
     embed.add_field(name="/assign-roles-from-invitational", value="Assign Legendary/Super Rare from an invitational event", inline=False)
     embed.add_field(name="/wheretoplay", value="Manually push the Where to Play post", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
