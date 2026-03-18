@@ -10,11 +10,10 @@ Features:
   - /welcome         — manually welcome a member (admins only)
   - /recheck         — reprocess missed results threads (admins only)
   - /watch-rph-event — subscribe to DM alerts when a spot opens at a full event
-  - /unwatch-rph-event — unsubscribe from a watched event:q
+  - /unwatch-rph-event — unsubscribe from a watched event
   - /list-watches    — see all currently watched events
   - /help            — list all commands
   - on_member_join   — auto-greets new members (currently disabled)
-  - whos_going_daily — posts #whos_going polls at 7AM ET for stores expected to run today
   - where_to_play_weekly — refreshes #where-to-play every Sunday evening
 
 Requirements:
@@ -32,11 +31,9 @@ Environment variables (optional — override via .env for local dev):
   ANNOUNCEMENTS_CHANNEL       default: announcements
   RESULTS_REPORTING_CHANNEL   default: results-reporting
   WHERE_TO_PLAY_CHANNEL       default: where-to-play
-  WHOS_GOING_CHANNEL          default: whos_going
   CURRENT_SEASON              default: S11
   RPH_RETRY_ATTEMPTS          default: 2
   RPH_RETRY_DELAY             default: 300 (seconds)
-  WHOS_GOING_POST_HOUR_ET     default: 7 (7AM ET)
   WHERE_TO_PLAY_POST_HOUR_ET  default: 23 (11PM ET)
 """
 
@@ -71,8 +68,6 @@ from constants import (
     WELCOME_CHANNEL,
     SELF_ASSIGN_ROLES,
     WHERE_TO_PLAY_CHANNEL,
-    WHOS_GOING_CHANNEL,
-    WHOS_GOING_POST_HOUR_ET,
     WHERE_TO_PLAY_POST_DAY,
     WHERE_TO_PLAY_POST_HOUR_ET,
     SET_CHAMPS_START_DATE,
@@ -229,90 +224,11 @@ async def keepalive():
     print(f"  ♥ Heartbeat — bot alive, watching #{ANNOUNCEMENTS_CHANNEL} and #{RESULTS_REPORTING_CHANNEL}")
 
 
-# ── Whos-Going & Where-to-Play tasks ────────────────────────────────
+# ── Where-to-Play tasks ────────────────────────────────
 
 # Stores the message ID of the current #where-to-play post so we can edit it
 # in-place each Sunday rather than posting a new one.
 _where_to_play_msg_ids: list[int | None] = [None, None, None]  # regular, semi-regular, info
-
-
-# @tasks.loop(minutes=1)
-# async def whos_going_daily():
-#     """
-#     Posts one #Whos-Going poll per Regular store expected to run today.
-#     Fires once daily at WHOS_GOING_POST_HOUR_ET (ET).
-#     Skips if no stores are expected today.
-#     """
-#     now_et = _now_et()
-#     if now_et.hour != WHOS_GOING_POST_HOUR_ET or now_et.minute != 0:
-#         return
-#
-#     print(f"  🗓 whos_going_daily: checking expected stores for {now_et.date()}...")
-#     await _post_whos_going_polls(now_et.date())
-
-
-async def _post_whos_going_polls(target_date, interaction: discord.Interaction = None):
-    """
-    Core who's-going poll posting logic. Posts one poll per Regular store expected on target_date.
-    If interaction is provided, sends ephemeral feedback to the caller.
-    """
-    loop = asyncio.get_running_loop()
-    try:
-        store_analysis  = await loop.run_in_executor(None, analyse_stores, target_date)
-        expected_stores = await loop.run_in_executor(
-            None, get_expected_stores_for_date, target_date, store_analysis
-        )
-        gc.collect()  # TODO: remove when upgraded to 1GB RAM — analyse_stores holds a full season of RPH events
-    except Exception as e:
-        msg = f"Failed to fetch store analysis: {e}"
-        print(f"  ✗ _post_whos_going_polls: {msg}")
-        if interaction:
-            await interaction.followup.send(f"❌ {msg}", ephemeral=True)
-        return
-
-    if not expected_stores:
-        msg = f"No stores expected on {target_date} — no polls posted."
-        print(f"  ↩ _post_whos_going_polls: {msg}")
-        if interaction:
-            await interaction.followup.send(f"ℹ️ {msg}", ephemeral=True)
-        return
-
-    posted = 0
-    for guild in bot.guilds:
-        whos_going_ch = get_channel(guild, WHOS_GOING_CHANNEL)
-        if not whos_going_ch:
-            print(f"  ⚠ _post_whos_going_polls: #{WHOS_GOING_CHANNEL} not found in {guild.name}")
-            continue
-
-        for store in expected_stores:
-            embed = make_embed(
-                title=f"📅 Who's coming today?",
-                description=(
-                    f"**{store['store_name']}**\n"
-                    f"📆 {target_date.strftime('%A, %B %d').replace(' 0', ' ')}\n"
-                    f"🕐 Typically starts: {store['time']} (Toronto time)\n"
-                    f"🎮 Format: {store['format']}\n\n"
-                    f"React below to let the community know if you're attending!\n"
-                    f"👍 Going · 👎 Not going · 🤔 Maybe"
-                ),
-                colour=discord.Colour.blurple()
-            )
-            try:
-                msg = await whos_going_ch.send(embed=embed)
-                await msg.add_reaction("👍")
-                await msg.add_reaction("👎")
-                await msg.add_reaction("🤔")
-                print(f"  ✓ Who's-going poll posted for {store['store_name']}")
-                posted += 1
-            except Exception as e:
-                print(f"  ✗ Failed to post who's-going poll for {store['store_name']}: {e}")
-
-    if interaction:
-        await interaction.followup.send(
-            f"✅ Posted {posted} who's-going poll(s) for {target_date.strftime('%A, %B %d').replace(' 0', ' ')}.",
-            ephemeral=True
-        )
-
 
 @tasks.loop(minutes=1)
 async def where_to_play_weekly():
@@ -662,9 +578,6 @@ async def on_ready():
     if not keepalive.is_running():
         keepalive.start()
         print(f"  ♻ Keepalive task started")
-    # if not whos_going_daily.is_running():
-    #     whos_going_daily.start()
-    #     print(f"  ♻ Whos-going daily task started (fires at {WHOS_GOING_POST_HOUR_ET}AM ET)")
     if not where_to_play_weekly.is_running():
         where_to_play_weekly.start()
         print(f"  ♻ Where-to-play weekly task started (fires Sundays at {WHERE_TO_PLAY_POST_HOUR_ET}:00 ET)")
@@ -1518,28 +1431,6 @@ async def wheretoplay_command(interaction: discord.Interaction):
         })
         await interaction.followup.send(f"✅ #{WHERE_TO_PLAY_CHANNEL} updated.", ephemeral=True)
 
-    except Exception as e:
-        await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
-
-
-@tree.command(name="testwhosgoing", description="Manually trigger today's #whos_going polls (admins only)")
-@app_commands.describe(date="Optional date to test (YYYY-MM-DD), defaults to today")
-async def testwhosgoing_command(interaction: discord.Interaction, date: str = None):
-    if interaction.user.id != ADMIN_USER_ID:
-        await interaction.response.send_message("❌ Admins only.", ephemeral=True)
-        return
-
-    await interaction.response.defer(ephemeral=True)
-
-    try:
-        if date:
-            from datetime import date as date_type
-            target_date = date_type.fromisoformat(date)
-        else:
-            target_date = _now_et().date()
-        await _post_whos_going_polls(target_date, interaction=interaction)
-    except ValueError:
-        await interaction.followup.send("❌ Invalid date format — use YYYY-MM-DD.", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 

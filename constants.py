@@ -60,7 +60,7 @@ RESULTS_CHANNEL           = "results"
 DECKLISTS_CHANNEL         = "decklists"
 WELCOME_CHANNEL           = "general"
 WHERE_TO_PLAY_CHANNEL     = os.getenv("WHERE_TO_PLAY_CHANNEL", "where-to-play")
-WHOS_GOING_CHANNEL              = os.getenv("WHOS_GOING_CHANNEL", "whos-going")
+WHOS_GOING_CHANNEL        = os.getenv("WHOS_GOING_CHANNEL", "whos-going")
 
 CHANNELS = {
     "where_to_play": 1479988278164852746
@@ -68,7 +68,6 @@ CHANNELS = {
 
 # Who's-Going & Where-to-Play settings
 # Override via .env for local testing, e.g. WHOS_GOING_POST_HOUR_ET=9
-WHOS_GOING_POST_HOUR_ET             = int(os.getenv("WHOS_GOING_POST_HOUR_ET", 7))   # 7AM ET daily
 WHERE_TO_PLAY_POST_DAY        = 6   # Sunday (0=Mon … 6=Sun)
 WHERE_TO_PLAY_POST_HOUR_ET    = int(os.getenv("WHERE_TO_PLAY_POST_HOUR_ET", 23))  # 11PM ET Sunday
 WHERE_TO_PLAY_MIN_CONSECUTIVE_WEEKS    = 2   # weeks in a row to become Regular

@@ -909,7 +909,7 @@ def refresh_set_champs() -> int:
             dt_toronto.strftime('%Y-%m-%d'),
             dt_toronto.strftime('%I:%M %p').lstrip('0'),
             e['store']['name'],
-            _parse_city(['store'].get('full_address', '')),
+            _parse_city(e['store'].get('full_address', '')),
             e.get('capacity', ''),
             e['gameplay_format']['name'],
             e.get('name', ''),

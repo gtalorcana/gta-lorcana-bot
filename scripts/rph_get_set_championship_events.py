@@ -23,8 +23,6 @@ import os
 import sys
 from zoneinfo import ZoneInfo
 
-from stores import _parse_city
-
 # Allow running from project root or scripts/
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -37,11 +35,12 @@ from constants import (
     SET_CHAMPS_START_DT,
     SET_CHAMPS_END_DT,
 )
+from stores import _parse_city
 
 _TZ_TORONTO = ZoneInfo("America/Toronto")
 
 # Set to True once you've verified the printed output looks correct
-WRITE_TO_SHEET = FALSE
+WRITE_TO_SHEET = False
 
 # Only include events whose name contains this string (case-insensitive).
 # Set to None to include all events and inspect names first.
