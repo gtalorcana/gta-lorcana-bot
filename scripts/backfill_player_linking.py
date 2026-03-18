@@ -181,6 +181,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             colour=discord.Colour.green()
         )
     else:
+        add_player_mapping(0, suggestion['playhub_id'], suggestion['display_name'], 'skipped')
         print(f"  Skipped: {suggestion['display_name']}")
         new_embed = discord.Embed(
             title="Skipped - use /link to resolve",
