@@ -47,7 +47,7 @@ from roles import (
 )
 
 # Seasons available in the archive spreadsheet
-ARCHIVE_SEASONS = ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9", "S10"]
+ARCHIVE_SEASONS = ["S5", "S6", "S7", "S8", "S9", "S10"]
 
 intents = discord.Intents.default()
 intents.members = True
