@@ -48,21 +48,11 @@ STANDINGS_RANGE_NAME        = STANDINGS_SHEET_NAME + "!" + "A3:F"
 EVENTS_RANGE_NAME           = EVENTS_SHEET_NAME + "!" + "A2:G"
 EVENTS_TIMESTAMP_RANGE_NAME = EVENTS_SHEET_NAME + "!" + "J1:K1"
 
-# Discord channel names (production values)
-# Override via .env locally to point at test channels, e.g.:
-#   ANNOUNCEMENTS_CHANNEL=test-announcements
-#   RESULTS_REPORTING_CHANNEL=test-results-reporting
-ANNOUNCEMENTS_CHANNEL     = os.getenv("ANNOUNCEMENTS_CHANNEL", "announcements")
-RESULTS_REPORTING_CHANNEL = os.getenv("RESULTS_REPORTING_CHANNEL", "results-reporting")
+# Discord channel IDs
 RESULTS_REPORTING_CHANNEL_URL = "https://discord.com/channels/1253915141716578314/"
-## TODO: Update all the channels to use Channel ID instead.
-RESULTS_CHANNEL           = "results"
-DECKLISTS_CHANNEL         = "decklists"
-WELCOME_CHANNEL           = "general"
-WHERE_TO_PLAY_CHANNEL     = os.getenv("WHERE_TO_PLAY_CHANNEL", "where-to-play")
-WHOS_GOING_CHANNEL        = os.getenv("WHOS_GOING_CHANNEL", "whos-going")
-
 CHANNELS = {
+    "announcements": 1256090387978784778,
+    "results_reporting": 1253943193519784028,
     "where_to_play": 1479988278164852746
 }
 
