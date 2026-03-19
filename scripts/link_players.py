@@ -106,11 +106,7 @@ async def _post_next():
 
         if best_member and score >= FUZZY_LOW_CONFIDENCE:
             high = score >= FUZZY_HIGH_CONFIDENCE
-            grant_cmds = "  ".join(
-                f"`/grant-role @member {RARITY_ROLE_NAMES[r]}`"
-                for r in sorted(role_ids, key=lambda r: RARITY_ROLE_IDS.index(r), reverse=True)
-            )
-            low_hint = f"\n\nIf the match is wrong, ❌ then:\n{grant_cmds}" if not high else ""
+            low_hint = f"\n\nIf the match is wrong, ❌ then use:\n`/link @member \"{player_name}\"`" if not high else ""
             embed = discord.Embed(
                 title=f"{'Suggested' if high else 'Low-Confidence'} Match — {role_names_str}",
                 description=(
@@ -138,10 +134,6 @@ async def _post_next():
             return
 
         else:
-            grant_cmds = "  ".join(
-                f"`/grant-role @member {RARITY_ROLE_NAMES[r]}`"
-                for r in sorted(role_ids, key=lambda r: RARITY_ROLE_IDS.index(r), reverse=True)
-            )
             embed = discord.Embed(
                 title=f"No Match — {role_names_str}",
                 description=(
@@ -149,7 +141,7 @@ async def _post_next():
                     f"**Roles:** {role_names_str}\n"
                     f"**Seasons:** {seasons_str}\n"
                     f"**Best guess:** {best_member.display_name if best_member else 'n/a'} ({score:.0%})\n\n"
-                    f"If you know who this is:\n{grant_cmds}"
+                    f"If you know who this is:\n`/link @member \"{player_name}\"`"
                 ),
                 colour=discord.Colour.red()
             )
