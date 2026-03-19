@@ -1492,25 +1492,20 @@ async def link_command(interaction: discord.Interaction, member: discord.Member,
 
     registry = await loop.run_in_executor(None, get_player_registry)
 
-    # Check for existing links
+    # Check for existing links — block only if the identifier is claimed by a different member.
+    # Linking a second Playhub name to the same member is allowed (rows will be merged).
     for entry in registry:
         if not entry['discord_id']:
             continue
-        if playhub_id and entry['playhub_id'] == playhub_id:
+        if playhub_id and entry['playhub_id'] == playhub_id and entry['discord_id'] != member.id:
             await interaction.followup.send(
                 f"⚠️ Playhub ID `{playhub_id}` is already linked to <@{entry['discord_id']}>.",
                 ephemeral=True
             )
             return
-        if playhub_name and entry['playhub_name'].lower() == playhub_name.lower():
+        if playhub_name and entry['playhub_name'].lower() == playhub_name.lower() and entry['discord_id'] != member.id:
             await interaction.followup.send(
                 f"⚠️ Playhub name `{playhub_name}` is already linked to <@{entry['discord_id']}>.",
-                ephemeral=True
-            )
-            return
-        if entry['discord_id'] == member.id:
-            await interaction.followup.send(
-                f"⚠️ {member.mention} is already linked to Playhub `{entry['playhub_name'] or entry['playhub_id']}`.",
                 ephemeral=True
             )
             return
