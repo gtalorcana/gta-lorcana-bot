@@ -363,14 +363,14 @@ def _merge_duplicate_rows(discord_id: int):
         [best_row],
     )
 
-    # Blank Discord columns (F–J) on all other matching rows
+    # Blank the entire duplicate row (A–J) so it no longer appears in the registry
     for dup_idx, _ in matching[1:]:
         dup_sheet_row = dup_idx + 2
         _gs.update_values(
             STORE_SPREADSHEET_ID,
-            f"{PLAYER_REGISTRY_SHEET_NAME}!F{dup_sheet_row}:J{dup_sheet_row}",
+            f"{PLAYER_REGISTRY_SHEET_NAME}!A{dup_sheet_row}:J{dup_sheet_row}",
             'USER_ENTERED',
-            [['', '', '', '', '']],
+            [[''] * 10],
         )
 
 
