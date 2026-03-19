@@ -340,7 +340,7 @@ def _merge_duplicate_rows(discord_id: int):
     for _, dup_row in matching[1:]:
         for col in range(1, 5):
             if dup_row[col].strip():
-                if not best_row[col].strip() or dup_row[col].strip() < best_row[col].strip():
+                if not best_row[col].strip() or _season_num(dup_row[col]) < _season_num(best_row[col]):
                     best_row[col] = dup_row[col].strip()
 
     # Write best row back
@@ -395,6 +395,14 @@ def get_unlinked_players(standing_rows: list[list]) -> list[tuple[str, str]]:
 
 
 # ── Fuzzy Matching ─────────────────────────────────────────────────────────────
+
+def _season_num(s: str) -> int:
+    """Extract numeric value from a season string for correct ordering, e.g. 'S10' -> 10."""
+    try:
+        return int(s.strip().lstrip('Ss'))
+    except ValueError:
+        return 0
+
 
 def _similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()

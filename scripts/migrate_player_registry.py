@@ -72,6 +72,13 @@ intents.members = True
 client = discord.Client(intents=intents)
 
 
+def _season_num(s: str) -> int:
+    try:
+        return int(s.strip().lstrip('Ss'))
+    except ValueError:
+        return 0
+
+
 def _load_old_mapping() -> dict:
     """Return {display_name_lower: {discord_id, playhub_id, display_name, linked_at, linked_by}}"""
     print("  Loading old Playhub <-> Discord IDs mapping...")
@@ -146,7 +153,7 @@ def _build_player_data(old_mapping: dict) -> list[list]:
             'playhub_id': None,
         })
         existing = entry['role_seasons'].get(role_id)
-        if existing is None or season < existing:
+        if existing is None or _season_num(season) < _season_num(existing):
             entry['role_seasons'][role_id] = season
 
     # Archive leaderboards
