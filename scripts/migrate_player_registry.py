@@ -60,10 +60,12 @@ OLD_MAPPING_RANGE_NAME = OLD_MAPPING_SHEET_NAME + "!A2:E"
 
 # Parse args before bot startup
 parser = argparse.ArgumentParser(description="Migrate to Player Registry sheet")
+parser.add_argument("--rebuild-registry", action="store_true",
+                    help="Clear and rebuild the Player Registry from archive + old mapping (DESTRUCTIVE)")
 parser.add_argument("--clear-discord-roles", action="store_true",
-                    help="Remove Legendary/SR/Rare/Uncommon from all guild members before assigning")
+                    help="Remove Legendary/SR/Rare/Uncommon from all guild members (requires --rebuild-registry)")
 parser.add_argument("--assign-discord-roles", action="store_true",
-                    help="Assign Discord roles based on registry for all linked players")
+                    help="Assign Discord roles based on current registry for all linked players (safe, never clears sheet)")
 args = parser.parse_args()
 
 
@@ -218,6 +220,41 @@ async def on_ready():
     members = [m for m in guild.members if not m.bot]
     rarity_roles = {UNCOMMON_ROLE_ID, RARE_ROLE_ID, SUPER_RARE_ROLE_ID, LEGENDARY_ROLE_ID}
 
+    # --assign-discord-roles alone: read registry as-is, assign roles, done.
+    # Never touches the sheet data.
+    if args.assign_discord_roles and not args.rebuild_registry:
+        print("  --assign-discord-roles only: reading current Player Registry...")
+        from roles import get_player_registry, RARITY_ROLE_NAMES as _ROLE_NAMES
+        registry = get_player_registry()
+        assigned_count = 0
+        discord_id_to_member = {m.id: m for m in members}
+        for entry in registry:
+            if not entry['discord_id']:
+                continue
+            member = discord_id_to_member.get(entry['discord_id'])
+            if not member:
+                continue
+            current_role_ids = {r.id for r in member.roles}
+            role_col_map = [
+                (LEGENDARY_ROLE_ID,  entry['legendary']),
+                (SUPER_RARE_ROLE_ID, entry['super_rare']),
+                (RARE_ROLE_ID,       entry['rare']),
+                (UNCOMMON_ROLE_ID,   entry['uncommon']),
+            ]
+            roles_to_add = [guild.get_role(rid) for rid, season in role_col_map
+                            if season and rid not in current_role_ids and guild.get_role(rid)]
+            if roles_to_add:
+                try:
+                    await member.add_roles(*roles_to_add, reason="migrate_player_registry: assign")
+                    print(f"    Assigned {', '.join(_ROLE_NAMES.get(r.id, r.name) for r in roles_to_add)} → {member.display_name}")
+                    assigned_count += len(roles_to_add)
+                except discord.HTTPException as e:
+                    print(f"    [WARN] Could not assign roles for {member.display_name}: {e}")
+        print(f"\nDone — assigned {assigned_count} role(s).")
+        await client.close()
+        return
+
+    # Full rebuild (default, or --rebuild-registry)
     # Step 1: Load old mapping
     old_mapping = _load_old_mapping()
 
