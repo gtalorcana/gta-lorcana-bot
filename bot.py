@@ -1481,12 +1481,14 @@ async def link_command(interaction: discord.Interaction, member: discord.Member,
     loop = asyncio.get_running_loop()
 
     # Determine if identifier is a numeric playhub_id or a display name
-    if identifier.strip().isdigit():
-        playhub_id   = identifier.strip()
+    # Strip surrounding quotes in case the user wrapped the name in quotes
+    identifier = identifier.strip().strip('"').strip("'")
+    if identifier.isdigit():
+        playhub_id   = identifier
         playhub_name = None
     else:
         playhub_id   = None
-        playhub_name = identifier.strip()
+        playhub_name = identifier
 
     registry = await loop.run_in_executor(None, get_player_registry)
 
