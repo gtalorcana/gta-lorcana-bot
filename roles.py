@@ -154,7 +154,12 @@ def upsert_player_roles(playhub_name: str, role_seasons: dict[int, str], playhub
                 row_idx = i
                 break
 
-    # Fall back to name match
+    # Fall back to name match — exact first, then case-insensitive
+    if row_idx is None:
+        for i, row in enumerate(rows):
+            if row and row[0].strip() == playhub_name:
+                row_idx = i
+                break
     if row_idx is None:
         for i, row in enumerate(rows):
             if row and row[0].strip().lower() == playhub_name.lower():
@@ -233,6 +238,12 @@ def link_player(
                 row_idx = i
                 break
 
+    if row_idx is None and playhub_name:
+        # Exact match first, then case-insensitive fallback
+        for i, row in enumerate(rows):
+            if row and row[0].strip() == playhub_name:
+                row_idx = i
+                break
     if row_idx is None and playhub_name:
         for i, row in enumerate(rows):
             if row and row[0].strip().lower() == playhub_name.lower():
