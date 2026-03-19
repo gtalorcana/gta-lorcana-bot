@@ -83,6 +83,7 @@ from roles import (
     get_player_registry,
     link_player,
     upsert_player_roles,
+    batch_upsert_player_roles,
     compute_earned_roles,
     RARITY_ROLE_IDS,
     RARITY_ROLE_NAMES,
@@ -1566,8 +1567,8 @@ async def sync_roles(interaction: discord.Interaction):
     )
     leaderboard_rows = lb_data.get('values', [])
 
-    # 2. Build earned dict: {player_name_lower: {role_id: CURRENT_SEASON}}
-    earned_by_name: dict[str, dict[int, str]] = {}
+    # 2. Build earned dict: {player_name_lower: (display_name, {role_id: CURRENT_SEASON})}
+    earned_by_name: dict[str, tuple[str, dict[int, str]]] = {}
     for row in leaderboard_rows:
         if len(row) < 2:
             continue
@@ -1582,13 +1583,20 @@ async def sync_roles(interaction: discord.Interaction):
             events_played = 0
         earned = compute_earned_roles(rank, events_played)
         if earned:
-            earned_by_name[player_name.lower()] = {r: CURRENT_SEASON for r in earned}
+            earned_by_name[player_name.lower()] = (player_name, {r: CURRENT_SEASON for r in earned})
 
     if not earned_by_name:
         await interaction.followup.send("✅ No players have earned roles this season.", ephemeral=True)
         return
 
-    # 3. Read registry once
+    # 3. Batch-upsert all role changes in one registry read + one API write
+    earners = [(name, roles, None) for name, roles in earned_by_name.values()]
+    try:
+        await loop.run_in_executor(None, batch_upsert_player_roles, earners)
+    except Exception as e:
+        print(f"  ⚠ sync-roles: batch upsert failed: {e}")
+
+    # 4. Read registry once for Discord role assignment
     registry = await loop.run_in_executor(None, get_player_registry)
     registry_by_name = {r['playhub_name'].lower(): r for r in registry}
 
@@ -1596,24 +1604,8 @@ async def sync_roles(interaction: discord.Interaction):
     applied   = []   # (member_mention, role_name)
     unlinked  = []   # player names who earned roles but have no Discord link
 
-    # 4. Process each earned player
-    for player_name_lower, role_seasons in earned_by_name.items():
-        # Find original-case name from leaderboard
-        player_name_display = next(
-            (row[1].strip() for row in leaderboard_rows
-             if len(row) >= 2 and row[1].strip().lower() == player_name_lower),
-            player_name_lower
-        )
-
-        # Upsert registry role columns
-        try:
-            await loop.run_in_executor(
-                None, upsert_player_roles, player_name_display, role_seasons
-            )
-        except Exception as e:
-            print(f"  ⚠ sync-roles: registry upsert failed for {player_name_display}: {e}")
-
-        # Assign Discord roles if linked
+    # 5. Assign Discord roles for linked players
+    for player_name_lower, (player_name_display, role_seasons) in earned_by_name.items():
         reg_entry = registry_by_name.get(player_name_lower)
         if not reg_entry or not reg_entry['discord_id']:
             unlinked.append(player_name_display)

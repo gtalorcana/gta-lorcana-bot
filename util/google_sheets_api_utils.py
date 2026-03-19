@@ -159,6 +159,27 @@ class GoogleSheetsApi:
         except HttpError as error:
             raise
 
+    def batch_update_values(self, spreadsheet_id, value_ranges: list):
+        """
+        Update multiple ranges in a single API call.
+        value_ranges: list of {"range": "Sheet!A1:J1", "values": [[...]]}
+        """
+        try:
+            body = {
+                "valueInputOption": "USER_ENTERED",
+                "data": value_ranges,
+            }
+            result = (
+                self.service.spreadsheets()
+                .values()
+                .batchUpdate(spreadsheetId=spreadsheet_id, body=body)
+                .execute()
+            )
+            print(f"  {result.get('totalUpdatedCells')} cells batch-updated")
+            return result
+        except HttpError as error:
+            raise
+
     def append_values(self, spreadsheet_id, range_name, value_input_option, _values):
         try:
             body = {"values": _values}

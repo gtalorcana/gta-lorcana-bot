@@ -181,32 +181,30 @@ def upsert_player_roles(playhub_name: str, role_seasons: dict[int, str], playhub
         )
         return
 
-    # Existing row — pad to 10 cols and update only blank cells
+    # Existing row — pad to 10 cols and update only blank cells, then write once
     existing = list(rows[row_idx]) + [''] * (10 - len(rows[row_idx]))
     sheet_row = row_idx + 2  # +1 for 0-index, +1 for header row
 
+    changed = False
     for role_id, season in role_seasons.items():
         col = _ROLE_COL.get(role_id)
-        col_letter = _ROLE_COL_LETTER.get(role_id)
-        if col is None or col_letter is None:
+        if col is None:
             continue
         if existing[col]:
             continue  # already recorded — preserve oldest
         existing[col] = season
-        _gs.update_values(
-            STORE_SPREADSHEET_ID,
-            f"{PLAYER_REGISTRY_SHEET_NAME}!{col_letter}{sheet_row}",
-            'USER_ENTERED',
-            [[season]],
-        )
+        changed = True
 
-    # Also update playhub_id column (H) if provided and currently blank
     if playhub_id and not existing[7].strip():
+        existing[7] = str(playhub_id)
+        changed = True
+
+    if changed:
         _gs.update_values(
             STORE_SPREADSHEET_ID,
-            f"{PLAYER_REGISTRY_SHEET_NAME}!H{sheet_row}",
+            f"{PLAYER_REGISTRY_SHEET_NAME}!A{sheet_row}:J{sheet_row}",
             'USER_ENTERED',
-            [[str(playhub_id)]],
+            [existing],
         )
 
 
@@ -270,35 +268,23 @@ def link_player(
         _merge_duplicate_rows(discord_id)
         return {}
 
-    # Update Discord columns in the existing row
+    # Update Discord columns in the existing row and write it all at once
     sheet_row = row_idx + 2
-    existing = list(rows[row_idx]) + [''] * (10 - len(rows[row_idx]))
+    updated_row = list(rows[row_idx]) + [''] * (10 - len(rows[row_idx]))
 
-    updates = [
-        ('F', str(discord_id)),
-        ('G', discord_display_name),
-        ('I', now),
-        ('J', link_method),
-    ]
-    if playhub_id and not existing[7].strip():
-        updates.append(('H', str(playhub_id)))
-
-    for col_letter, value in updates:
-        _gs.update_values(
-            STORE_SPREADSHEET_ID,
-            f"{PLAYER_REGISTRY_SHEET_NAME}!{col_letter}{sheet_row}",
-            'USER_ENTERED',
-            [[value]],
-        )
-
-    # Read back the row to extract role data
-    updated_row = existing[:]
     updated_row[5] = str(discord_id)
     updated_row[6] = discord_display_name
     updated_row[8] = now
     updated_row[9] = link_method
-    if playhub_id and not existing[7].strip():
+    if playhub_id and not updated_row[7].strip():
         updated_row[7] = str(playhub_id)
+
+    _gs.update_values(
+        STORE_SPREADSHEET_ID,
+        f"{PLAYER_REGISTRY_SHEET_NAME}!A{sheet_row}:J{sheet_row}",
+        'USER_ENTERED',
+        [updated_row],
+    )
 
     row_dict = _row_to_dict(updated_row)
     role_seasons = {}
@@ -354,24 +340,96 @@ def _merge_duplicate_rows(discord_id: int):
                 if not best_row[col].strip() or _season_num(dup_row[col]) < _season_num(best_row[col]):
                     best_row[col] = dup_row[col].strip()
 
-    # Write best row back
+    # Write best row + blank all duplicates in one batch call
     best_sheet_row = best_idx + 2
-    _gs.update_values(
-        STORE_SPREADSHEET_ID,
-        f"{PLAYER_REGISTRY_SHEET_NAME}!A{best_sheet_row}:J{best_sheet_row}",
-        'USER_ENTERED',
-        [best_row],
-    )
-
-    # Blank the entire duplicate row (A–J) so it no longer appears in the registry
+    value_ranges = [{
+        'range': f"{PLAYER_REGISTRY_SHEET_NAME}!A{best_sheet_row}:J{best_sheet_row}",
+        'values': [best_row],
+    }]
     for dup_idx, _ in matching[1:]:
         dup_sheet_row = dup_idx + 2
-        _gs.update_values(
-            STORE_SPREADSHEET_ID,
-            f"{PLAYER_REGISTRY_SHEET_NAME}!A{dup_sheet_row}:J{dup_sheet_row}",
-            'USER_ENTERED',
-            [[''] * 10],
-        )
+        value_ranges.append({
+            'range': f"{PLAYER_REGISTRY_SHEET_NAME}!A{dup_sheet_row}:J{dup_sheet_row}",
+            'values': [[''] * 10],
+        })
+    _gs.batch_update_values(STORE_SPREADSHEET_ID, value_ranges)
+
+
+def batch_upsert_player_roles(earners: list[tuple[str, dict, str | None]]):
+    """
+    Upsert role columns for multiple players in one read + one batch write.
+    Far more efficient than calling upsert_player_roles() in a loop.
+
+    earners: list of (playhub_name, role_seasons, playhub_id)
+             role_seasons: {role_id: season_str}
+    """
+    if not earners:
+        return
+
+    data = _gs.get_values(STORE_SPREADSHEET_ID, PLAYER_REGISTRY_RANGE_NAME)
+    rows = data.get('values', [])
+
+    # Build lookup indices from the single read
+    id_to_idx: dict[str, int] = {}
+    exact_to_idx: dict[str, int] = {}
+    lower_to_idx: dict[str, int] = {}
+    for i, row in enumerate(rows):
+        padded = list(row) + [''] * (10 - len(row))
+        if padded[7].strip():
+            id_to_idx[padded[7].strip()] = i
+        name = padded[0].strip()
+        if name:
+            exact_to_idx[name] = i
+            lower_to_idx[name.lower()] = i
+
+    value_ranges = []   # batch updates for existing rows
+    new_rows = []       # appends for new players
+
+    for playhub_name, role_seasons, playhub_id in earners:
+        if not role_seasons:
+            continue
+
+        row_idx = None
+        if playhub_id:
+            row_idx = id_to_idx.get(str(playhub_id))
+        if row_idx is None:
+            row_idx = exact_to_idx.get(playhub_name)
+        if row_idx is None:
+            row_idx = lower_to_idx.get(playhub_name.lower())
+
+        if row_idx is None:
+            new_row = [playhub_name, '', '', '', '', '', '', str(playhub_id) if playhub_id else '', '', '']
+            for role_id, season in role_seasons.items():
+                col = _ROLE_COL.get(role_id)
+                if col is not None:
+                    new_row[col] = season
+            new_rows.append(new_row)
+        else:
+            existing = list(rows[row_idx]) + [''] * (10 - len(rows[row_idx]))
+            changed = False
+            for role_id, season in role_seasons.items():
+                col = _ROLE_COL.get(role_id)
+                if col is None:
+                    continue
+                if existing[col]:
+                    continue  # preserve earliest season
+                existing[col] = season
+                changed = True
+            if playhub_id and not existing[7].strip():
+                existing[7] = str(playhub_id)
+                changed = True
+            if changed:
+                sheet_row = row_idx + 2
+                value_ranges.append({
+                    'range': f"{PLAYER_REGISTRY_SHEET_NAME}!A{sheet_row}:J{sheet_row}",
+                    'values': [existing],
+                })
+                rows[row_idx] = existing  # keep local copy consistent for later earners
+
+    if value_ranges:
+        _gs.batch_update_values(STORE_SPREADSHEET_ID, value_ranges)
+    if new_rows:
+        _gs.append_values(STORE_SPREADSHEET_ID, PLAYER_REGISTRY_RANGE_NAME, 'USER_ENTERED', new_rows)
 
 
 def get_linked_playhub_ids() -> set[str]:
