@@ -10,7 +10,7 @@ Features:
   - /recheck         — reprocess missed results threads (admins only)
   - /link            — manually link a Discord member to a Playhub ID (admins only)
   - /sync-roles      — apply Uncommon/Rare upgrades from standings (admins only)
-  - /assign-roles-from-invitational — assign Legendary/Super Rare (admins only)
+  - /invitational-roles     — assign Legendary/Super Rare (admins only)
   - /wheretoplay     — manually push the where-to-play post (admins only)
   - on_member_join   — auto-assigns Common rarity role to new members
   - where_to_play_weekly — refreshes #where-to-play every Sunday evening
@@ -75,14 +75,17 @@ from constants import (
     LEAGUE_SPREADSHEET_ID,
     STANDINGS_RANGE_NAME,
     LEADERBOARD_RANGE_NAME,
+    CURRENT_SEASON,
 )
 from roles import (
     fuzzy_match_member,
     get_unlinked_players,
-    get_player_mapping,
-    add_player_mapping,
-    compute_role_assignments,
+    get_player_registry,
+    link_player,
+    upsert_player_roles,
+    compute_earned_roles,
     RARITY_ROLE_IDS,
+    RARITY_ROLE_NAMES,
     FUZZY_HIGH_CONFIDENCE,
     FUZZY_LOW_CONFIDENCE,
 )
@@ -1141,19 +1144,38 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         suggestion = _pending_link_suggestions.pop(payload.message_id)
 
         if emoji == "✅":
-            await loop.run_in_executor(
-                None, add_player_mapping,
-                suggestion['discord_id'],
-                suggestion['playhub_id'],
-                suggestion['display_name'],
+            role_seasons = await loop.run_in_executor(
+                None, link_player,
+                suggestion['discord_id'], suggestion['discord_name'],
                 'fuzzy-confirmed',
+                suggestion['playhub_id'], suggestion['display_name'],
             )
+            # Assign Discord roles for each role_id in role_seasons
+            if role_seasons and guild:
+                rarity_id_set = set(RARITY_ROLE_IDS)
+                member = guild.get_member(suggestion['discord_id'])
+                if member:
+                    current = {r.id for r in member.roles if r.id in rarity_id_set}
+                    for role_id, season in role_seasons.items():
+                        if role_id not in current:
+                            role = guild.get_role(role_id)
+                            if role:
+                                try:
+                                    await member.add_roles(role, reason="fuzzy-link-confirmed")
+                                except discord.HTTPException as e:
+                                    print(f"  ⚠ Could not assign role: {e}")
             if mod_ch:
+                roles_str = ""
+                if role_seasons:
+                    roles_str = "\nRoles assigned: " + ", ".join(
+                        f"**{RARITY_ROLE_NAMES.get(r, str(r))}** ({s})"
+                        for r, s in role_seasons.items()
+                    )
                 await mod_ch.send(embed=make_embed(
                     title="✅ Link Confirmed",
                     description=(
                         f"**{suggestion['display_name']}** (Playhub `{suggestion['playhub_id']}`)"
-                        f" → <@{suggestion['discord_id']}>"
+                        f" → <@{suggestion['discord_id']}>{roles_str}"
                     ),
                     colour=discord.Colour.green()
                 ))
@@ -1176,7 +1198,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         if emoji == "✅":
             legendary_role = guild.get_role(LEGENDARY_ROLE_ID)
             sr_role        = guild.get_role(SUPER_RARE_ROLE_ID)
-            rarity_id_set  = set(RARITY_ROLE_IDS)
             assigned = []
             skipped  = []
 
@@ -1192,10 +1213,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     skipped.append(f"**{name}** (Playhub `{pid}`) — unlinked")
                     continue
                 try:
-                    roles_to_remove = [r for r in member.roles if r.id in rarity_id_set and r.id != role.id]
-                    await member.add_roles(role, reason=f"/assign-roles-from-invitational: {assignment['event_name']}")
-                    for r in roles_to_remove:
-                        await member.remove_roles(r, reason=f"/assign-roles-from-invitational: {assignment['event_name']}")
+                    await member.add_roles(role, reason=f"/invitational-roles: {assignment['event_name']}")
                     assigned.append(f"{member.mention} → **{role_name}**")
                 except discord.HTTPException as e:
                     skipped.append(f"{member.mention} — error: {e}")
@@ -1452,48 +1470,84 @@ async def recheck(interaction: discord.Interaction, after: str = ""):
 
 
 # ── /link ─────────────────────────────────────────────────────
-@tree.command(name="link", description="Link a Discord member to their Playhub ID (mods only)")
-@app_commands.describe(member="Discord member", playhub_id="Ravensburger Playhub numeric ID")
-async def link_command(interaction: discord.Interaction, member: discord.Member, playhub_id: str):
+@tree.command(name="link", description="Link a Discord member to their Playhub ID or display name (mods only)")
+@app_commands.describe(member="Discord member", identifier="Playhub ID (numeric) or Playhub display name")
+async def link_command(interaction: discord.Interaction, member: discord.Member, identifier: str):
     if not _is_admin(interaction):
         await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
         return
 
     await interaction.response.defer(ephemeral=True)
     loop = asyncio.get_running_loop()
-    mapping = await loop.run_in_executor(None, get_player_mapping)
 
-    for entry in mapping:
+    # Determine if identifier is a numeric playhub_id or a display name
+    if identifier.strip().isdigit():
+        playhub_id   = identifier.strip()
+        playhub_name = None
+    else:
+        playhub_id   = None
+        playhub_name = identifier.strip()
+
+    registry = await loop.run_in_executor(None, get_player_registry)
+
+    # Check for existing links
+    for entry in registry:
         if not entry['discord_id']:
-            continue  # skip placeholder rows written by backfill (skipped/unmatched)
-        if entry['playhub_id'] == playhub_id:
+            continue
+        if playhub_id and entry['playhub_id'] == playhub_id:
             await interaction.followup.send(
                 f"⚠️ Playhub ID `{playhub_id}` is already linked to <@{entry['discord_id']}>.",
                 ephemeral=True
             )
             return
+        if playhub_name and entry['playhub_name'].lower() == playhub_name.lower():
+            await interaction.followup.send(
+                f"⚠️ Playhub name `{playhub_name}` is already linked to <@{entry['discord_id']}>.",
+                ephemeral=True
+            )
+            return
         if entry['discord_id'] == member.id:
             await interaction.followup.send(
-                f"⚠️ {member.mention} is already linked to Playhub ID `{entry['playhub_id']}`.",
+                f"⚠️ {member.mention} is already linked to Playhub `{entry['playhub_name'] or entry['playhub_id']}`.",
                 ephemeral=True
             )
             return
 
-    await loop.run_in_executor(
-        None, add_player_mapping,
-        member.id, playhub_id, member.display_name,
+    role_seasons = await loop.run_in_executor(
+        None, link_player,
+        member.id, member.display_name,
         f'manual:{interaction.user.display_name}',
+        playhub_id, playhub_name,
     )
+
+    # Assign any earned Discord roles
+    roles_assigned = []
+    if role_seasons:
+        rarity_id_set = set(RARITY_ROLE_IDS)
+        current = {r.id for r in member.roles if r.id in rarity_id_set}
+        for role_id, season in role_seasons.items():
+            if role_id not in current:
+                discord_role = interaction.guild.get_role(role_id)
+                if discord_role:
+                    try:
+                        await member.add_roles(discord_role, reason="link-command")
+                        roles_assigned.append(f"**{RARITY_ROLE_NAMES.get(role_id, str(role_id))}** ({season})")
+                    except discord.HTTPException as e:
+                        print(f"  ⚠ link: failed to assign role {role_id} to {member.display_name}: {e}")
+
+    id_str = f"ID `{playhub_id}`" if playhub_id else f"name `{playhub_name}`"
+    roles_str = ("\nRoles assigned: " + ", ".join(roles_assigned)) if roles_assigned else ""
     await interaction.followup.send(
-        f"✅ Linked **{member.display_name}** → Playhub `{playhub_id}`", ephemeral=True
+        f"✅ Linked **{member.display_name}** → Playhub {id_str}{roles_str}", ephemeral=True
     )
     mod_ch = get_channel_by_id(interaction.guild, MOD_CHANNEL_ID)
     if mod_ch:
         await mod_ch.send(embed=make_embed(
             title="🔗 Manual Link Added",
             description=(
-                f"{member.mention} → Playhub `{playhub_id}`\n"
+                f"{member.mention} → Playhub {id_str}\n"
                 f"Linked by {interaction.user.mention}"
+                + (f"\nRoles assigned: {', '.join(roles_assigned)}" if roles_assigned else "")
             ),
             colour=discord.Colour.green()
         ))
@@ -1509,39 +1563,99 @@ async def sync_roles(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     loop = asyncio.get_running_loop()
 
+    # 1. Read leaderboard
     lb_data = await loop.run_in_executor(
         None, _gs.get_values, LEAGUE_SPREADSHEET_ID, LEADERBOARD_RANGE_NAME
     )
     leaderboard_rows = lb_data.get('values', [])
 
-    changes = await loop.run_in_executor(
-        None, compute_role_assignments, interaction.guild, leaderboard_rows
-    )
+    # 2. Build earned dict: {player_name_lower: {role_id: CURRENT_SEASON}}
+    earned_by_name: dict[str, dict[int, str]] = {}
+    for row in leaderboard_rows:
+        if len(row) < 2:
+            continue
+        try:
+            rank = int(row[0])
+        except (ValueError, IndexError):
+            continue
+        player_name = row[1].strip()
+        try:
+            events_played = int(row[3]) if len(row) > 3 and row[3] else 0
+        except ValueError:
+            events_played = 0
+        earned = compute_earned_roles(rank, events_played)
+        if earned:
+            earned_by_name[player_name.lower()] = {r: CURRENT_SEASON for r in earned}
 
-    if not changes:
-        await interaction.followup.send("✅ All roles are up to date — no changes needed.", ephemeral=True)
+    if not earned_by_name:
+        await interaction.followup.send("✅ No players have earned roles this season.", ephemeral=True)
         return
 
-    applied = []
-    for member, new_role in changes:
+    # 3. Read registry once
+    registry = await loop.run_in_executor(None, get_player_registry)
+    registry_by_name = {r['playhub_name'].lower(): r for r in registry}
+
+    rarity_id_set = set(RARITY_ROLE_IDS)
+    applied   = []   # (member_mention, role_name)
+    unlinked  = []   # player names who earned roles but have no Discord link
+
+    # 4. Process each earned player
+    for player_name_lower, role_seasons in earned_by_name.items():
+        # Find original-case name from leaderboard
+        player_name_display = next(
+            (row[1].strip() for row in leaderboard_rows
+             if len(row) >= 2 and row[1].strip().lower() == player_name_lower),
+            player_name_lower
+        )
+
+        # Upsert registry role columns
         try:
-            await member.add_roles(new_role, reason="sync-roles")
-            applied.append((member, new_role))
-        except discord.HTTPException as e:
-            print(f"  ⚠ sync-roles: failed to assign {new_role.name} to {member.display_name}: {e}")
+            await loop.run_in_executor(
+                None, upsert_player_roles, player_name_display, role_seasons
+            )
+        except Exception as e:
+            print(f"  ⚠ sync-roles: registry upsert failed for {player_name_display}: {e}")
+
+        # Assign Discord roles if linked
+        reg_entry = registry_by_name.get(player_name_lower)
+        if not reg_entry or not reg_entry['discord_id']:
+            unlinked.append(player_name_display)
+            continue
+
+        member = interaction.guild.get_member(reg_entry['discord_id'])
+        if not member:
+            unlinked.append(player_name_display)
+            continue
+
+        current = {r.id for r in member.roles if r.id in rarity_id_set}
+        for role_id, season in role_seasons.items():
+            if role_id not in current:
+                discord_role = interaction.guild.get_role(role_id)
+                if discord_role:
+                    try:
+                        await member.add_roles(discord_role, reason="sync-roles")
+                        applied.append((member.mention, RARITY_ROLE_NAMES.get(role_id, str(role_id))))
+                    except discord.HTTPException as e:
+                        print(f"  ⚠ sync-roles: failed to assign {role_id} to {member.display_name}: {e}")
 
     mod_ch = get_channel_by_id(interaction.guild, MOD_CHANNEL_ID)
-    if mod_ch and applied:
-        lines = [f"{member.mention}: +**{new_role.name}**" for member, new_role in applied]
+    if mod_ch and (applied or unlinked):
+        lines = [f"{mention}: +**{role_name}**" for mention, role_name in applied]
+        if unlinked:
+            lines.append(f"\n**Earned roles but not yet linked ({len(unlinked)}):**")
+            lines.extend(f"• {name}" for name in unlinked[:20])
+            if len(unlinked) > 20:
+                lines.append(f"  *(and {len(unlinked) - 20} more)*")
         await mod_ch.send(embed=make_embed(
-            title=f"Role Sync — {len(applied)} change(s)",
-            description="\n".join(lines),
+            title=f"Role Sync — {len(applied)} role(s) assigned",
+            description="\n".join(lines) if lines else "No changes.",
             colour=discord.Colour.gold()
         ))
 
-    await interaction.followup.send(
-        f"✅ Sync complete — {len(applied)} role(s) updated.", ephemeral=True
-    )
+    summary = f"✅ Sync complete — {len(applied)} role(s) assigned"
+    if unlinked:
+        summary += f", {len(unlinked)} unlinked player(s) will get roles when they /link"
+    await interaction.followup.send(summary + ".", ephemeral=True)
 
 
 # ── /grant-role ────────────────────────────────────────────────
@@ -1554,9 +1668,11 @@ _GRANT_ROLE_MAP = {
 }
 
 @tree.command(name="grant-role", description="Manually grant a rarity role to a member (admins only)")
-@app_commands.describe(member="Discord member", role="Rarity role to grant")
+@app_commands.describe(member="Discord member", role="Rarity role to grant",
+                       player_name="RPH display name for Role Audit (optional)", season="Season e.g. S7 (optional)")
 @app_commands.choices(role=[app_commands.Choice(name=n, value=n) for n in _GRANT_ROLE_MAP])
-async def grant_role(interaction: discord.Interaction, member: discord.Member, role: app_commands.Choice[str]):
+async def grant_role(interaction: discord.Interaction, member: discord.Member, role: app_commands.Choice[str],
+                     player_name: str = None, season: str = None):
     if not _is_admin(interaction):
         await interaction.response.send_message("⚠️ Admins only.", ephemeral=True)
         return
@@ -1568,16 +1684,26 @@ async def grant_role(interaction: discord.Interaction, member: discord.Member, r
         return
 
     await member.add_roles(discord_role, reason=f"grant-role by {interaction.user.display_name}")
+
+    audit_note = ""
+    if player_name and season and role_id in (_GRANT_ROLE_MAP.get(k) for k in ("Uncommon", "Rare", "Super Rare", "Legendary")):
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(None, upsert_player_roles, player_name, {role_id: season})
+            audit_note = f" Registry updated ({player_name} / {season})."
+        except Exception as e:
+            print(f"  ⚠ grant-role: registry write failed: {e}")
+
     await interaction.response.send_message(
-        f"✅ Granted **{role.value}** to {member.mention}.", ephemeral=True
+        f"✅ Granted **{role.value}** to {member.mention}.{audit_note}", ephemeral=True
     )
 
 
-# ── /assign-roles-from-invitational ───────────────────────────
-@tree.command(name="assign-roles-from-invitational",
+# ── /invitational-roles ───────────────────────────────────────
+@tree.command(name="invitational-roles",
               description="Preview and assign Legendary/Super Rare from an invitational (mods only)")
 @app_commands.describe(event_url="RPH event URL or bare event ID")
-async def assign_roles_from_invitational(interaction: discord.Interaction, event_url: str):
+async def invitational_roles(interaction: discord.Interaction, event_url: str):
     if not _is_admin(interaction):
         await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
         return
@@ -1612,8 +1738,8 @@ async def assign_roles_from_invitational(interaction: discord.Interaction, event
         return
 
     standings.sort(key=lambda s: s['rank'])
-    mapping_list      = await loop.run_in_executor(None, get_player_mapping)
-    playhub_to_discord = {m['playhub_id']: m['discord_id'] for m in mapping_list if m['playhub_id'] and m['discord_id']}
+    registry_list      = await loop.run_in_executor(None, get_player_registry)
+    playhub_to_discord = {r['playhub_id']: r['discord_id'] for r in registry_list if r['playhub_id'] and r['discord_id']}
 
     def resolve(s):
         pid    = str(s['player']['id'])
@@ -1690,7 +1816,7 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="/link", value="Manually link a Discord member to a Playhub ID", inline=False)
     embed.add_field(name="/sync-roles", value="Compute and apply Uncommon/Rare role upgrades from current standings", inline=False)
     embed.add_field(name="/grant-role", value="Manually grant a rarity role to a member", inline=False)
-    embed.add_field(name="/assign-roles-from-invitational", value="Assign Legendary/Super Rare from an invitational event", inline=False)
+    embed.add_field(name="/invitational-roles", value="Assign Legendary/Super Rare from an invitational event", inline=False)
     embed.add_field(name="/wheretoplay", value="Manually push the Where to Play post", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 

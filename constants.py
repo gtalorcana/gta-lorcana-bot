@@ -72,9 +72,11 @@ RARE_ROLE_ID       = int(os.getenv("RARE_ROLE_ID",       1347683773256568964))
 SUPER_RARE_ROLE_ID = int(os.getenv("SUPER_RARE_ROLE_ID", 1347683770815479819))
 LEGENDARY_ROLE_ID  = int(os.getenv("LEGENDARY_ROLE_ID",  1347683767367503953))
 
-# Player mapping sheet (STORE_SPREADSHEET_ID — internal, not the public league sheet)
-PLAYER_MAPPING_SHEET_NAME = "Playhub <-> Discord IDs"
-PLAYER_MAPPING_RANGE_NAME = PLAYER_MAPPING_SHEET_NAME + "!A2:E"
+# Player Registry — combined mapping + role audit (STORE_SPREADSHEET_ID)
+# Columns (A–J): Playhub Name | Legendary | Super Rare | Rare | Uncommon |
+#                Discord ID | Discord Display Name | Playhub ID | Linked At | Link Method
+PLAYER_REGISTRY_SHEET_NAME = "Player Registry"
+PLAYER_REGISTRY_RANGE_NAME = PLAYER_REGISTRY_SHEET_NAME + "!A2:J"
 
 # Historical invitational results (manually maintained)
 INVITATIONAL_RESULTS_SHEET_NAME = "Invitational Results"
@@ -111,4 +113,3 @@ SET_CHAMPS_END_DATE     = "2026-04-24"
 SET_CHAMPS_START_DT     = SET_CHAMPS_START_DATE + START_OF_DAY
 SET_CHAMPS_END_DT       = SET_CHAMPS_END_DATE + END_OF_DAY
 
-RARE_RANK_THRESHOLD = 32

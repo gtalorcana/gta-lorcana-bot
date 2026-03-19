@@ -46,6 +46,7 @@ from roles import (
     fuzzy_match_member,
     FUZZY_HIGH_CONFIDENCE,
     FUZZY_LOW_CONFIDENCE,
+    update_role_audit,
 )
 
 # Seasons available in the archive spreadsheet
@@ -91,17 +92,22 @@ def _load_leaderboard(spreadsheet_id: str, range_name: str, season: str) -> list
 def _build_queue() -> list[tuple]:
     """
     Read all season leaderboards, aggregate per player, return sorted queue.
-    Each entry: (player_name, role_ids: set, seasons_str)
+    Each entry: (player_name, role_ids: set, seasons_str, oldest_per_role: dict)
     Roles are additive — a player can earn both Rare and Uncommon.
+    oldest_per_role maps role_id -> earliest season string for the Role Audit sheet.
     """
-    # player_name -> {'role_ids': set, 'seasons': list}
+    # player_name -> {'role_ids': set, 'seasons': list, 'oldest_per_role': dict}
     player_data: dict[str, dict] = {}
 
     def _update(player_name: str, role_id: int, season: str):
-        entry = player_data.setdefault(player_name, {'role_ids': set(), 'seasons': []})
+        entry = player_data.setdefault(player_name, {'role_ids': set(), 'seasons': [], 'oldest_per_role': {}})
         entry['role_ids'].add(role_id)
         if season not in entry['seasons']:
             entry['seasons'].append(season)
+        # Keep the earliest (smallest season string, e.g. S5 < S10)
+        existing = entry['oldest_per_role'].get(role_id)
+        if existing is None or season < existing:
+            entry['oldest_per_role'][role_id] = season
 
     # Archive seasons only — current season (S11) is handled by /sync-roles
     for season in ARCHIVE_SEASONS:
@@ -135,7 +141,7 @@ def _build_queue() -> list[tuple]:
         print(f"  [WARN] Could not load invitational results: {e}")
 
     queue = [
-        (name, entry['role_ids'], ", ".join(sorted(entry['seasons'])))
+        (name, entry['role_ids'], ", ".join(sorted(entry['seasons'])), entry['oldest_per_role'])
         for name, entry in player_data.items()
         if entry['role_ids']
     ]
@@ -155,18 +161,37 @@ _ROLE_NAMES = {
 async def _post_next():
     """Post the next match suggestion, skipping members who already have all earned roles."""
     while _queue:
-        player_name, role_ids, seasons_str = _queue.pop(0)
+        player_name, role_ids, seasons_str, oldest_per_role = _queue.pop(0)
+
+        # First: scan ALL members (ignoring matched exclusions) to detect if someone
+        # already has all the needed roles — catches /grant-role assignments made outside
+        # this script. Only skip if the match is at least low-confidence.
+        best_all, score_all = fuzzy_match_member(player_name, _members)
+        if best_all and score_all >= FUZZY_LOW_CONFIDENCE:
+            already_has = {r.id for r in best_all.roles}
+            if not (role_ids - already_has):
+                _matched_discord_ids.add(best_all.id)
+                print(f"  [SKIP] {player_name} -> {best_all.display_name} already has all earned roles")
+                try:
+                    update_role_audit(player_name, oldest_per_role)
+                except Exception as e:
+                    print(f"  [WARN] Role audit write failed for {player_name}: {e}")
+                continue
 
         available = [m for m in _members if m.id not in _matched_discord_ids]
         best_member, score = fuzzy_match_member(player_name, available)
 
-        # At any confidence level: skip if best_member already has every role this player earned
+        # Skip if best match already has every role this player earned
         if best_member and score >= FUZZY_LOW_CONFIDENCE:
             already_has = {r.id for r in best_member.roles}
             roles_needed = role_ids - already_has
             if not roles_needed:
                 _matched_discord_ids.add(best_member.id)
                 print(f"  [SKIP] {player_name} -> {best_member.display_name} already has all earned roles")
+                try:
+                    update_role_audit(player_name, oldest_per_role)
+                except Exception as e:
+                    print(f"  [WARN] Role audit write failed for {player_name}: {e}")
                 continue
             role_ids = roles_needed  # only assign what's missing
 
@@ -176,6 +201,9 @@ async def _post_next():
 
         if score >= FUZZY_HIGH_CONFIDENCE or score >= FUZZY_LOW_CONFIDENCE:
             high = score >= FUZZY_HIGH_CONFIDENCE
+            grant_cmds = "  ".join(f"`/grant-role @member {_ROLE_NAMES[r]}`" for r in
+                                   sorted(role_ids, key=lambda r: RARITY_ROLE_IDS.index(r), reverse=True))
+            low_hint = f"\n\nIf the match is wrong, ❌ then:\n{grant_cmds}" if not high else ""
             embed = discord.Embed(
                 title=f"{'Suggested' if high else 'Low-Confidence'} Match — {role_names_str}",
                 description=(
@@ -185,6 +213,7 @@ async def _post_next():
                     f"**Roles to assign:** {role_names_str}\n"
                     f"**Seasons:** {seasons_str}\n\n"
                     f"React to confirm or skip. ({remaining} remaining after this)"
+                    f"{low_hint}"
                 ),
                 colour=discord.Colour.yellow() if high else discord.Colour.orange()
             )
@@ -192,11 +221,12 @@ async def _post_next():
             await msg.add_reaction("✅")
             await msg.add_reaction("❌")
             _pending[msg.id] = {
-                'player_name':  player_name,
-                'discord_id':   best_member.id,
-                'discord_name': best_member.display_name,
-                'role_ids':     role_ids,
-                'role_names':   role_names_str,
+                'player_name':    player_name,
+                'discord_id':     best_member.id,
+                'discord_name':   best_member.display_name,
+                'role_ids':       role_ids,
+                'role_names':     role_names_str,
+                'oldest_per_role': oldest_per_role,
             }
             print(f"  [{'HIGH' if high else 'LOW '}] {player_name} -> {best_member.display_name} ({score:.0%}) — {role_names_str}  ({remaining} left)")
             return
@@ -238,16 +268,13 @@ async def on_ready():
         return
 
     _members[:] = [m for m in guild.members if not m.bot]
-    rarity_id_set = set(RARITY_ROLE_IDS)
 
-    # Seed already-matched IDs: members who already have all four rarity roles
-    # (per-player skip logic handles partial cases during the queue)
-    all_four = {UNCOMMON_ROLE_ID, RARE_ROLE_ID, SUPER_RARE_ROLE_ID, LEGENDARY_ROLE_ID}
-    _matched_discord_ids = {
-        m.id for m in _members
-        if all_four.issubset({r.id for r in m.roles})
-    }
-    print(f"  {len(_members)} members loaded, {len(_matched_discord_ids)} already have all rarity roles")
+    # Don't pre-seed matched IDs from roles — the per-player skip check handles
+    # members who already have all earned roles. Pre-seeding caused good matches
+    # to be excluded from the available pool (e.g. Legendary winners have all 4 roles
+    # and were incorrectly excluded before their own queue entry was reached).
+    _matched_discord_ids = set()
+    print(f"  {len(_members)} members loaded")
 
     print("\nLoading leaderboard data from all seasons...")
     queue = _build_queue()
@@ -284,6 +311,18 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                         print(f"  Failed to assign {_ROLE_NAMES.get(role_id, role_id)}: {e}")
             _matched_discord_ids.add(suggestion['discord_id'])
             print(f"  Assigned {suggestion['role_names']} to {suggestion['discord_name']}")
+
+        # Write to Role Audit sheet — only roles that were actually assigned
+        audit_seasons = {
+            role_id: suggestion['oldest_per_role'][role_id]
+            for role_id in suggestion['role_ids']
+            if role_id in suggestion['oldest_per_role']
+        }
+        if audit_seasons:
+            try:
+                update_role_audit(suggestion['player_name'], audit_seasons)
+            except Exception as e:
+                print(f"  [WARN] Role audit write failed for {suggestion['player_name']}: {e}")
 
         new_embed = discord.Embed(
             title=f"Assigned — {suggestion['role_names']}",
