@@ -1,0 +1,8 @@
+name = "gta-lorcana-id-check"
+main = "worker/id-check/index.js"
+compatibility_date = "2024-01-01"
+
+[env.production]
+routes = [
+  { pattern = "gtalorcana.ca/id-check/*", zone_name = "gtalorcana.ca" }
+]
