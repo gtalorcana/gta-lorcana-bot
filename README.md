@@ -24,11 +24,12 @@ util/
   google_sheets_api_utils.py               # Google Sheets API wrapper (singleton)
   rph_api_utils.py                         # RPH API wrapper with pagination + retry
 scripts/
-  sync_commands.py                         # Syncs slash commands to guild (runs as Fly.io release_command)
-  clear_global_commands.py                 # One-time script — clears legacy global Discord commands
-  backfill_player_linking.py              # One-time script — post fuzzy-match suggestions for historical standings data
-  rph_get_set_championship_events.py       # Manual run script — inspect/write set champs events
-  test_debug_sheet.py                      # Local test script — runs analyse_stores() against a test spreadsheet
+  sync_commands.py                         # Fly.io release_command — syncs slash commands to guild on every deploy
+  clear_roles.py                           # Season maintenance — strips rarity roles from all Discord members
+  migrate_player_registry.py              # Season maintenance — rebuilds Player Registry from archive + old mapping
+  link_players.py                          # Interactive tool — fuzzy-match and link unlinked players with earned roles
+  rph_get_set_championship_events.py       # Manual run — inspect/write Set Champs events from RPH
+  test_debug_sheet.py                      # Local dev — runs analyse_stores() against a test spreadsheet
 ```
 
 ---
