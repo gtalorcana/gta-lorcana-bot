@@ -33,7 +33,7 @@ import discord
 from clients import gs as _gs
 from constants import (
     DISCORD_BOT_TOKEN,
-    STORE_SPREADSHEET_ID,
+    BOT_DATABASE_SPREADSHEET_ID,
     ARCHIVE_SPREADSHEET_ID,
     RARE_ROLE_ID,
     UNCOMMON_ROLE_ID,
@@ -85,7 +85,7 @@ def _load_old_mapping() -> dict:
     """Return {display_name_lower: {discord_id, playhub_id, display_name, linked_at, linked_by}}"""
     print("  Loading old Playhub <-> Discord IDs mapping...")
     try:
-        data = _gs.get_values(STORE_SPREADSHEET_ID, OLD_MAPPING_RANGE_NAME)
+        data = _gs.get_values(BOT_DATABASE_SPREADSHEET_ID, OLD_MAPPING_RANGE_NAME)
         rows = data.get('values', [])
     except Exception as e:
         print(f"  [WARN] Could not read old mapping: {e}")
@@ -172,7 +172,7 @@ def _build_player_data(old_mapping: dict) -> list[list]:
     # Invitational results
     print("  Loading invitational results...")
     try:
-        inv_data = _gs.get_values(STORE_SPREADSHEET_ID, INVITATIONAL_RESULTS_RANGE_NAME)
+        inv_data = _gs.get_values(BOT_DATABASE_SPREADSHEET_ID, INVITATIONAL_RESULTS_RANGE_NAME)
         for row in inv_data.get('values', []):
             if len(row) < 3:
                 continue
@@ -261,7 +261,7 @@ async def on_ready():
     # Step 2: Clear Player Registry
     print(f"  Clearing Player Registry...")
     try:
-        _gs.clear_values(STORE_SPREADSHEET_ID, PLAYER_REGISTRY_RANGE_NAME)
+        _gs.clear_values(BOT_DATABASE_SPREADSHEET_ID, PLAYER_REGISTRY_RANGE_NAME)
         print("  Player Registry cleared")
     except Exception as e:
         print(f"  [ERROR] Could not clear Player Registry: {e}")
@@ -277,7 +277,7 @@ async def on_ready():
     if registry_rows:
         try:
             _gs.update_values(
-                STORE_SPREADSHEET_ID,
+                BOT_DATABASE_SPREADSHEET_ID,
                 PLAYER_REGISTRY_RANGE_NAME,
                 'USER_ENTERED',
                 registry_rows,

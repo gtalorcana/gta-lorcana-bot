@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 
 from clients import gs as _gs
 from constants import (
-    STORE_SPREADSHEET_ID,
+    BOT_DATABASE_SPREADSHEET_ID,
     PLAYER_REGISTRY_RANGE_NAME,
     PLAYER_REGISTRY_SHEET_NAME,
     COMMON_ROLE_ID,
@@ -119,7 +119,7 @@ def _role_col_for(role_id: int) -> str | None:
 
 def get_player_registry() -> list[dict]:
     """Return all non-empty rows from Player Registry as list of dicts."""
-    data = _gs.get_values(STORE_SPREADSHEET_ID, PLAYER_REGISTRY_RANGE_NAME)
+    data = _gs.get_values(BOT_DATABASE_SPREADSHEET_ID, PLAYER_REGISTRY_RANGE_NAME)
     result = []
     for row in data.get('values', []):
         if not row or not row[0].strip():
@@ -141,7 +141,7 @@ def upsert_player_roles(playhub_name: str, role_seasons: dict[int, str], playhub
     if not role_seasons:
         return
 
-    data = _gs.get_values(STORE_SPREADSHEET_ID, PLAYER_REGISTRY_RANGE_NAME)
+    data = _gs.get_values(BOT_DATABASE_SPREADSHEET_ID, PLAYER_REGISTRY_RANGE_NAME)
     rows = data.get('values', [])
 
     row_idx = None
@@ -174,7 +174,7 @@ def upsert_player_roles(playhub_name: str, role_seasons: dict[int, str], playhub
             if col is not None:
                 new_row[col] = season
         _gs.append_values(
-            STORE_SPREADSHEET_ID,
+            BOT_DATABASE_SPREADSHEET_ID,
             PLAYER_REGISTRY_RANGE_NAME,
             'USER_ENTERED',
             [new_row],
@@ -201,7 +201,7 @@ def upsert_player_roles(playhub_name: str, role_seasons: dict[int, str], playhub
 
     if changed:
         _gs.update_values(
-            STORE_SPREADSHEET_ID,
+            BOT_DATABASE_SPREADSHEET_ID,
             f"{PLAYER_REGISTRY_SHEET_NAME}!A{sheet_row}:J{sheet_row}",
             'USER_ENTERED',
             [existing],
@@ -224,7 +224,7 @@ def link_player(
     """
     now = datetime.now(timezone.utc).isoformat()
 
-    data = _gs.get_values(STORE_SPREADSHEET_ID, PLAYER_REGISTRY_RANGE_NAME)
+    data = _gs.get_values(BOT_DATABASE_SPREADSHEET_ID, PLAYER_REGISTRY_RANGE_NAME)
     rows = data.get('values', [])
 
     row_idx = None
@@ -260,7 +260,7 @@ def link_player(
             link_method,
         ]
         _gs.append_values(
-            STORE_SPREADSHEET_ID,
+            BOT_DATABASE_SPREADSHEET_ID,
             PLAYER_REGISTRY_RANGE_NAME,
             'USER_ENTERED',
             [new_row],
@@ -280,7 +280,7 @@ def link_player(
         updated_row[7] = str(playhub_id)
 
     _gs.update_values(
-        STORE_SPREADSHEET_ID,
+        BOT_DATABASE_SPREADSHEET_ID,
         f"{PLAYER_REGISTRY_SHEET_NAME}!A{sheet_row}:J{sheet_row}",
         'USER_ENTERED',
         [updated_row],
@@ -309,7 +309,7 @@ def _merge_duplicate_rows(discord_id: int):
     The "best" row is determined by: has playhub_id + most roles filled.
     All other rows with the same discord_id are cleared of their Discord columns.
     """
-    data = _gs.get_values(STORE_SPREADSHEET_ID, PLAYER_REGISTRY_RANGE_NAME)
+    data = _gs.get_values(BOT_DATABASE_SPREADSHEET_ID, PLAYER_REGISTRY_RANGE_NAME)
     rows = data.get('values', [])
 
     matching = []
@@ -352,7 +352,7 @@ def _merge_duplicate_rows(discord_id: int):
             'range': f"{PLAYER_REGISTRY_SHEET_NAME}!A{dup_sheet_row}:J{dup_sheet_row}",
             'values': [[''] * 10],
         })
-    _gs.batch_update_values(STORE_SPREADSHEET_ID, value_ranges)
+    _gs.batch_update_values(BOT_DATABASE_SPREADSHEET_ID, value_ranges)
 
 
 def batch_upsert_player_roles(earners: list[tuple[str, dict, str | None]]):
@@ -366,7 +366,7 @@ def batch_upsert_player_roles(earners: list[tuple[str, dict, str | None]]):
     if not earners:
         return
 
-    data = _gs.get_values(STORE_SPREADSHEET_ID, PLAYER_REGISTRY_RANGE_NAME)
+    data = _gs.get_values(BOT_DATABASE_SPREADSHEET_ID, PLAYER_REGISTRY_RANGE_NAME)
     rows = data.get('values', [])
 
     # Build lookup indices from the single read
@@ -427,9 +427,9 @@ def batch_upsert_player_roles(earners: list[tuple[str, dict, str | None]]):
                 rows[row_idx] = existing  # keep local copy consistent for later earners
 
     if value_ranges:
-        _gs.batch_update_values(STORE_SPREADSHEET_ID, value_ranges)
+        _gs.batch_update_values(BOT_DATABASE_SPREADSHEET_ID, value_ranges)
     if new_rows:
-        _gs.append_values(STORE_SPREADSHEET_ID, PLAYER_REGISTRY_RANGE_NAME, 'USER_ENTERED', new_rows)
+        _gs.append_values(BOT_DATABASE_SPREADSHEET_ID, PLAYER_REGISTRY_RANGE_NAME, 'USER_ENTERED', new_rows)
 
 
 def get_linked_playhub_ids() -> set[str]:

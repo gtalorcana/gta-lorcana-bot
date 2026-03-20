@@ -58,7 +58,6 @@ from constants import (
     EVENTS_URL_RE,
     RPH_RETRY_DELAY,
     RPH_RETRY_ATTEMPTS,
-    ADMIN_USER_ID,
     ADMIN_USER_IDS,
     UPCOMING_EVENTS_JSON_URL,
     WHERE_TO_PLAY_POST_DAY,
@@ -75,7 +74,7 @@ from constants import (
     LEAGUE_SPREADSHEET_ID,
     STANDINGS_RANGE_NAME,
     LEADERBOARD_RANGE_NAME,
-    CURRENT_SEASON,
+    CURRENT_SEASON, DISCORD_GUILD_ID,
 )
 from roles import (
     fuzzy_match_member,
@@ -99,13 +98,12 @@ intents.members = True  # on_member_join event
 class GtaLorcanaBot(commands.Bot):
     async def setup_hook(self):
         if os.getenv("SYNC_COMMANDS_ONLY") == "1":
-            guild_id = os.getenv("DISCORD_GUILD_ID", "0")
-            guild = discord.Object(id=int(guild_id))
-            print(f"  SYNC_COMMANDS_ONLY mode — guild_id={guild_id}, commands registered={len(self.tree.get_commands())}")
+            guild = discord.Object(id=int(DISCORD_GUILD_ID))
+            print(f"  SYNC_COMMANDS_ONLY mode — guild_id={DISCORD_GUILD_ID}, commands registered={len(self.tree.get_commands())}")
             # Copy to guild FIRST, then clear globals
             self.tree.copy_global_to(guild=guild)
             synced = await self.tree.sync(guild=guild)
-            print(f"✓ Synced {len(synced)} command(s) to guild {guild_id}:")
+            print(f"✓ Synced {len(synced)} command(s) to guild {DISCORD_GUILD_ID}:")
             for cmd in synced:
                 print(f"  /{cmd.name}")
             # Clear global commands after guild sync
@@ -894,7 +892,7 @@ async def _schedule_auto_retry(
                 description=(
                     f"All {RPH_RETRY_ATTEMPTS} automatic retries failed.\n"
                     f"Last error:\n```{error}```\n"
-                    f"<@{ADMIN_USER_ID}> Manual intervention required."
+                    f"{' '.join(f'<@{uid}>' for uid in ADMIN_USER_IDS)} Manual intervention required."
                 ),
                 colour=discord.Colour.red()
             )
@@ -1382,7 +1380,7 @@ async def _find_and_reprocess_missed_threads(
                         description=(
                             f"This thread failed to process on a previous bot restart and was skipped "
                             f"to prevent a crash loop.\n"
-                            f"<@{ADMIN_USER_ID}> Manual intervention required."
+                            f"{' '.join(f'<@{uid}>' for uid in ADMIN_USER_IDS)} Manual intervention required."
                         ),
                         colour=discord.Colour.red()
                     )

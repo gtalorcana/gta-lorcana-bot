@@ -44,8 +44,8 @@ import stores
 import constants
 
 # Patch STORE_SPREADSHEET_ID at runtime to redirect all sheet writes
-constants.STORE_SPREADSHEET_ID = TEST_STORE_SPREADSHEET_ID
-stores.STORE_SPREADSHEET_ID    = TEST_STORE_SPREADSHEET_ID  # stores.py reads it at call time via _gs
+constants.BOT_DATABASE_SPREADSHEET_ID = TEST_STORE_SPREADSHEET_ID
+stores.BOT_DATABASE_SPREADSHEET_ID    = TEST_STORE_SPREADSHEET_ID  # stores.py reads it at call time via _gs
 
 # Also patch the range names to use the test sheet's tab names if needed
 # (leave as-is if your test sheet has the same tab names)

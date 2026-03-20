@@ -81,21 +81,17 @@ Members earn rarity roles based on league participation. Roles are additive — 
 2. At season end, run `/sync-roles` to compute and apply Uncommon/Rare upgrades based on the full standings.
 3. After an invitational, run `/assign-roles-from-invitational <event_url>` to assign Super Rare / Legendary.
 
-**Player mapping sheet (`Playhub <-> Discord IDs` in Store Sheet):**
+**Player Registry sheet (`Player Registry` in Store Sheet):**
 
 | Column | Value |
 |--------|-------|
-| A | Discord user ID (0 = skipped/unmatched) |
-| B | Playhub numeric ID |
-| C | Display name |
-| D | Linked timestamp (UTC ISO) |
-| E | How it was linked (`fuzzy-confirmed`, `manual:<mod>`, `skipped`) |
-
-**Backfill script** (run once after initial deploy to link historical data):
-```bash
-python scripts/backfill_player_linking.py
-```
-Posts suggestions one at a time to the mod channel. Safe to stop and restart — confirmed links are written immediately, so the script picks up where it left off.
+| A | Playhub Name |
+| B–E | Legendary, Super Rare, Rare, Uncommon (season earned, e.g. `S11`) |
+| F | Discord ID (blank = unlinked) |
+| G | Discord Display Name |
+| H | Playhub ID |
+| I | Linked At (UTC ISO) |
+| J | Link Method (`fuzzy-confirmed`, `manual:<mod>`, `skipped`) |
 
 ---
 
@@ -209,7 +205,7 @@ Manually add a store missing from RPH entirely:
 3. Writes standings rows first, then the event row — so if a crash occurs mid-write, the missing event row signals a safe retry rather than a false duplicate
 4. On validation error: posts feedback and waits for the organizer to edit — `on_message_edit` re-triggers automatically
 5. On API error: schedules auto-retries (up to `RPH_RETRY_ATTEMPTS`, spaced `RPH_RETRY_DELAY` seconds apart)
-6. If all retries fail: pings `ADMIN_USER_ID` in the thread
+6. If all retries fail: pings all `ADMIN_USER_IDS` in the thread
 7. Deleting a thread removes its event data from the sheet via `on_thread_delete`
 8. After a successful write, the bot fuzzy-matches any new Playhub players and posts linking suggestions to the mod channel
 
@@ -233,7 +229,7 @@ Manually add a store missing from RPH entirely:
 | `Store Debug` | store_id, store_name, city, full_address, day, floored_time, format, status, streak, week of \<date\> ×4, event_ids | `analyse_stores()` every run — pre-override, raw RPH data |
 | `Overrides` | store_id, store_name, day, time, format, override_status, override_day, override_time, reason | Manual — never touched by bot |
 | `Bot State` | key, value | Bot — see below |
-| `Playhub <-> Discord IDs` | discord_id, playhub_id, display_name, linked_at, linked_by | Bot — player linking |
+| `Player Registry` | Playhub Name, Legendary, Super Rare, Rare, Uncommon, Discord ID, Discord Display Name, Playhub ID, Linked At, Link Method | Bot — player linking + role audit |
 
 **Bot State keys:**
 
@@ -268,20 +264,13 @@ This means a bad thread will be attempted exactly once on startup. After that it
 
 ```
 DISCORD_BOT_TOKEN
-DISCORD_GUILD_ID
 WORKER_URL
 WORKER_SECRET
 GOOGLE_CREDENTIALS_JSON
 GOOGLE_TOKEN_JSON
-MOD_CHANNEL_ID
-COMMON_ROLE_ID
-UNCOMMON_ROLE_ID
-RARE_ROLE_ID
-SUPER_RARE_ROLE_ID
-LEGENDARY_ROLE_ID
 ```
 
-Role IDs and `MOD_CHANNEL_ID` have hardcoded defaults in `constants.py` matching the production server — only need to be set as secrets if deploying to a different server.
+All other IDs (guild, channel, role) are hardcoded in `constants.py` and can be overridden via `.env` locally — they don't need to be Fly.io secrets.
 
 Admin commands are accessible to anyone with Manage Guild permission, or any Discord user ID listed in `ADMIN_USER_IDS` in `constants.py`.
 
@@ -364,5 +353,4 @@ Set `TEST_STORE_SPREADSHEET_ID` in the script to a spreadsheet ID with a blank `
 1. Update `SEASON_START_DATE`, `SEASON_END_DATE`, `CURRENT_SEASON`, `SET_CHAMPS_START_DATE`, and `SET_CHAMPS_END_DATE` in `constants.py`
 2. Create new `S## Standings - User Reported`, `S## Events - User Reported`, and `S## Set Champs` tabs in the relevant sheets
 3. Deploy: `fly deploy`
-4. Run the backfill script to link any new players from historical data: `python scripts/backfill_player_linking.py`
-5. At season end, run `/sync-roles` to assign Uncommon/Rare based on final standings
+4. At season end, run `/sync-roles` to assign Uncommon/Rare based on final standings

@@ -35,7 +35,7 @@ from clients import gs as _gs, rph_api as _rph_api
 from constants import (
     SEASON_START_DT,
     SEASON_END_DT,
-    STORE_SPREADSHEET_ID,
+    BOT_DATABASE_SPREADSHEET_ID,
     STORE_CLASSIFICATIONS_RANGE_NAME,
     STORE_OVERRIDES_RANGE_NAME,
     BOT_STATE_RANGE_NAME,
@@ -416,7 +416,7 @@ def save_store_analysis(store_analysis: dict) -> None:
     """Write store classifications to the Google Sheet."""
     rows = _store_analysis_to_rows(store_analysis)
     _gs.update_values(
-        STORE_SPREADSHEET_ID,
+        BOT_DATABASE_SPREADSHEET_ID,
         STORE_CLASSIFICATIONS_RANGE_NAME,
         "USER_ENTERED",
         rows,
@@ -429,7 +429,7 @@ def load_store_analysis() -> dict | None:
     Read store classifications from the Google Sheet.
     Returns None if the sheet is empty (not yet bootstrapped).
     """
-    result = _gs.get_values(STORE_SPREADSHEET_ID, STORE_CLASSIFICATIONS_RANGE_NAME)
+    result = _gs.get_values(BOT_DATABASE_SPREADSHEET_ID, STORE_CLASSIFICATIONS_RANGE_NAME)
     rows   = result.get('values', [])
     if len(rows) <= 1:
         print(f"  ⚠ Store classifications sheet is empty — run bootstrap script first")
@@ -458,7 +458,7 @@ def _load_overrides() -> list:
     Returns a list of override dicts, or [] if the sheet is empty or missing.
     """
     try:
-        result = _gs.get_values(STORE_SPREADSHEET_ID, STORE_OVERRIDES_RANGE_NAME)
+        result = _gs.get_values(BOT_DATABASE_SPREADSHEET_ID, STORE_OVERRIDES_RANGE_NAME)
         rows   = result.get('values', [])
         if len(rows) <= 1:
             return []
@@ -658,7 +658,7 @@ def save_debug_sheet(event_map: dict, analysis: dict, reference_date: date) -> N
                 streak,
             ] + week_times + [event_ids])
 
-        _gs.update_values(STORE_SPREADSHEET_ID, STORE_DEBUG_RANGE_NAME, "USER_ENTERED", rows)
+        _gs.update_values(BOT_DATABASE_SPREADSHEET_ID, STORE_DEBUG_RANGE_NAME, "USER_ENTERED", rows)
         print(f"  ✓ Store Debug sheet updated ({len(rows) - 1} rows, weeks: {week_hdrs})")
     except Exception as e:
         print(f"  ⚠ Could not save debug sheet: {e}")
@@ -679,7 +679,7 @@ def load_bot_state() -> dict:
     # to concurrent multi-server writes.
     """
     try:
-        result = _gs.get_values(STORE_SPREADSHEET_ID, BOT_STATE_RANGE_NAME)
+        result = _gs.get_values(BOT_DATABASE_SPREADSHEET_ID, BOT_STATE_RANGE_NAME)
         rows   = result.get('values', [])
         return {row[0]: row[1] for row in rows if len(row) >= 2}
     except Exception as e:
@@ -693,10 +693,10 @@ def save_bot_state(state: dict) -> None:
     Clears the range first so deleted keys don't linger as stale rows.
     """
     try:
-        _gs.clear_values(STORE_SPREADSHEET_ID, BOT_STATE_RANGE_NAME)
+        _gs.clear_values(BOT_DATABASE_SPREADSHEET_ID, BOT_STATE_RANGE_NAME)
         if state:
             rows = [[k, v] for k, v in state.items()]
-            _gs.update_values(STORE_SPREADSHEET_ID, BOT_STATE_RANGE_NAME, "USER_ENTERED", rows)
+            _gs.update_values(BOT_DATABASE_SPREADSHEET_ID, BOT_STATE_RANGE_NAME, "USER_ENTERED", rows)
     except Exception as e:
         print(f"  ⚠ Could not save bot state: {e}")
 
