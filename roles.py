@@ -8,9 +8,10 @@ Handles:
     Super Rare / Legendary (invitational)
 
 Registry columns (A–J, data starts row 2):
-  A: Playhub Name  B: Legendary  C: Super Rare  D: Rare  E: Uncommon
-  F: Discord ID    G: Discord Display Name  H: Playhub ID
-  I: Linked At     J: Link Method
+  A: Playhub Name  B: Playhub ID
+  C: Discord ID    D: Discord Display Name
+  E: Linked At     F: Link Method
+  G: Legendary     H: Super Rare  I: Rare  J: Uncommon
 
 Standing row columns (index): date(0) | store(1) | rank(2) | display_name(3) |
                                 record(4) | match_points(5) | playhub_id(6)
@@ -55,18 +56,18 @@ UNCOMMON_EVENT_THRESHOLD = 10  # distinct events to earn Uncommon
 RARE_RANK_THRESHOLD      = 32  # leaderboard rank to earn Rare
 
 # Maps role_id → column index (0-based) in registry row (A=0 … J=9)
-# B=Legendary(1), C=Super Rare(2), D=Rare(3), E=Uncommon(4)
+# G=Legendary(6), H=Super Rare(7), I=Rare(8), J=Uncommon(9)
 _ROLE_COL = {
-    LEGENDARY_ROLE_ID:  1,
-    SUPER_RARE_ROLE_ID: 2,
-    RARE_ROLE_ID:       3,
-    UNCOMMON_ROLE_ID:   4,
+    LEGENDARY_ROLE_ID:  6,
+    SUPER_RARE_ROLE_ID: 7,
+    RARE_ROLE_ID:       8,
+    UNCOMMON_ROLE_ID:   9,
 }
 _ROLE_COL_LETTER = {
-    LEGENDARY_ROLE_ID:  'B',
-    SUPER_RARE_ROLE_ID: 'C',
-    RARE_ROLE_ID:       'D',
-    UNCOMMON_ROLE_ID:   'E',
+    LEGENDARY_ROLE_ID:  'G',
+    SUPER_RARE_ROLE_ID: 'H',
+    RARE_ROLE_ID:       'I',
+    UNCOMMON_ROLE_ID:   'J',
 }
 
 
@@ -77,15 +78,15 @@ def _row_to_dict(row: list) -> dict:
     padded = list(row) + [''] * (10 - len(row))
     return {
         'playhub_name':   padded[0].strip(),
-        'legendary':      padded[1].strip(),
-        'super_rare':     padded[2].strip(),
-        'rare':           padded[3].strip(),
-        'uncommon':       padded[4].strip(),
-        'discord_id':     int(padded[5]) if padded[5].strip().isdigit() else None,
-        'discord_name':   padded[6].strip(),
-        'playhub_id':     padded[7].strip(),
-        'linked_at':      padded[8].strip(),
-        'link_method':    padded[9].strip(),
+        'playhub_id':     padded[1].strip(),
+        'discord_id':     int(padded[2]) if padded[2].strip().isdigit() else None,
+        'discord_name':   padded[3].strip(),
+        'linked_at':      padded[4].strip(),
+        'link_method':    padded[5].strip(),
+        'legendary':      padded[6].strip(),
+        'super_rare':     padded[7].strip(),
+        'rare':           padded[8].strip(),
+        'uncommon':       padded[9].strip(),
     }
 
 
@@ -93,15 +94,15 @@ def _dict_to_row(d: dict) -> list:
     """Convert a registry dict back to a 10-element list for the sheet."""
     return [
         d.get('playhub_name', ''),
+        d.get('playhub_id', ''),
+        str(d['discord_id']) if d.get('discord_id') else '',
+        d.get('discord_name', ''),
+        d.get('linked_at', ''),
+        d.get('link_method', ''),
         d.get('legendary', ''),
         d.get('super_rare', ''),
         d.get('rare', ''),
         d.get('uncommon', ''),
-        str(d['discord_id']) if d.get('discord_id') else '',
-        d.get('discord_name', ''),
-        d.get('playhub_id', ''),
-        d.get('linked_at', ''),
-        d.get('link_method', ''),
     ]
 
 
@@ -144,14 +145,16 @@ def upsert_player_roles(playhub_name: str, role_seasons: dict[int, str], playhub
     data = _gs.get_values(BOT_DATABASE_SPREADSHEET_ID, PLAYER_REGISTRY_RANGE_NAME)
     rows = data.get('values', [])
 
-    row_idx = None
+    row_idx      = None
+    found_by_id  = False
 
     # Try to find by playhub_id first
     if playhub_id:
         for i, row in enumerate(rows):
             padded = list(row) + [''] * (10 - len(row))
-            if padded[7].strip() == str(playhub_id):
-                row_idx = i
+            if padded[1].strip() == str(playhub_id):
+                row_idx     = i
+                found_by_id = True
                 break
 
     # Fall back to name match — exact first, then case-insensitive
@@ -168,7 +171,7 @@ def upsert_player_roles(playhub_name: str, role_seasons: dict[int, str], playhub
 
     if row_idx is None:
         # No existing row — build new one
-        new_row = [playhub_name, '', '', '', '', '', '', playhub_id or '', '', '']
+        new_row = [playhub_name, playhub_id or '', '', '', '', '', '', '', '', '']
         for role_id, season in role_seasons.items():
             col = _ROLE_COL.get(role_id)
             if col is not None:
@@ -195,8 +198,14 @@ def upsert_player_roles(playhub_name: str, role_seasons: dict[int, str], playhub
         existing[col] = season
         changed = True
 
-    if playhub_id and not existing[7].strip():
-        existing[7] = str(playhub_id)
+    if playhub_id and not existing[1].strip():
+        existing[1] = str(playhub_id)
+        changed = True
+
+    # Sync display name if found by ID and name has changed
+    if found_by_id and playhub_name and existing[0].strip() != playhub_name:
+        print(f"  ↻ Playhub name updated: {existing[0].strip()!r} → {playhub_name!r}")
+        existing[0] = playhub_name
         changed = True
 
     if changed:
@@ -232,7 +241,7 @@ def link_player(
     if playhub_id:
         for i, row in enumerate(rows):
             padded = list(row) + [''] * (10 - len(row))
-            if padded[7].strip() == str(playhub_id):
+            if padded[1].strip() == str(playhub_id):
                 row_idx = i
                 break
 
@@ -252,12 +261,12 @@ def link_player(
         # No existing row — create one
         new_row = [
             playhub_name or '',
-            '', '', '', '',
+            str(playhub_id) if playhub_id else '',
             str(discord_id),
             discord_display_name,
-            str(playhub_id) if playhub_id else '',
             now,
             link_method,
+            '', '', '', '',
         ]
         _gs.append_values(
             BOT_DATABASE_SPREADSHEET_ID,
@@ -272,12 +281,12 @@ def link_player(
     sheet_row = row_idx + 2
     updated_row = list(rows[row_idx]) + [''] * (10 - len(rows[row_idx]))
 
-    updated_row[5] = str(discord_id)
-    updated_row[6] = discord_display_name
-    updated_row[8] = now
-    updated_row[9] = link_method
-    if playhub_id and not updated_row[7].strip():
-        updated_row[7] = str(playhub_id)
+    updated_row[2] = str(discord_id)
+    updated_row[3] = discord_display_name
+    updated_row[4] = now
+    updated_row[5] = link_method
+    if playhub_id and not updated_row[1].strip():
+        updated_row[1] = str(playhub_id)
 
     _gs.update_values(
         BOT_DATABASE_SPREADSHEET_ID,
@@ -315,7 +324,7 @@ def _merge_duplicate_rows(discord_id: int):
     matching = []
     for i, row in enumerate(rows):
         padded = list(row) + [''] * (10 - len(row))
-        if padded[5].strip().isdigit() and int(padded[5].strip()) == discord_id:
+        if padded[2].strip().isdigit() and int(padded[2].strip()) == discord_id:
             matching.append((i, padded))
 
     if len(matching) <= 1:
@@ -323,8 +332,8 @@ def _merge_duplicate_rows(discord_id: int):
 
     # Score each row: has playhub_id → +10, each non-blank role col → +1
     def _score(padded):
-        s = 10 if padded[7].strip() else 0
-        for col in range(1, 5):
+        s = 10 if padded[1].strip() else 0
+        for col in range(6, 10):
             if padded[col].strip():
                 s += 1
         return s
@@ -335,7 +344,7 @@ def _merge_duplicate_rows(discord_id: int):
     # Union role seasons into the best row — preserve earliest (lowest sort order)
     best_row = list(best_row)
     for _, dup_row in matching[1:]:
-        for col in range(1, 5):
+        for col in range(6, 10):
             if dup_row[col].strip():
                 if not best_row[col].strip() or _season_num(dup_row[col]) < _season_num(best_row[col]):
                     best_row[col] = dup_row[col].strip()
@@ -375,8 +384,8 @@ def batch_upsert_player_roles(earners: list[tuple[str, dict, str | None]]):
     lower_to_idx: dict[str, int] = {}
     for i, row in enumerate(rows):
         padded = list(row) + [''] * (10 - len(row))
-        if padded[7].strip():
-            id_to_idx[padded[7].strip()] = i
+        if padded[1].strip():
+            id_to_idx[padded[1].strip()] = i
         name = padded[0].strip()
         if name:
             exact_to_idx[name] = i
@@ -398,7 +407,7 @@ def batch_upsert_player_roles(earners: list[tuple[str, dict, str | None]]):
             row_idx = lower_to_idx.get(playhub_name.lower())
 
         if row_idx is None:
-            new_row = [playhub_name, '', '', '', '', '', '', str(playhub_id) if playhub_id else '', '', '']
+            new_row = [playhub_name, str(playhub_id) if playhub_id else '', '', '', '', '', '', '', '', '']
             for role_id, season in role_seasons.items():
                 col = _ROLE_COL.get(role_id)
                 if col is not None:
@@ -415,8 +424,8 @@ def batch_upsert_player_roles(earners: list[tuple[str, dict, str | None]]):
                     continue  # preserve earliest season
                 existing[col] = season
                 changed = True
-            if playhub_id and not existing[7].strip():
-                existing[7] = str(playhub_id)
+            if playhub_id and not existing[1].strip():
+                existing[1] = str(playhub_id)
                 changed = True
             if changed:
                 sheet_row = row_idx + 2

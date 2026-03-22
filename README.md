@@ -25,9 +25,6 @@ util/
   rph_api_utils.py                         # RPH API wrapper with pagination + retry
 scripts/
   sync_commands.py                         # Fly.io release_command — syncs slash commands to guild on every deploy
-  clear_roles.py                           # Season maintenance — strips rarity roles from all Discord members
-  migrate_player_registry.py              # Season maintenance — rebuilds Player Registry from archive + old mapping
-  link_players.py                          # Interactive tool — fuzzy-match and link unlinked players with earned roles
   rph_get_set_championship_events.py       # Manual run — inspect/write Set Champs events from RPH
   test_debug_sheet.py                      # Local dev — runs analyse_stores() against a test spreadsheet
 ```

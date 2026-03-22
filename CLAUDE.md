@@ -24,12 +24,6 @@ See README.md for full architecture, commands, and deployment docs.
 - Store the message ID of the league-rules post in Bot State
 - `/season-rollover` (or a separate command) edits that message in-place from `discord/league-rules.md`
 
-### Bootstrap migration (not yet run on production)
-Clean-start flow to fully initialize the Player Registry for S11:
-1. `python scripts/clear_roles.py` — strip all rarity roles from Discord members
-2. `python scripts/migrate_player_registry.py --assign-discord-roles` — rebuild registry from archive + assign roles
-3. `python scripts/link_players.py` — interactive fuzzy match for remaining unlinked players
-
 ### constants.py cleanup (ongoing)
 - `SELF_ASSIGN_ROLES` — already removed from constants, nothing left to do
 - `WHERE_TO_PLAY_POST_DAY` / `WHERE_TO_PLAY_POST_HOUR_ET` — code config, keep in constants (can override via .env)
