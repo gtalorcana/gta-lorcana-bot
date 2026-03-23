@@ -1604,7 +1604,7 @@ async def schedule(interaction: discord.Interaction):
         }
         for e in upcoming:
             icon = type_icons.get(e.get("type", ""), "📅")
-            date = datetime.strptime(e["date"], "%Y-%m-%d").strftime("%a %b %d").replace(" 0", " ")
+            date_str = datetime.strptime(e["date"], "%Y-%m-%d").strftime("%a %b %d").replace(" 0", " ")
             name = e.get("name", "Unnamed Event")
             location = e.get("location", "TBA")
             url = e.get("url", "")
@@ -1613,7 +1613,7 @@ async def schedule(interaction: discord.Interaction):
             if url:
                 value += f"\n[RSVP here]({url})"
 
-            embed.add_field(name=f"**{date}** — {name}", value=value, inline=False)
+            embed.add_field(name=f"**{date_str}** — {name}", value=value, inline=False)
 
     embed.add_field(
         name="Full details",

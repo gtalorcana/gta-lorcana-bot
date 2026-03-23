@@ -235,37 +235,6 @@ def _parse_city(full_address: str) -> str:
             # Province found — city is the token immediately before it
             return parts[i - 1].title()
     return ''
-    """
-    Compute streak metrics for an event type given its week-start dates.
-
-    Args:
-        week_starts:    Set of Monday dates on which this event type ran.
-        reference_date: Evaluate streaks as of this date (typically today).
-
-    Returns:
-        (current_streak, current_miss_streak) where:
-          current_streak      — consecutive weeks WITH events ending at reference_date
-          current_miss_streak — consecutive weeks WITHOUT events ending at reference_date
-    """
-    if not week_starts:
-        return 0, 0
-
-    ref_week = _get_week_start(reference_date)
-    min_week = min(week_starts)
-
-    current_streak = 0
-    check = ref_week
-    while check in week_starts:
-        current_streak += 1
-        check -= timedelta(weeks=1)
-
-    current_miss_streak = 0
-    check = ref_week
-    while check not in week_starts and check >= min_week:
-        current_miss_streak += 1
-        check -= timedelta(weeks=1)
-
-    return current_streak, current_miss_streak
 
 
 def _compute_streaks(week_starts: set, reference_date: date) -> tuple[int, int]:
@@ -1039,7 +1008,7 @@ _RPH_EVENT_BASE_URL     = "https://tcg.ravensburgerplay.com/events/"
 _SET_CHAMPS_NAME_FILTER = "Set Champ"
 
 
-def refresh_set_champs() -> int:
+def refresh_set_champs() -> tuple[int, list]:
     """
     Fetch Set Championship events from RPH and write them to the Set Champs sheet.
 

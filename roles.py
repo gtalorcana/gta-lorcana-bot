@@ -2,7 +2,7 @@
 League role management.
 
 Handles:
-  - Player Registry sheet CRUD ("Player Registry" in STORE_SPREADSHEET_ID)
+  - Player Registry sheet CRUD ("Player Registry" in BOT_DATABASE_SPREADSHEET_ID)
   - Fuzzy matching of Playhub display names against Discord members
   - Role calculation: Uncommon (10+ events), Rare (top-32 leaderboard),
     Super Rare / Legendary (invitational)
