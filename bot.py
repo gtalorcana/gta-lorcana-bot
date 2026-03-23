@@ -48,7 +48,7 @@ from datetime import datetime, timezone, date, timedelta
 
 from clients import gs as _gs, rph_api as _rph_api
 from results import process_event_data, remove_event_data
-from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, refresh_set_champs, set_bot_state_key, delete_bot_state_key, fetch_event_status, create_season_sheets, archive_season_data, get_gta_store_ids
+from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, refresh_set_champs, set_bot_state_key, delete_bot_state_key, fetch_event_status, create_season_sheets, archive_season_data, get_etb_approval, append_etb_approval, get_player_event_count
 
 from constants import (
     DISCORD_BOT_TOKEN,
@@ -1294,77 +1294,38 @@ async def link_rph(interaction: discord.Interaction, rph_username: str, email: s
     loop     = asyncio.get_running_loop()
     discord_id = str(interaction.user.id)
 
-    # ── Step 1: RPH username lookup ───────────────────────────
+    # ── Step 1: Current season event attendance (from Standings sheet) ───────────
     try:
-        user = await loop.run_in_executor(None, _rph_api.lookup_user_by_username, rph_username)
+        count = await loop.run_in_executor(None, get_player_event_count, rph_username)
     except Exception as e:
-        print(f"  ✗ /link-rph RPH lookup failed: {e}")
+        print(f"  ✗ /link-rph standings lookup failed: {e}")
         await interaction.followup.send(
-            "⚠️ Couldn't reach the RPH API right now — please try again in a moment.",
+            "⚠️ Couldn't reach the standings sheet right now — please try again in a moment.",
             ephemeral=True,
         )
         return
-
-    if not user:
-        await interaction.followup.send(
-            f'❌ We couldn\'t find the RPH username "{rph_username}".\n'
-            f'Check your username at tcg.ravensburgerplay.com and try again.',
-            ephemeral=True,
-        )
-        return
-
-    rph_id = str(user['id'])
-
-    # ── Step 2: Current season GTA event attendance ───────────
-    if not season.SEASON_START_DATE or not season.SEASON_END_DATE:
-        await interaction.followup.send(
-            "⚠️ Season dates aren't configured yet — please try again later.",
-            ephemeral=True,
-        )
-        return
-
-    try:
-        gta_store_ids  = await loop.run_in_executor(None, get_gta_store_ids)
-        event_history  = await loop.run_in_executor(None, _rph_api.get_user_event_history, rph_id)
-    except Exception as e:
-        print(f"  ✗ /link-rph event history fetch failed for rph_id={rph_id}: {e}")
-        await interaction.followup.send(
-            "⚠️ Couldn't retrieve your event history right now — please try again in a moment.",
-            ephemeral=True,
-        )
-        return
-
-    qualifying = [
-        e for e in event_history
-        if str(e.get('store', {}).get('id', '')) in gta_store_ids
-        and e.get('registration_status') == 'COMPLETE'
-        and season.SEASON_START_DATE <= (e.get('start_datetime') or '')[:10] <= season.SEASON_END_DATE
-    ]
-    count = len(qualifying)
 
     if count < _ETB_DISCOUNT_MIN_EVENTS:
         await interaction.followup.send(
             f'❌ You need at least {_ETB_DISCOUNT_MIN_EVENTS} GTA Lorcana events this season to qualify.\n'
-            f'We found {count} event(s) on your record for this season.\n'
+            f'We found {count} event(s) on your record for {season.CURRENT_SEASON}.\n'
             f'Keep playing and try again after your next event!',
             ephemeral=True,
         )
         return
 
-    # ── Step 3: Already approved check (Bot State) ────────────
+    # ── Step 3: Already approved check (ETB Approvals sheet) ──
     try:
-        state = await loop.run_in_executor(None, load_bot_state)
+        existing = await loop.run_in_executor(None, get_etb_approval, discord_id)
     except Exception as e:
-        print(f"  ✗ /link-rph bot state load failed: {e}")
+        print(f"  ✗ /link-rph ETB approval lookup failed: {e}")
         await interaction.followup.send(
-            "⚠️ Couldn't reach bot state right now — please try again in a moment.",
+            "⚠️ Couldn't reach the approvals sheet right now — please try again in a moment.",
             ephemeral=True,
         )
         return
 
-    bot_state_key = f'etb_discount:{discord_id}'
-    if bot_state_key in state:
-        existing     = json.loads(state[bot_state_key])
+    if existing:
         approved_dt  = datetime.fromisoformat(existing['approved_at'])
         approved_str = approved_dt.strftime('%b %-d, %Y')
         await interaction.followup.send(
@@ -1407,14 +1368,14 @@ async def link_rph(interaction: discord.Interaction, rph_username: str, email: s
             already = False  # safe to proceed — worst case we add them again (no-op)
 
         if already:
-            record = json.dumps({
-                'rph_username': rph_username,
-                'rph_id':       rph_id,
-                'email':        email,
-                'approved_at':  datetime.now(timezone.utc).isoformat(),
-                'events_count': count,
-            })
-            await loop.run_in_executor(None, set_bot_state_key, bot_state_key, record)
+            try:
+                await loop.run_in_executor(
+                    None, append_etb_approval,
+                    discord_id, rph_username, email,
+                    datetime.now(timezone.utc).isoformat(), count,
+                )
+            except Exception as e:
+                print(f"  ✗ /link-rph ETB approval write failed (recovery): {e}")
             await interaction.followup.send(
                 f"You're already approved! 🎉\n"
                 f"Use code `{_ETB_DISCOUNT_CODE}` at enterthebattlefield.ca",
@@ -1422,7 +1383,7 @@ async def link_rph(interaction: discord.Interaction, rph_username: str, email: s
             )
             return
     else:
-        print(f"  ⚠ /link-rph: Shopify not configured — skipping Steps 4–6 for rph_id={rph_id}")
+        print(f"  ⚠ /link-rph: Shopify not configured — skipping Steps 4–6 for {rph_username}")
 
     # ── Step 6: Apply Shopify whitelist ───────────────────────
     if _shopify and _etb_price_rule_id and customer is not None:
@@ -1431,12 +1392,12 @@ async def link_rph(interaction: discord.Interaction, rph_username: str, email: s
                 None, _shopify.add_to_whitelist, _etb_price_rule_id, customer['id']
             )
         except Exception as e:
-            print(f"  ✗ /link-rph add_to_whitelist failed for rph_id={rph_id}: {e}")
+            print(f"  ✗ /link-rph add_to_whitelist failed for {rph_username}: {e}")
             try:
                 ryan = await bot.fetch_user(ADMIN_USER_IDS[0])
                 await ryan.send(
                     f"⚠️ /link-rph Shopify whitelist failed for {interaction.user} "
-                    f"(rph: {rph_username}, rph_id: {rph_id})\nError: {e}"
+                    f"(rph: {rph_username})\nError: {e}"
                 )
             except Exception:
                 pass
@@ -1447,18 +1408,15 @@ async def link_rph(interaction: discord.Interaction, rph_username: str, email: s
             )
             return
 
-    # ── Step 7: Store in Bot State and DM ─────────────────────
-    record = json.dumps({
-        'rph_username': rph_username,
-        'rph_id':       rph_id,
-        'email':        email,
-        'approved_at':  datetime.now(timezone.utc).isoformat(),
-        'events_count': count,
-    })
+    # ── Step 7: Record approval and DM ────────────────────────
     try:
-        await loop.run_in_executor(None, set_bot_state_key, bot_state_key, record)
+        await loop.run_in_executor(
+            None, append_etb_approval,
+            discord_id, rph_username, email,
+            datetime.now(timezone.utc).isoformat(), count,
+        )
     except Exception as e:
-        print(f"  ✗ /link-rph bot state write failed for discord_id={discord_id}: {e}")
+        print(f"  ✗ /link-rph ETB approval write failed for discord_id={discord_id}: {e}")
 
     try:
         await interaction.user.send(

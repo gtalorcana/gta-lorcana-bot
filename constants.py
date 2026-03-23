@@ -84,6 +84,11 @@ STORE_DEBUG_RANGE_NAME = STORE_DEBUG_SHEET_NAME + "!A1:Z"  # wide enough for 4 w
 PLAYER_REGISTRY_SHEET_NAME = "Player Registry"
 PLAYER_REGISTRY_RANGE_NAME = PLAYER_REGISTRY_SHEET_NAME + "!A2:J"
 
+# ETB Approvals — one row per approved player (BOT_DATABASE_SPREADSHEET_ID)
+# Columns (A–E): Discord ID | RPH Username | Email | Approved At | Events Count
+ETB_APPROVALS_SHEET_NAME = "ETB Approvals"
+ETB_APPROVALS_RANGE_NAME = ETB_APPROVALS_SHEET_NAME + "!A2:E"
+
 # Scripts Constants
 
 # Archive spreadsheet — historical seasons (S1–S10)

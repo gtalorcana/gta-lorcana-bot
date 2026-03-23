@@ -43,6 +43,8 @@ from constants import (
     WHERE_TO_PLAY_MIN_CONSECUTIVE_WEEKS,
     STORE_DEBUG_SHEET_NAME,
     STORE_DEBUG_RANGE_NAME,
+    ETB_APPROVALS_SHEET_NAME,
+    ETB_APPROVALS_RANGE_NAME,
 )
 
 _TZ_TORONTO = ZoneInfo("America/Toronto")
@@ -724,6 +726,56 @@ def delete_bot_state_key(key: str) -> None:
     if key in state:
         del state[key]
         save_bot_state(state)
+
+
+# ── ETB Approvals ─────────────────────────────────────────────────────────────
+
+def get_etb_approval(discord_id: str) -> dict | None:
+    """
+    Look up an ETB discount approval by Discord ID.
+    Returns a dict with keys (discord_id, rph_username, email, approved_at,
+    events_count) if found, or None if the player has not been approved.
+    """
+    result = _gs.get_values(BOT_DATABASE_SPREADSHEET_ID, ETB_APPROVALS_RANGE_NAME)
+    rows   = result.get('values', [])
+    for row in rows:
+        if row and row[0] == discord_id:
+            return {
+                'discord_id':   row[0] if len(row) > 0 else '',
+                'rph_username': row[1] if len(row) > 1 else '',
+                'email':        row[2] if len(row) > 2 else '',
+                'approved_at':  row[3] if len(row) > 3 else '',
+                'events_count': row[4] if len(row) > 4 else '',
+            }
+    return None
+
+
+def append_etb_approval(
+    discord_id:   str,
+    rph_username: str,
+    email:        str,
+    approved_at:  str,
+    events_count: int,
+) -> None:
+    """Append a new ETB approval row. Raises on sheet error."""
+    _gs.append_values(
+        BOT_DATABASE_SPREADSHEET_ID,
+        ETB_APPROVALS_RANGE_NAME,
+        'USER_ENTERED',
+        [[discord_id, rph_username, email, approved_at, str(events_count)]],
+    )
+
+
+def get_player_event_count(rph_username: str) -> int:
+    """
+    Count how many events the player appears in for the current season
+    by scanning the Standings sheet (column D = Playhub Name).
+    Returns the number of matching rows (each row = one event attended).
+    """
+    result = _gs.get_values(LEAGUE_SPREADSHEET_ID, season.STANDINGS_RANGE_NAME)
+    rows   = result.get('values', [])
+    name   = rph_username.lower()
+    return sum(1 for row in rows if len(row) > 3 and row[3].lower() == name)
 
 
 def create_season_sheets(new_season: str) -> list[str]:
