@@ -62,20 +62,16 @@ from constants import (
     UPCOMING_EVENTS_JSON_URL,
     WHERE_TO_PLAY_POST_DAY,
     WHERE_TO_PLAY_POST_HOUR_ET,
-    SET_CHAMPS_START_DATE,
-    SET_CHAMPS_END_DATE,
     SET_CHAMPS_SPREADSHEET_ID,
-    SET_CHAMPS_EVENTS_RANGE_NAME,
     COMMON_ROLE_ID,
     UNCOMMON_ROLE_ID,
     RARE_ROLE_ID,
     LEGENDARY_ROLE_ID,
     SUPER_RARE_ROLE_ID,
     LEAGUE_SPREADSHEET_ID,
-    STANDINGS_RANGE_NAME,
-    LEADERBOARD_RANGE_NAME,
-    CURRENT_SEASON, DISCORD_GUILD_ID,
+    DISCORD_GUILD_ID,
 )
+import season
 from roles import (
     fuzzy_match_member,
     get_unlinked_players,
@@ -368,10 +364,6 @@ async def where_to_play_weekly():
 
 # ── Set Championships daily refresh ─────────────────────────────────────────
 
-_SET_CHAMPS_START = date.fromisoformat(SET_CHAMPS_START_DATE) - timedelta(weeks=2)
-_SET_CHAMPS_END   = date.fromisoformat(SET_CHAMPS_END_DATE)
-
-
 @tasks.loop(minutes=1)
 async def set_champs_daily():
     """
@@ -381,7 +373,9 @@ async def set_champs_daily():
     now_et = _now_et()
     if now_et.hour != 7 or now_et.minute != 0:
         return
-    if not (_SET_CHAMPS_START <= now_et.date() <= _SET_CHAMPS_END):
+    _start = date.fromisoformat(season.SET_CHAMPS_START_DATE) - timedelta(weeks=2)
+    _end   = date.fromisoformat(season.SET_CHAMPS_END_DATE)
+    if not (_start <= now_et.date() <= _end):
         return
 
     print(f"  🏆 set_champs_daily: refreshing Set Champs sheet for {now_et.date()}...")
@@ -640,10 +634,18 @@ async def on_ready():
     print(f"  Watching {_ch('announcements')} for website sync")
     print(f"  Watching {_ch('results_reporting')} for results processing")
 
+    # Load Bot State: initialise season config and restore persisted message IDs
+    loop = asyncio.get_running_loop()
+    try:
+        state = await loop.run_in_executor(None, load_bot_state)
+        season.init(state)
+    except Exception as e:
+        print(f"  ⚠ Could not load bot state for season init: {e}")
+        season.init({})
+        state = {}
+
     # Restore persisted where-to-play message IDs so edits work after restarts
     try:
-        loop = asyncio.get_running_loop()
-        state = await loop.run_in_executor(None, load_bot_state)
         ids = [
             int(state[f'wtp_msg_{i}']) if f'wtp_msg_{i}' in state and state[f'wtp_msg_{i}'] else None
             for i in range(4)
@@ -661,7 +663,7 @@ async def on_ready():
         print(f"  ♻ Where-to-play weekly task started (fires Sundays at {WHERE_TO_PLAY_POST_HOUR_ET}:00 ET)")
     if not set_champs_daily.is_running():
         set_champs_daily.start()
-        print(f"  ♻ Set Champs daily task started (fires 7AM ET, {SET_CHAMPS_START_DATE} → {SET_CHAMPS_END_DATE})")
+        print(f"  ♻ Set Champs daily task started (fires 7AM ET, {season.SET_CHAMPS_START_DATE} → {season.SET_CHAMPS_END_DATE})")
     if not rph_watcher.is_running():
         rph_watcher.start()
         print(f"  ♻ RPH event watcher started (polls every 15 min)")
@@ -1561,7 +1563,7 @@ async def sync_roles(interaction: discord.Interaction):
 
     # 1. Read leaderboard
     lb_data = await loop.run_in_executor(
-        None, _gs.get_values, LEAGUE_SPREADSHEET_ID, LEADERBOARD_RANGE_NAME
+        None, _gs.get_values, LEAGUE_SPREADSHEET_ID, season.LEADERBOARD_RANGE_NAME
     )
     leaderboard_rows = lb_data.get('values', [])
 
@@ -1581,7 +1583,7 @@ async def sync_roles(interaction: discord.Interaction):
             events_played = 0
         earned = compute_earned_roles(rank, events_played)
         if earned:
-            earned_by_name[player_name.lower()] = (player_name, {r: CURRENT_SEASON for r in earned})
+            earned_by_name[player_name.lower()] = (player_name, {r: season.CURRENT_SEASON for r in earned})
 
     if not earned_by_name:
         await interaction.followup.send("✅ No players have earned roles this season.", ephemeral=True)

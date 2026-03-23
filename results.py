@@ -1,13 +1,10 @@
 from datetime import datetime, timezone
 
+import season
 from clients import gs as _gs, rph_api as _rph_api
 from constants import (
     LEAGUE_SPREADSHEET_ID,
-    EVENTS_RANGE_NAME,
     RESULTS_REPORTING_CHANNEL_URL,
-    STANDINGS_RANGE_NAME,
-    EVENTS_TIMESTAMP_RANGE_NAME,
-    EVENTS_SHEET_NAME,
 )
 
 # ── Singletons ────────────────────────────────────────────────────────────────
@@ -101,7 +98,7 @@ def process_event_data(rph_url, thread_id):
          the event row won't exist so /recheck can safely retry the thread.
     """
     print(f"  → process_event_data: reading existing events from sheet...")
-    existing_data = _gs.get_values(LEAGUE_SPREADSHEET_ID, EVENTS_RANGE_NAME)
+    existing_data = _gs.get_values(LEAGUE_SPREADSHEET_ID, season.EVENTS_RANGE_NAME)
     existing_rows = existing_data.get('values', [])
 
     # ── Step 1: Duplicate check ───────────────────────────────
@@ -142,14 +139,14 @@ def process_event_data(rph_url, thread_id):
     # mid-write, the event row won't exist yet so the duplicate check won't
     # trigger and the thread can be safely retried via /recheck.
     print(f"  → Writing {len(standing_rows)} standings rows to sheet...")
-    _gs.update_values(LEAGUE_SPREADSHEET_ID, STANDINGS_RANGE_NAME, "USER_ENTERED", standing_rows)
+    _gs.update_values(LEAGUE_SPREADSHEET_ID, season.STANDINGS_RANGE_NAME, "USER_ENTERED", standing_rows)
 
     print(f"  → Writing {len(event_rows)} event rows to sheet...")
-    _gs.update_values(LEAGUE_SPREADSHEET_ID, EVENTS_RANGE_NAME, "USER_ENTERED", event_rows)
+    _gs.update_values(LEAGUE_SPREADSHEET_ID, season.EVENTS_RANGE_NAME, "USER_ENTERED", event_rows)
 
     utc_dt   = datetime.now(timezone.utc)
     local_dt = utc_dt.astimezone().isoformat()
-    _gs.update_values(LEAGUE_SPREADSHEET_ID, EVENTS_TIMESTAMP_RANGE_NAME, "USER_ENTERED", [['Last updated', local_dt]])
+    _gs.update_values(LEAGUE_SPREADSHEET_ID, season.EVENTS_TIMESTAMP_RANGE_NAME, "USER_ENTERED", [['Last updated', local_dt]])
 
     print(f"  ✓ All sheets updated successfully")
     return standing_rows
@@ -158,12 +155,12 @@ def process_event_data(rph_url, thread_id):
 def remove_event_data(thread_id):
     """Clear the row matching thread_id from the events sheet."""
     print(f"  → remove_event_data: searching for thread {thread_id}...")
-    recorded = _gs.get_values(LEAGUE_SPREADSHEET_ID, EVENTS_RANGE_NAME)
+    recorded = _gs.get_values(LEAGUE_SPREADSHEET_ID, season.EVENTS_RANGE_NAME)
 
     for idx, row in enumerate(recorded.get('values', [])):
         if len(row) > 1 and row[1] == str(thread_id):
             sheet_row   = idx + 2  # sheet rows start at A2
-            clear_range = EVENTS_SHEET_NAME + f"!A{sheet_row}:G{sheet_row}"
+            clear_range = season.EVENTS_SHEET_NAME + f"!A{sheet_row}:G{sheet_row}"
             _gs.update_values(LEAGUE_SPREADSHEET_ID, clear_range, "USER_ENTERED", [[""] * 7])
             print(f"  ✓ Cleared row {sheet_row} for thread {thread_id}")
             return
@@ -175,16 +172,16 @@ if __name__ == "__main__":
     # Standalone: re-fetch and rewrite all standings without adding a new event.
     # Reads whatever URLs are currently in the sheet and rewrites everything.
     print("Running standalone standings refresh...")
-    existing_data = _gs.get_values(LEAGUE_SPREADSHEET_ID, EVENTS_RANGE_NAME)
+    existing_data = _gs.get_values(LEAGUE_SPREADSHEET_ID, season.EVENTS_RANGE_NAME)
     existing_rows = existing_data.get('values', [])
 
     event_rows, standing_rows = _fetch_event_rows_and_standings(existing_rows)
 
-    _gs.update_values(LEAGUE_SPREADSHEET_ID, EVENTS_RANGE_NAME, "USER_ENTERED", event_rows)
-    _gs.update_values(LEAGUE_SPREADSHEET_ID, STANDINGS_RANGE_NAME, "USER_ENTERED", standing_rows)
+    _gs.update_values(LEAGUE_SPREADSHEET_ID, season.EVENTS_RANGE_NAME, "USER_ENTERED", event_rows)
+    _gs.update_values(LEAGUE_SPREADSHEET_ID, season.STANDINGS_RANGE_NAME, "USER_ENTERED", standing_rows)
 
     utc_dt   = datetime.now(timezone.utc)
     local_dt = utc_dt.astimezone().isoformat()
-    _gs.update_values(LEAGUE_SPREADSHEET_ID, EVENTS_TIMESTAMP_RANGE_NAME, "USER_ENTERED", [['Last updated', local_dt]])
+    _gs.update_values(LEAGUE_SPREADSHEET_ID, season.EVENTS_TIMESTAMP_RANGE_NAME, "USER_ENTERED", [['Last updated', local_dt]])
 
     print(f"Done — {len(event_rows)} events, {len(standing_rows)} standings rows written.")

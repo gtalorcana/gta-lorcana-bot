@@ -31,19 +31,15 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 import re
 
+import season
 from clients import gs as _gs, rph_api as _rph_api
 from constants import (
-    SEASON_START_DT,
-    SEASON_END_DT,
     BOT_DATABASE_SPREADSHEET_ID,
     STORE_CLASSIFICATIONS_RANGE_NAME,
     STORE_OVERRIDES_RANGE_NAME,
     BOT_STATE_RANGE_NAME,
     WHERE_TO_PLAY_MIN_CONSECUTIVE_WEEKS,
-    SET_CHAMPS_START_DT,
-    SET_CHAMPS_END_DT,
     SET_CHAMPS_SPREADSHEET_ID,
-    SET_CHAMPS_EVENTS_RANGE_NAME,
     STORE_DEBUG_SHEET_NAME,
     STORE_DEBUG_RANGE_NAME,
 )
@@ -63,7 +59,7 @@ _DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
 def _fetch_current_season_events() -> list:
     """Fetch all Ontario Lorcana events for the current season from RPH."""
     print(f"  → Fetching current season RPH events...")
-    events = _rph_api.get_events(SEASON_START_DT, SEASON_END_DT)
+    events = _rph_api.get_events(season.SEASON_START_DT, season.SEASON_END_DT)
     print(f"  ✓ {len(events)} events fetched")
     return events
 
@@ -888,10 +884,10 @@ def refresh_set_champs() -> int:
         'display_statuses': ['past', 'inProgress', 'upcoming'],
     }
 
-    print(f"  → Fetching Set Championship events ({SET_CHAMPS_START_DT} → {SET_CHAMPS_END_DT})...")
+    print(f"  → Fetching Set Championship events ({season.SET_CHAMPS_START_DT} → {season.SET_CHAMPS_END_DT})...")
     events = _rph_api.get_events(
-        start_date_after=SET_CHAMPS_START_DT,
-        start_date_before=SET_CHAMPS_END_DT,
+        start_date_after=season.SET_CHAMPS_START_DT,
+        start_date_before=season.SET_CHAMPS_END_DT,
         extra_params=override_params,
     )
 
@@ -918,6 +914,6 @@ def refresh_set_champs() -> int:
 
     rows.sort(key=lambda r: (r[0], r[1]))  # sort by date then time
 
-    _gs.update_values(SET_CHAMPS_SPREADSHEET_ID, SET_CHAMPS_EVENTS_RANGE_NAME, "USER_ENTERED", rows)
+    _gs.update_values(SET_CHAMPS_SPREADSHEET_ID, season.SET_CHAMPS_EVENTS_RANGE_NAME, "USER_ENTERED", rows)
     print(f"  ✓ Set Champs sheet updated ({len(rows)} row(s))")
     return len(rows)

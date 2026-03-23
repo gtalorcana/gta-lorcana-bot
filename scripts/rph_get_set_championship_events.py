@@ -29,12 +29,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime
 from util.rph_api_utils import RphApi
 from util.google_sheets_api_utils import GoogleSheetsApi
-from constants import (
-    SET_CHAMPS_SPREADSHEET_ID,
-    SET_CHAMPS_EVENTS_RANGE_NAME,
-    SET_CHAMPS_START_DT,
-    SET_CHAMPS_END_DT,
-)
+import season
+from constants import SET_CHAMPS_SPREADSHEET_ID
 from stores import _parse_city
 
 _TZ_TORONTO = ZoneInfo("America/Toronto")
@@ -80,12 +76,12 @@ if __name__ == '__main__':
     }
 
     print(f"\nFetching Set Championship events...")
-    print(f"  Date range: {SET_CHAMPS_START_DT} → {SET_CHAMPS_END_DT}")
+    print(f"  Date range: {season.SET_CHAMPS_START_DT} → {season.SET_CHAMPS_END_DT}")
     print(f"  Name filter: {NAME_FILTER!r}\n")
 
     events = rph_api.get_events(
-        start_date_after=SET_CHAMPS_START_DT,
-        start_date_before=SET_CHAMPS_END_DT,
+        start_date_after=season.SET_CHAMPS_START_DT,
+        start_date_before=season.SET_CHAMPS_END_DT,
         extra_params=override_params,
     )
 
@@ -129,7 +125,7 @@ if __name__ == '__main__':
     print(f"\n  {len(rows)} row(s) ready to write.")
 
     if WRITE_TO_SHEET:
-        gs.update_values(SET_CHAMPS_SPREADSHEET_ID, SET_CHAMPS_EVENTS_RANGE_NAME, "USER_ENTERED", rows)
+        gs.update_values(SET_CHAMPS_SPREADSHEET_ID, season.SET_CHAMPS_EVENTS_RANGE_NAME, "USER_ENTERED", rows)
         print(f"  ✓ Written to sheet.")
     else:
         print(f"\n  ⚠ WRITE_TO_SHEET = False — set to True to write to the sheet.")

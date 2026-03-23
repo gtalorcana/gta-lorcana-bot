@@ -47,28 +47,18 @@ GITHUB_OWNER = "gtalorcana"
 GITHUB_REPO  = "gtalorcana.ca"
 UPCOMING_EVENTS_JSON_URL   = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/main/data/upcoming_events.json"
 
-# League Constants
-# TODO: add to Bot State?
-CURRENT_SEASON = os.getenv("CURRENT_SEASON", "S11")
+# League Constants — fallback values used by season.py
+# These are overridden at runtime by Bot State values via season.init()
+CURRENT_SEASON      = os.getenv("CURRENT_SEASON", "S11")
 SEASON_START_DATE   = "2026-02-13"
 SEASON_END_DATE     = "2026-04-24"
 
-START_OF_DAY    = "T05%3A00%3A00.000Z"
-END_OF_DAY      = "T04%3A59%3A59.999Z"
-SEASON_START_DT = SEASON_START_DATE + START_OF_DAY
-SEASON_END_DT   = SEASON_END_DATE + END_OF_DAY
-
+# RPH API date suffix helpers — used by season.py to build datetime strings
+START_OF_DAY = "T05%3A00%3A00.000Z"
+END_OF_DAY   = "T04%3A59%3A59.999Z"
 
 # Google Sheets Constants
 LEAGUE_SPREADSHEET_ID = "1dSv5lzVwhot1DR0e2FghyS7R1Vm1ODZtH3d8e3C55Zo"
-
-STANDINGS_SHEET_NAME        = CURRENT_SEASON + " Standings - User Reported"
-EVENTS_SHEET_NAME           = CURRENT_SEASON + " Events - User Reported"
-LEADERBOARD_SHEET_NAME      = CURRENT_SEASON + " Leaderboard"
-STANDINGS_RANGE_NAME        = STANDINGS_SHEET_NAME + "!" + "A3:G"
-EVENTS_RANGE_NAME           = EVENTS_SHEET_NAME + "!" + "A2:G"
-EVENTS_TIMESTAMP_RANGE_NAME = EVENTS_SHEET_NAME + "!" + "J1:K1"
-LEADERBOARD_RANGE_NAME      = LEADERBOARD_SHEET_NAME + "!A2:D"  # Rank, Player, Points, Events Played
 
 # Separate spreadsheet for bot backend data
 BOT_DATABASE_SPREADSHEET_ID  = "1cKiZqVu88_umUbrGPXk-dmZhHEzx1uL-pGR6dQOJyaU"
@@ -96,12 +86,8 @@ PLAYER_REGISTRY_RANGE_NAME = PLAYER_REGISTRY_SHEET_NAME + "!A2:J"
 
 # Scripts Constants
 SET_CHAMPS_SPREADSHEET_ID = "1sF-TJ5ue5_sOCCpj9UlV_RvXbuJ9l2GwxTFVPthpCrc"
-SET_CHAMPS_EVENTS_SHEET_NAME = CURRENT_SEASON + " Set Champs"
-SET_CHAMPS_EVENTS_RANGE_NAME = SET_CHAMPS_EVENTS_SHEET_NAME + "!" + "A2:H"
-SET_CHAMPS_START_DATE   = "2026-04-04"
-SET_CHAMPS_END_DATE     = "2026-04-24"
-SET_CHAMPS_START_DT     = SET_CHAMPS_START_DATE + START_OF_DAY
-SET_CHAMPS_END_DT       = SET_CHAMPS_END_DATE + END_OF_DAY
+SET_CHAMPS_START_DATE     = "2026-04-04"   # fallback — overridden by Bot State via season.init()
+SET_CHAMPS_END_DATE       = "2026-04-24"   # fallback — overridden by Bot State via season.init()
 
 # Archive spreadsheet — historical seasons (S1–S10)
 ARCHIVE_SPREADSHEET_ID = "1382ddPYx3dRKDTvSd60jiu4Yd_-SwkBTRy0djt84F2o"
