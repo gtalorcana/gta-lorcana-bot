@@ -6,6 +6,7 @@ Features:
   - /watch-rph-event — subscribe to DM alerts when a spot opens at a full event
   - /unwatch-rph-event — unsubscribe from a watched event
   - /list-watches    — see all currently watched events
+  - /link-rph        — verify RPH attendance and apply ETB discount whitelist
   - /help            — list all commands
   - /recheck         — reprocess missed results threads (admins only)
   - /link            — manually link a Discord member to a Playhub ID (admins only)
@@ -47,7 +48,7 @@ from datetime import datetime, timezone, date, timedelta
 
 from clients import gs as _gs, rph_api as _rph_api
 from results import process_event_data, remove_event_data
-from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, refresh_set_champs, set_bot_state_key, delete_bot_state_key, fetch_event_status, create_season_sheets, archive_season_data
+from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, refresh_set_champs, set_bot_state_key, delete_bot_state_key, fetch_event_status, create_season_sheets, archive_season_data, get_gta_store_ids
 
 from constants import (
     DISCORD_BOT_TOKEN,
@@ -69,8 +70,11 @@ from constants import (
     SUPER_RARE_ROLE_ID,
     LEAGUE_SPREADSHEET_ID,
     DISCORD_GUILD_ID,
+    SHOPIFY_TOKEN,
+    SHOPIFY_STORE_DOMAIN,
 )
 import season
+from util.shopify_api_utils import ShopifyApi as _ShopifyApi
 from roles import (
     fuzzy_match_member,
     get_unlinked_players,
@@ -1250,6 +1254,209 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 # SLASH COMMANDS
 # ═══════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════
+# ETB DISCOUNT — /link-rph
+# ═══════════════════════════════════════════════════════════════
+
+_ETB_DISCOUNT_CODE    = "ETBGTALORCANA"
+_ETB_DISCOUNT_MIN_EVENTS = 3
+
+@tree.command(name="link-rph", description="Link your RPH account to unlock the Enter the Battlefield community discount")
+@app_commands.describe(
+    rph_username="Your RPH display name (as shown on tcg.ravensburgerplay.com)",
+    email="Your email address registered at enterthebattlefield.ca",
+)
+async def link_rph(interaction: discord.Interaction, rph_username: str, email: str):
+    await interaction.response.defer(ephemeral=True)
+    loop     = asyncio.get_running_loop()
+    discord_id = str(interaction.user.id)
+
+    # ── Step 1: RPH username lookup ───────────────────────────
+    try:
+        user = await loop.run_in_executor(None, _rph_api.lookup_user_by_username, rph_username)
+    except Exception as e:
+        print(f"  ✗ /link-rph RPH lookup failed: {e}")
+        await interaction.followup.send(
+            "⚠️ Couldn't reach the RPH API right now — please try again in a moment.",
+            ephemeral=True,
+        )
+        return
+
+    if not user:
+        await interaction.followup.send(
+            f'❌ We couldn\'t find the RPH username "{rph_username}".\n'
+            f'Check your username at tcg.ravensburgerplay.com and try again.',
+            ephemeral=True,
+        )
+        return
+
+    rph_id = str(user['id'])
+
+    # ── Step 2: Current season GTA event attendance ───────────
+    if not season.SEASON_START_DATE or not season.SEASON_END_DATE:
+        await interaction.followup.send(
+            "⚠️ Season dates aren't configured yet — please try again later.",
+            ephemeral=True,
+        )
+        return
+
+    try:
+        gta_store_ids  = await loop.run_in_executor(None, get_gta_store_ids)
+        event_history  = await loop.run_in_executor(None, _rph_api.get_user_event_history, rph_id)
+    except Exception as e:
+        print(f"  ✗ /link-rph event history fetch failed for rph_id={rph_id}: {e}")
+        await interaction.followup.send(
+            "⚠️ Couldn't retrieve your event history right now — please try again in a moment.",
+            ephemeral=True,
+        )
+        return
+
+    qualifying = [
+        e for e in event_history
+        if str(e.get('store', {}).get('id', '')) in gta_store_ids
+        and e.get('registration_status') == 'COMPLETE'
+        and season.SEASON_START_DATE <= (e.get('start_datetime') or '')[:10] <= season.SEASON_END_DATE
+    ]
+    count = len(qualifying)
+
+    if count < _ETB_DISCOUNT_MIN_EVENTS:
+        await interaction.followup.send(
+            f'❌ You need at least {_ETB_DISCOUNT_MIN_EVENTS} GTA Lorcana events this season to qualify.\n'
+            f'We found {count} event(s) on your record for this season.\n'
+            f'Keep playing and try again after your next event!',
+            ephemeral=True,
+        )
+        return
+
+    # ── Step 3: Already approved check (Bot State) ────────────
+    try:
+        state = await loop.run_in_executor(None, load_bot_state)
+    except Exception as e:
+        print(f"  ✗ /link-rph bot state load failed: {e}")
+        await interaction.followup.send(
+            "⚠️ Couldn't reach bot state right now — please try again in a moment.",
+            ephemeral=True,
+        )
+        return
+
+    bot_state_key = f'etb_discount:{discord_id}'
+    if bot_state_key in state:
+        existing     = json.loads(state[bot_state_key])
+        approved_dt  = datetime.fromisoformat(existing['approved_at'])
+        approved_str = approved_dt.strftime('%b %-d, %Y')
+        await interaction.followup.send(
+            f"You're already approved! 🎉\n"
+            f"Use code `{_ETB_DISCOUNT_CODE}` at enterthebattlefield.ca\n"
+            f"(Approved on {approved_str})",
+            ephemeral=True,
+        )
+        return
+
+    # ── Steps 4 & 5: Shopify customer lookup + whitelist check ─
+    shopify = _ShopifyApi(SHOPIFY_TOKEN, SHOPIFY_STORE_DOMAIN) if SHOPIFY_TOKEN else None
+    customer = None
+
+    if shopify:
+        try:
+            customer = await loop.run_in_executor(None, shopify.lookup_customer_by_email, email)
+        except Exception as e:
+            print(f"  ✗ /link-rph Shopify lookup failed: {e}")
+            await interaction.followup.send(
+                "⚠️ Couldn't reach the Shopify API right now — please try again in a moment.",
+                ephemeral=True,
+            )
+            return
+
+        if customer is None:
+            await interaction.followup.send(
+                f'❌ That email isn\'t registered at enterthebattlefield.ca.\n'
+                f'Create an account at enterthebattlefield.ca first, then run /link-rph again.',
+                ephemeral=True,
+            )
+            return
+
+        # Step 5: already whitelisted in Shopify
+        if shopify.is_whitelisted(customer):
+            record = json.dumps({
+                'rph_username': rph_username,
+                'rph_id':       rph_id,
+                'email':        email,
+                'approved_at':  datetime.now(timezone.utc).isoformat(),
+                'events_count': count,
+            })
+            await loop.run_in_executor(None, set_bot_state_key, bot_state_key, record)
+            await interaction.followup.send(
+                f"You're already approved! 🎉\n"
+                f"Use code `{_ETB_DISCOUNT_CODE}` at enterthebattlefield.ca",
+                ephemeral=True,
+            )
+            return
+    else:
+        print(f"STUB: Shopify token not configured — skipping customer lookup and whitelist for rph_id={rph_id}")
+
+    # ── Step 6: Apply Shopify whitelist ───────────────────────
+    if shopify and customer is not None:
+        try:
+            await loop.run_in_executor(None, shopify.whitelist_customer, customer)
+        except Exception as e:
+            print(f"  ✗ /link-rph Shopify whitelist failed for rph_id={rph_id}: {e}")
+            # Notify Ryan (first admin ID)
+            try:
+                ryan = await bot.fetch_user(ADMIN_USER_IDS[0])
+                await ryan.send(
+                    f"⚠️ /link-rph Shopify whitelist failed for {interaction.user} "
+                    f"(rph: {rph_username}, rph_id: {rph_id})\nError: {e}"
+                )
+            except Exception:
+                pass
+            await interaction.followup.send(
+                "⚠️ Something went wrong on our end — Ryan has been notified and will\n"
+                "approve you manually shortly. Sorry for the inconvenience!",
+                ephemeral=True,
+            )
+            return
+    else:
+        print(f"STUB: Shopify whitelist skipped — token not configured")
+
+    # ── Step 7: Store in Bot State and DM ─────────────────────
+    record = json.dumps({
+        'rph_username': rph_username,
+        'rph_id':       rph_id,
+        'email':        email,
+        'approved_at':  datetime.now(timezone.utc).isoformat(),
+        'events_count': count,
+    })
+    try:
+        await loop.run_in_executor(None, set_bot_state_key, bot_state_key, record)
+    except Exception as e:
+        print(f"  ✗ /link-rph bot state write failed for discord_id={discord_id}: {e}")
+
+    try:
+        await interaction.user.send(
+            f"✅ **You're approved for the ETB GTA Lorcana discount!**\n\n"
+            f"Discount code: `{_ETB_DISCOUNT_CODE}`\n"
+            f"Shop: enterthebattlefield.ca\n\n"
+            f"Your account ({email}) has been activated.\n"
+            f"The code will work at checkout on your next visit.\n\n"
+            f"Questions? Ask in #store-discounts."
+        )
+        await interaction.followup.send(
+            "✅ You're approved! Check your DMs for the discount code.",
+            ephemeral=True,
+        )
+    except discord.Forbidden:
+        # DMs disabled — send the code ephemerally instead
+        await interaction.followup.send(
+            f"✅ **You're approved for the ETB GTA Lorcana discount!**\n\n"
+            f"Discount code: `{_ETB_DISCOUNT_CODE}`\n"
+            f"Shop: enterthebattlefield.ca\n\n"
+            f"Your account ({email}) has been activated.\n"
+            f"The code will work at checkout on your next visit.\n\n"
+            f"Questions? Ask in #store-discounts.",
+            ephemeral=True,
+        )
+
+
 # ── /schedule ─────────────────────────────────────────────────
 # Events are read from data/upcoming_events.json in the website repo.
 # To add or update events, edit that file directly in GitHub.
@@ -1878,6 +2085,7 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="/watch-rph-event", value="Subscribe to DM alerts when a spot opens at a full RPH event", inline=False)
     embed.add_field(name="/unwatch-rph-event", value="Unsubscribe from a watched event", inline=False)
     embed.add_field(name="/list-watches", value="Show all active event watches", inline=False)
+    embed.add_field(name="/link-rph", value="Link your RPH account to unlock the Enter the Battlefield community discount", inline=False)
     embed.add_field(name="🧵 Results Threads",
                     value=f"New threads in `{_ch('results_reporting')}` are processed automatically. Edit to retry on bad URL.",
                     inline=False)

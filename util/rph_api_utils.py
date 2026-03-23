@@ -2,7 +2,7 @@ import time
 
 import requests
 
-from constants import RPH_EVENTS_URL, RPH_GAME_STORES_URL, RPH_STANDINGS_URL
+from constants import RPH_EVENTS_URL, RPH_GAME_STORES_URL, RPH_STANDINGS_URL, RPH_USERS_URL
 
 _MAX_RETRIES = 3
 _RETRY_DELAY = 2  # seconds between retries
@@ -123,3 +123,31 @@ class RphApi:
         url = RPH_STANDINGS_URL.format(round_id=round_id)
         data = _get_with_retry(self.session, url)
         return data['standings']
+
+    def lookup_user_by_username(self, username: str) -> dict | None:
+        """
+        Search for an RPH user by display name.
+        Returns the first matching user dict (with at least 'id' and 'username'), or None if not found.
+        NOTE: RPH username search may be case-sensitive — pass the username exactly as entered.
+        """
+        data = _get_with_retry(self.session, RPH_USERS_URL, params={'username': username})
+        results = data.get('results', [])
+        return results[0] if results else None
+
+    def get_user_event_history(self, rph_id: str) -> list:
+        """
+        Fetch all event history entries for an RPH user.
+        Returns a flat list of event dicts. Each entry is expected to have:
+          store.id, start_datetime, registration_status
+        NOTE: field names are based on the spec — verify against actual API response.
+        """
+        url = RPH_USERS_URL + str(rph_id) + '/event-history/'
+        results = []
+        params = {'page': 1, 'page_size': 50}
+        while True:
+            data = _get_with_retry(self.session, url, params)
+            results.extend(data.get('results', []))
+            if not data.get('next'):
+                break
+            params['page'] += 1
+        return results

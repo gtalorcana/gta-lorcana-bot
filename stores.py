@@ -438,6 +438,17 @@ def load_store_analysis() -> dict | None:
     return analysis
 
 
+def get_gta_store_ids() -> set:
+    """
+    Return all store IDs from the Store Classifications sheet as strings.
+    Used to filter RPH event history to GTA Lorcana stores only.
+    This is the same store list used by the Where to Play feature.
+    """
+    result = _gs.get_values(BOT_DATABASE_SPREADSHEET_ID, STORE_CLASSIFICATIONS_RANGE_NAME)
+    rows   = result.get('values', [])
+    return {str(row[0]) for row in rows[1:] if row}  # skip header; col A is store_id
+
+
 # ── Overrides ─────────────────────────────────────────────────────────────────
 
 def _load_overrides() -> list:
