@@ -12,7 +12,7 @@ Features:
   - /link            — manually link a Discord member to a Playhub ID (admins only)
   - /sync-roles      — apply Uncommon/Rare upgrades from standings (admins only)
   - /invitational-roles     — assign Legendary/Super Rare (admins only)
-  - /wheretoplay     — manually push the where-to-play post (admins only)
+  - /where-to-play     — manually push the where-to-play post (admins only)
   - /set-champs      — manually refresh and post the Set Champs update (admins only)
   - on_member_join   — auto-assigns Common rarity role to new members
   - where_to_play_weekly — refreshes #where-to-play every Sunday evening
@@ -2186,7 +2186,7 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="/link", value="Manually link a Discord member to a Playhub ID", inline=False)
     embed.add_field(name="/sync-roles", value="Compute and apply Uncommon/Rare role upgrades from current standings", inline=False)
     embed.add_field(name="/invitational-roles", value="Assign Legendary/Super Rare from an invitational event", inline=False)
-    embed.add_field(name="/wheretoplay", value="Manually push the Where to Play post", inline=False)
+    embed.add_field(name="/where-to-play", value="Manually push the Where to Play post", inline=False)
     embed.add_field(name="/season-rollover", value="Create new season sheet tabs, update Bot State, and reload season config in memory", inline=False)
     embed.add_field(name="/archive-season", value="Copy a completed season's tabs from the League sheet to the Archive spreadsheet", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -2196,8 +2196,8 @@ async def help_command(interaction: discord.Interaction):
 # WHERE TO PLAY — MANUAL TRIGGER
 # ═══════════════════════════════════════════════════════════════
 
-@tree.command(name="wheretoplay", description="Manually push the Where to Play post (admins only)")
-async def wheretoplay_command(interaction: discord.Interaction):
+@tree.command(name="where-to-play", description="Manually push the Where to Play post (admins only)")
+async def where_to_play_command(interaction: discord.Interaction):
     if not _is_admin(interaction):
         await interaction.response.send_message("❌ Admins only.", ephemeral=True)
         return
