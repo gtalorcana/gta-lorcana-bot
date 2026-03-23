@@ -58,7 +58,7 @@ def _fetch_event_rows_and_standings(input_rows):
             if note == "Format: Core Constructed":
                 gameplay_format_name = "Core Constructed"
 
-            event_rows.append([
+            event_row = [
                 rph_url,
                 thread_id,
                 note,
@@ -66,9 +66,10 @@ def _fetch_event_rows_and_standings(input_rows):
                 event['store']['name'],
                 gameplay_format_name,
                 event['starting_player_count'],
-            ])
+            ]
 
             if not event['tournament_phases']:
+                event_rows.append(event_row)
                 continue
 
             last_phase = event['tournament_phases'][-1]
@@ -76,6 +77,7 @@ def _fetch_event_rows_and_standings(input_rows):
                 last_phase = event['tournament_phases'][-2]
 
             if not last_phase['rounds']:
+                event_rows.append(event_row)
                 continue
 
             last_round_id = last_phase['rounds'][-1]['id']
@@ -94,6 +96,9 @@ def _fetch_event_rows_and_standings(input_rows):
                     print(f"    ⚠ Last round detected as all-draw — auto-using second-to-last round")
                     last_round_id = last_phase['rounds'][-2]['id']
                     standings = _rph_api.get_standings_from_tournament_round_id(str(last_round_id))
+                    event_row[2] = "Auto: all-draw last round removed"
+
+            event_rows.append(event_row)
 
             for standing in standings:
                 standing_rows.append([
