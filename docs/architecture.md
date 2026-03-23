@@ -33,10 +33,17 @@ This means a bad thread will be attempted exactly once on startup. After that it
 
 ---
 
+## Season Config (`season.py`)
+
+Season values (dates, sheet names, range names) live in `season.py` as mutable module globals.
+`season.init(bot_state)` is called at startup and by `/season-rollover` to rebuild all derived values.
+
+All consumers must use `import season; season.X` — not `from season import X` — to get the live
+call-time value rather than a frozen import-time copy.
+
+Fallback values in `constants.py` are used when Bot State keys are absent.
+
 ## constants.py Notes
 
 - `WHERE_TO_PLAY_POST_DAY` / `WHERE_TO_PLAY_POST_HOUR_ET` — code config, keep in constants (can override via .env)
 - `EVENTS_URL_RE`, `RPH_*` URLs — code config, keep in constants
-- `ARCHIVE_SPREADSHEET_ID` — only used in scripts; could move to a scripts-specific block
-- `SET_CHAMPS_SPREADSHEET_ID` — consider consolidating under `BOT_DATABASE_SPREADSHEET_ID` to reduce Google API client instances
-- Sheet name/range constants — currently fine; will need refactor if `CURRENT_SEASON` moves to Bot State

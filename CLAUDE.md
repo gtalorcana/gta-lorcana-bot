@@ -13,13 +13,6 @@ See README.md for project structure and links to all docs in docs/.
 
 ---
 
-## TODO
-
-### Season Rollover (next priority)
-See [docs/season-rollover.md](docs/season-rollover.md) for steps and TODOs.
-
----
-
 ## Key Design Notes
 
 - `ADMIN_USER_IDS` is a list (not set) — supports indexing for pings and `in` checks
