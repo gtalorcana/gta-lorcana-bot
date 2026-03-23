@@ -58,15 +58,16 @@ def init(bot_state: dict) -> None:
     global LEADERBOARD_RANGE_NAME, SET_CHAMPS_EVENTS_RANGE_NAME
 
     CURRENT_SEASON        = bot_state.get('season',                _c.CURRENT_SEASON)
-    SEASON_START_DATE     = bot_state.get('season_start_date',     _c.SEASON_START_DATE)
-    SEASON_END_DATE       = bot_state.get('season_end_date',       _c.SEASON_END_DATE)
-    SET_CHAMPS_START_DATE = bot_state.get('set_champs_start_date', _c.SET_CHAMPS_START_DATE)
-    SET_CHAMPS_END_DATE   = bot_state.get('set_champs_end_date',   _c.SET_CHAMPS_END_DATE)
+    SEASON_START_DATE     = bot_state.get('season_start_date')     or None
+    SEASON_END_DATE       = bot_state.get('season_end_date')       or None
+    SET_CHAMPS_START_DATE = bot_state.get('set_champs_start_date') or None
+    SET_CHAMPS_END_DATE   = bot_state.get('set_champs_end_date')   or None
 
-    SEASON_START_DT     = SEASON_START_DATE     + _c.START_OF_DAY
-    SEASON_END_DT       = SEASON_END_DATE       + _c.END_OF_DAY
-    SET_CHAMPS_START_DT = SET_CHAMPS_START_DATE + _c.START_OF_DAY
-    SET_CHAMPS_END_DT   = SET_CHAMPS_END_DATE   + _c.END_OF_DAY
+    # Derived datetime strings — None if dates not configured
+    SEASON_START_DT     = (SEASON_START_DATE     + _c.START_OF_DAY) if SEASON_START_DATE     else None
+    SEASON_END_DT       = (SEASON_END_DATE       + _c.END_OF_DAY)   if SEASON_END_DATE       else None
+    SET_CHAMPS_START_DT = (SET_CHAMPS_START_DATE + _c.START_OF_DAY) if SET_CHAMPS_START_DATE else None
+    SET_CHAMPS_END_DT   = (SET_CHAMPS_END_DATE   + _c.END_OF_DAY)   if SET_CHAMPS_END_DATE   else None
 
     STANDINGS_SHEET_NAME         = CURRENT_SEASON + " Standings - User Reported"
     EVENTS_SHEET_NAME            = CURRENT_SEASON + " Events - User Reported"

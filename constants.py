@@ -49,8 +49,6 @@ UPCOMING_EVENTS_JSON_URL   = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/
 # League Constants — fallback values used by season.py
 # These are overridden at runtime by Bot State values via season.init()
 CURRENT_SEASON      = os.getenv("CURRENT_SEASON", "S11")
-SEASON_START_DATE   = "2026-02-13"
-SEASON_END_DATE     = "2026-04-24"
 
 # RPH API date suffix helpers — used by season.py to build datetime strings
 START_OF_DAY = "T05%3A00%3A00.000Z"
@@ -84,8 +82,6 @@ PLAYER_REGISTRY_SHEET_NAME = "Player Registry"
 PLAYER_REGISTRY_RANGE_NAME = PLAYER_REGISTRY_SHEET_NAME + "!A2:J"
 
 # Scripts Constants
-SET_CHAMPS_START_DATE     = "2026-04-04"   # fallback — overridden by Bot State via season.init()
-SET_CHAMPS_END_DATE       = "2026-04-24"   # fallback — overridden by Bot State via season.init()
 
 # Archive spreadsheet — historical seasons (S1–S10)
 ARCHIVE_SPREADSHEET_ID = "1382ddPYx3dRKDTvSd60jiu4Yd_-SwkBTRy0djt84F2o"

@@ -59,6 +59,8 @@ _DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
 
 def _fetch_current_season_events() -> list:
     """Fetch all Ontario Lorcana events for the current season from RPH."""
+    if not season.SEASON_START_DT or not season.SEASON_END_DT:
+        raise RuntimeError("Season dates not configured — run /season-rollover to set them in Bot State.")
     print(f"  → Fetching current season RPH events...")
     events = _rph_api.get_events(season.SEASON_START_DT, season.SEASON_END_DT)
     print(f"  ✓ {len(events)} events fetched")
@@ -958,6 +960,8 @@ def refresh_set_champs() -> int:
         'display_statuses': ['past', 'inProgress', 'upcoming'],
     }
 
+    if not season.SET_CHAMPS_START_DT or not season.SET_CHAMPS_END_DT:
+        raise RuntimeError("Set Champs dates not configured — run /season-rollover to set them in Bot State.")
     print(f"  → Fetching Set Championship events ({season.SET_CHAMPS_START_DT} → {season.SET_CHAMPS_END_DT})...")
     events = _rph_api.get_events(
         start_date_after=season.SET_CHAMPS_START_DT,

@@ -372,6 +372,9 @@ async def set_champs_daily():
     now_et = _now_et()
     if now_et.hour != 7 or now_et.minute != 0:
         return
+    if not season.SET_CHAMPS_START_DATE or not season.SET_CHAMPS_END_DATE:
+        print(f"  ⚠ set_champs_daily: season dates not configured — skipping")
+        return
     _start = date.fromisoformat(season.SET_CHAMPS_START_DATE) - timedelta(weeks=2)
     _end   = date.fromisoformat(season.SET_CHAMPS_END_DATE)
     if not (_start <= now_et.date() <= _end):
@@ -642,6 +645,15 @@ async def on_ready():
         print(f"  ⚠ Could not load bot state for season init: {e}")
         season.init({})
         state = {}
+
+    if season.SEASON_START_DATE is None:
+        print(f"  ✗ CRITICAL: Season dates not configured in Bot State — season-dependent tasks will not run.")
+        mod_ch = bot.get_channel(MOD_CHANNEL_ID)
+        if mod_ch:
+            await mod_ch.send(
+                "⚠️ **Season dates not configured.** Bot State is missing `season_start_date` / `season_end_date`. "
+                "Run `/season-rollover` to configure the current season."
+            )
 
     # Restore persisted where-to-play message IDs so edits work after restarts
     try:
