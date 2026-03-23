@@ -225,7 +225,7 @@ def link_player(
     playhub_name: str = None,
 ) -> dict:
     """
-    Fill Discord columns (F–J) for a registry row.
+    Fill Discord columns (C–F) for a registry row.
 
     Lookup priority: playhub_id → playhub_name → append new row.
     Returns {role_id: season} for all non-blank role columns in the matched row.
