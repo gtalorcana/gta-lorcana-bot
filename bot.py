@@ -456,7 +456,7 @@ async def _post_set_champs(rows: list, loop) -> None:
                 pass
 
     _set_champs_msg_ids = new_ids
-    ids_str = ','.join(str(i) for i in new_ids)
+    ids_str = '|'.join(str(i) for i in new_ids)
     await loop.run_in_executor(None, set_bot_state_key, 'set_champs_msg_ids', ids_str)
     print(f"  ✓ Set Champs Discord updated ({len(messages)} message(s))")
 
@@ -784,7 +784,7 @@ async def on_ready():
     global _set_champs_msg_ids
     try:
         raw = state.get('set_champs_msg_ids', '')
-        _set_champs_msg_ids = [int(x) for x in raw.split(',') if x] if raw else []
+        _set_champs_msg_ids = [int(x) for x in raw.split('|') if x] if raw else []
         print(f"  ✓ Restored Set Champs message IDs: {_set_champs_msg_ids}")
     except Exception as e:
         print(f"  ⚠ Could not restore Set Champs message IDs: {e}")
