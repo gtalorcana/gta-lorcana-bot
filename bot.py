@@ -6,7 +6,7 @@ Features:
   - /watch-rph-event — subscribe to DM alerts when a spot opens at a full event
   - /unwatch-rph-event — unsubscribe from a watched event
   - /list-watches    — see all currently watched events
-  - /link-rph        — verify RPH attendance and apply ETB discount whitelist
+  - /etb-discount     — verify GTA event attendance and unlock ETB community discount
   - /help            — list all commands
   - /recheck         — reprocess missed results threads (admins only)
   - /link            — manually link a Discord member to a Playhub ID (admins only)
@@ -677,10 +677,10 @@ async def on_ready():
             _etb_price_rule_id = await loop.run_in_executor(None, _shopify.get_price_rule_id, _ETB_DISCOUNT_CODE)
             print(f"  ✓ Shopify token cached, price rule ID: {_etb_price_rule_id}")
         except Exception as e:
-            print(f"  ⚠ Shopify init failed: {e} — /link-rph Shopify steps will be skipped")
+            print(f"  ⚠ Shopify init failed: {e} — /etb-discount Shopify steps will be skipped")
             _shopify = None
     else:
-        print(f"  ⚠ SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET not set — /link-rph Shopify steps stubbed")
+        print(f"  ⚠ SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET not set — /etb-discount Shopify steps stubbed")
 
     # Restore persisted where-to-play message IDs so edits work after restarts
     try:
@@ -1278,18 +1278,18 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 # ═══════════════════════════════════════════════════════════════
 
 # ═══════════════════════════════════════════════════════════════
-# ETB DISCOUNT — /link-rph
+# ETB DISCOUNT — /etb-discount
 # ═══════════════════════════════════════════════════════════════
 
 _ETB_DISCOUNT_CODE    = "ETBGTALORCANA"
 _ETB_DISCOUNT_MIN_EVENTS = 3
 
-@tree.command(name="link-rph", description="Link your RPH account to unlock the Enter the Battlefield community discount")
+@tree.command(name="etb-discount", description="Unlock the Enter the Battlefield community discount by verifying your GTA Lorcana event attendance")
 @app_commands.describe(
     rph_username="Your RPH display name (as shown on tcg.ravensburgerplay.com)",
     email="Your email address registered at enterthebattlefield.ca",
 )
-async def link_rph(interaction: discord.Interaction, rph_username: str, email: str):
+async def etb_discount(interaction: discord.Interaction, rph_username: str, email: str):
     await interaction.response.defer(ephemeral=True)
     loop     = asyncio.get_running_loop()
     discord_id = str(interaction.user.id)
@@ -1298,7 +1298,7 @@ async def link_rph(interaction: discord.Interaction, rph_username: str, email: s
     try:
         count = await loop.run_in_executor(None, get_player_event_count, rph_username)
     except Exception as e:
-        print(f"  ✗ /link-rph standings lookup failed: {e}")
+        print(f"  ✗ /etb-discount standings lookup failed: {e}")
         await interaction.followup.send(
             "⚠️ Couldn't reach the standings sheet right now — please try again in a moment.",
             ephemeral=True,
@@ -1318,7 +1318,7 @@ async def link_rph(interaction: discord.Interaction, rph_username: str, email: s
     try:
         existing = await loop.run_in_executor(None, get_etb_approval, discord_id)
     except Exception as e:
-        print(f"  ✗ /link-rph ETB approval lookup failed: {e}")
+        print(f"  ✗ /etb-discount ETB approval lookup failed: {e}")
         await interaction.followup.send(
             "⚠️ Couldn't reach the approvals sheet right now — please try again in a moment.",
             ephemeral=True,
@@ -1343,7 +1343,7 @@ async def link_rph(interaction: discord.Interaction, rph_username: str, email: s
         try:
             customer = await loop.run_in_executor(None, _shopify.lookup_customer_by_email, email)
         except Exception as e:
-            print(f"  ✗ /link-rph Shopify lookup failed: {e}")
+            print(f"  ✗ /etb-discount Shopify lookup failed: {e}")
             await interaction.followup.send(
                 "⚠️ Couldn't reach the Shopify API right now — please try again in a moment.",
                 ephemeral=True,
@@ -1353,7 +1353,7 @@ async def link_rph(interaction: discord.Interaction, rph_username: str, email: s
         if customer is None:
             await interaction.followup.send(
                 f'❌ That email isn\'t registered at enterthebattlefield.ca.\n'
-                f'Create an account at enterthebattlefield.ca first, then run /link-rph again.',
+                f'Create an account at enterthebattlefield.ca first, then run /etb-discount again.',
                 ephemeral=True,
             )
             return
@@ -1364,7 +1364,7 @@ async def link_rph(interaction: discord.Interaction, rph_username: str, email: s
                 None, _shopify.is_whitelisted, _etb_price_rule_id, customer['id']
             )
         except Exception as e:
-            print(f"  ✗ /link-rph whitelist check failed: {e}")
+            print(f"  ✗ /etb-discount whitelist check failed: {e}")
             already = False  # safe to proceed — worst case we add them again (no-op)
 
         if already:
@@ -1375,7 +1375,7 @@ async def link_rph(interaction: discord.Interaction, rph_username: str, email: s
                     datetime.now(timezone.utc).isoformat(), count,
                 )
             except Exception as e:
-                print(f"  ✗ /link-rph ETB approval write failed (recovery): {e}")
+                print(f"  ✗ /etb-discount ETB approval write failed (recovery): {e}")
             await interaction.followup.send(
                 f"You're already approved! 🎉\n"
                 f"Use code `{_ETB_DISCOUNT_CODE}` at enterthebattlefield.ca",
@@ -1383,7 +1383,7 @@ async def link_rph(interaction: discord.Interaction, rph_username: str, email: s
             )
             return
     else:
-        print(f"  ⚠ /link-rph: Shopify not configured — skipping Steps 4–6 for {rph_username}")
+        print(f"  ⚠ /etb-discount: Shopify not configured — skipping Steps 4–6 for {rph_username}")
 
     # ── Step 6: Apply Shopify whitelist ───────────────────────
     if _shopify and _etb_price_rule_id and customer is not None:
@@ -1392,11 +1392,11 @@ async def link_rph(interaction: discord.Interaction, rph_username: str, email: s
                 None, _shopify.add_to_whitelist, _etb_price_rule_id, customer['id']
             )
         except Exception as e:
-            print(f"  ✗ /link-rph add_to_whitelist failed for {rph_username}: {e}")
+            print(f"  ✗ /etb-discount add_to_whitelist failed for {rph_username}: {e}")
             try:
                 ryan = await bot.fetch_user(ADMIN_USER_IDS[0])
                 await ryan.send(
-                    f"⚠️ /link-rph Shopify whitelist failed for {interaction.user} "
+                    f"⚠️ /etb-discount Shopify whitelist failed for {interaction.user} "
                     f"(rph: {rph_username})\nError: {e}"
                 )
             except Exception:
@@ -1416,7 +1416,7 @@ async def link_rph(interaction: discord.Interaction, rph_username: str, email: s
             datetime.now(timezone.utc).isoformat(), count,
         )
     except Exception as e:
-        print(f"  ✗ /link-rph ETB approval write failed for discord_id={discord_id}: {e}")
+        print(f"  ✗ /etb-discount ETB approval write failed for discord_id={discord_id}: {e}")
 
     try:
         await interaction.user.send(
@@ -2072,7 +2072,7 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="/watch-rph-event", value="Subscribe to DM alerts when a spot opens at a full RPH event", inline=False)
     embed.add_field(name="/unwatch-rph-event", value="Unsubscribe from a watched event", inline=False)
     embed.add_field(name="/list-watches", value="Show all active event watches", inline=False)
-    embed.add_field(name="/link-rph", value="Link your RPH account to unlock the Enter the Battlefield community discount", inline=False)
+    embed.add_field(name="/etb-discount", value="Verify your GTA Lorcana event attendance to unlock the Enter the Battlefield community discount", inline=False)
     embed.add_field(name="🧵 Results Threads",
                     value=f"New threads in `{_ch('results_reporting')}` are processed automatically. Edit to retry on bad URL.",
                     inline=False)

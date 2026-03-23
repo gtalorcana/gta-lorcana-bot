@@ -30,7 +30,7 @@ the GTA-specific code is concentrated in these places:
 **`constants.py`** — `WHERE_TO_PLAY_MIN_CONSECUTIVE_WEEKS`, `WHERE_TO_PLAY_POST_DAY/HOUR_ET`
 
 **GTA-only features** (strip out entirely for white-label):
-- `/link-rph` command + `util/shopify_api_utils.py` — ETB discount integration
+- `/etb-discount` command + `util/shopify_api_utils.py` — ETB discount integration
 - `SHOPIFY_TOKEN`, `SHOPIFY_STORE_DOMAIN` constants
 - `specs/SHOPIFY_DISCOUNT_SPEC.md`
 
