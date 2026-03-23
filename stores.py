@@ -735,16 +735,24 @@ def append_etb_approval(
     )
 
 
-def get_player_event_count(rph_username: str) -> int:
+def get_player_event_count(rph_username: str) -> tuple[int, str | None]:
     """
     Count how many events the player appears in for the current season
     by scanning the Standings sheet (column D = Playhub Name).
-    Returns the number of matching rows (each row = one event attended).
+    Returns (count, playhub_id) where playhub_id is from column G of the
+    first matching row, or None if the player has no standings entries.
     """
     result = _gs.get_values(LEAGUE_SPREADSHEET_ID, season.STANDINGS_RANGE_NAME)
     rows   = result.get('values', [])
     name   = rph_username.lower()
-    return sum(1 for row in rows if len(row) > 3 and row[3].lower() == name)
+    count      = 0
+    playhub_id = None
+    for row in rows:
+        if len(row) > 3 and row[3].lower() == name:
+            count += 1
+            if playhub_id is None and len(row) > 6:
+                playhub_id = row[6]
+    return count, playhub_id
 
 
 def create_season_sheets(new_season: str) -> list[str]:

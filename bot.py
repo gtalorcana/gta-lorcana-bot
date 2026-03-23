@@ -1407,7 +1407,7 @@ async def etb_discount(interaction: discord.Interaction, rph_username: str, emai
 
     # ── Step 1: Current season event attendance (from Standings sheet) ───────────
     try:
-        count = await loop.run_in_executor(None, get_player_event_count, rph_username)
+        count, playhub_id = await loop.run_in_executor(None, get_player_event_count, rph_username)
     except Exception as e:
         print(f"  ✗ /etb-discount standings lookup failed: {e}")
         await interaction.followup.send(
@@ -1519,7 +1519,7 @@ async def etb_discount(interaction: discord.Interaction, rph_username: str, emai
             )
             return
 
-    # ── Step 7: Record approval and DM ────────────────────────
+    # ── Step 7: Record approval and link to Player Registry ───
     try:
         await loop.run_in_executor(
             None, append_etb_approval,
@@ -1528,6 +1528,16 @@ async def etb_discount(interaction: discord.Interaction, rph_username: str, emai
         )
     except Exception as e:
         print(f"  ✗ /etb-discount ETB approval write failed for discord_id={discord_id}: {e}")
+
+    try:
+        await loop.run_in_executor(
+            None, link_player,
+            int(discord_id), interaction.user.display_name, "etb-discount",
+            playhub_id, rph_username,
+        )
+        print(f"  ✓ /etb-discount: linked {rph_username} (playhub_id={playhub_id}) → discord {discord_id}")
+    except Exception as e:
+        print(f"  ⚠ /etb-discount: Player Registry link failed for {rph_username}: {e}")
 
     try:
         await interaction.user.send(
