@@ -62,7 +62,7 @@ WHERE_TO_PLAY_POST_HOUR_ET=23
 python bot.py
 ```
 
-Use `/testwhosgoing` and `/wheretoplay` in Discord to trigger tasks manually without waiting for the schedule.
+Use `/wheretoplay` in Discord to trigger the where-to-play post manually without waiting for the schedule.
 
 To test store debug sheet writes against a copy of the spreadsheet without touching production:
 ```bash
