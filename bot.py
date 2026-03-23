@@ -13,6 +13,7 @@ Features:
   - /sync-roles      — apply Uncommon/Rare upgrades from standings (admins only)
   - /invitational-roles     — assign Legendary/Super Rare (admins only)
   - /wheretoplay     — manually push the where-to-play post (admins only)
+  - /set-champs      — manually refresh and post the Set Champs update (admins only)
   - on_member_join   — auto-assigns Common rarity role to new members
   - where_to_play_weekly — refreshes #where-to-play every Sunday evening
 
@@ -2186,8 +2187,8 @@ async def wheretoplay_command(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 
-@tree.command(name="setchamps", description="Manually refresh and post the Set Champs update (admins only)")
-async def setchamps_command(interaction: discord.Interaction):
+@tree.command(name="set-champs", description="Manually refresh and post the Set Champs update (admins only)")
+async def set_champs_command(interaction: discord.Interaction):
     if not _is_admin(interaction):
         await interaction.response.send_message("❌ Admins only.", ephemeral=True)
         return
