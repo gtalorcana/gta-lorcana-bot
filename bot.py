@@ -804,7 +804,8 @@ async def on_ready():
         print(f"  ♻ Where-to-play weekly task started (fires Sundays at {WHERE_TO_PLAY_POST_HOUR_ET}:00 ET)")
     if not set_champs_daily.is_running():
         set_champs_daily.start()
-        print(f"  ♻ Set Champs daily task started (fires 7AM ET, {season.SET_CHAMPS_START_DATE} → {season.SET_CHAMPS_END_DATE})")
+        _sc_window_start = (date.fromisoformat(season.SET_CHAMPS_START_DATE) - timedelta(weeks=2)).isoformat() if season.SET_CHAMPS_START_DATE else '?'
+        print(f"  ♻ Set Champs daily task started (fires 7AM ET, {_sc_window_start} → {season.SET_CHAMPS_END_DATE})")
     if not rph_watcher.is_running():
         rph_watcher.start()
         print(f"  ♻ RPH event watcher started (polls every 15 min)")
