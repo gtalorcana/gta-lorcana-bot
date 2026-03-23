@@ -85,7 +85,6 @@ PLAYER_REGISTRY_SHEET_NAME = "Player Registry"
 PLAYER_REGISTRY_RANGE_NAME = PLAYER_REGISTRY_SHEET_NAME + "!A2:J"
 
 # Scripts Constants
-SET_CHAMPS_SPREADSHEET_ID = "1sF-TJ5ue5_sOCCpj9UlV_RvXbuJ9l2GwxTFVPthpCrc"
 SET_CHAMPS_START_DATE     = "2026-04-04"   # fallback — overridden by Bot State via season.init()
 SET_CHAMPS_END_DATE       = "2026-04-24"   # fallback — overridden by Bot State via season.init()
 

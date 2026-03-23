@@ -39,7 +39,6 @@ from constants import (
     STORE_OVERRIDES_RANGE_NAME,
     BOT_STATE_RANGE_NAME,
     WHERE_TO_PLAY_MIN_CONSECUTIVE_WEEKS,
-    SET_CHAMPS_SPREADSHEET_ID,
     STORE_DEBUG_SHEET_NAME,
     STORE_DEBUG_RANGE_NAME,
 )
@@ -712,6 +711,33 @@ def delete_bot_state_key(key: str) -> None:
         save_bot_state(state)
 
 
+def create_season_sheets(new_season: str) -> list[str]:
+    """
+    Create the four standard season tabs in the League spreadsheet for new_season.
+    Skips any tab that already exists (catches HttpError 400 with ALREADY_EXISTS).
+    Returns list of tab titles that were created.
+    """
+    from googleapiclient.errors import HttpError as _HttpError
+
+    titles = [
+        f"{new_season} Standings - User Reported",
+        f"{new_season} Events - User Reported",
+        f"{new_season} Leaderboard",
+        f"{new_season} Set Champs",
+    ]
+    created = []
+    for title in titles:
+        try:
+            _gs.add_sheet(LEAGUE_SPREADSHEET_ID, title)
+            created.append(title)
+        except _HttpError as e:
+            if e.status_code == 400 and 'ALREADY_EXISTS' in str(e):
+                print(f"  Sheet '{title}' already exists — skipping")
+            else:
+                raise
+    return created
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def analyse_stores(reference_date: date = None) -> dict:
@@ -914,6 +940,6 @@ def refresh_set_champs() -> int:
 
     rows.sort(key=lambda r: (r[0], r[1]))  # sort by date then time
 
-    _gs.update_values(SET_CHAMPS_SPREADSHEET_ID, season.SET_CHAMPS_EVENTS_RANGE_NAME, "USER_ENTERED", rows)
+    _gs.update_values(LEAGUE_SPREADSHEET_ID, season.SET_CHAMPS_EVENTS_RANGE_NAME, "USER_ENTERED", rows)
     print(f"  ✓ Set Champs sheet updated ({len(rows)} row(s))")
     return len(rows)

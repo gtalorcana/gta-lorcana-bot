@@ -47,7 +47,7 @@ from datetime import datetime, timezone, date, timedelta
 
 from clients import gs as _gs, rph_api as _rph_api
 from results import process_event_data, remove_event_data
-from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, refresh_set_champs, set_bot_state_key, delete_bot_state_key, fetch_event_status
+from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, refresh_set_champs, set_bot_state_key, delete_bot_state_key, fetch_event_status, create_season_sheets
 
 from constants import (
     DISCORD_BOT_TOKEN,
@@ -62,7 +62,6 @@ from constants import (
     UPCOMING_EVENTS_JSON_URL,
     WHERE_TO_PLAY_POST_DAY,
     WHERE_TO_PLAY_POST_HOUR_ET,
-    SET_CHAMPS_SPREADSHEET_ID,
     COMMON_ROLE_ID,
     UNCOMMON_ROLE_ID,
     RARE_ROLE_ID,
@@ -1744,6 +1743,85 @@ async def invitational_roles(interaction: discord.Interaction, event_url: str):
     )
 
 
+# ── /season-rollover ──────────────────────────────────────────
+@tree.command(name="season-rollover", description="Roll over to a new season: creates sheet tabs and reloads config (admins only)")
+@app_commands.describe(
+    new_season="New season identifier, e.g. S12",
+    start_date="Season start date (YYYY-MM-DD)",
+    end_date="Season end date (YYYY-MM-DD)",
+    set_champs_start="Set Champs start date (YYYY-MM-DD)",
+    set_champs_end="Set Champs end date (YYYY-MM-DD)",
+)
+async def season_rollover(
+    interaction: discord.Interaction,
+    new_season: str,
+    start_date: str,
+    end_date: str,
+    set_champs_start: str,
+    set_champs_end: str,
+):
+    if not _is_admin(interaction):
+        await interaction.response.send_message("⚠️ Admins only.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    # Validate date formats before touching anything
+    date_fields = [("start_date", start_date), ("end_date", end_date),
+                   ("set_champs_start", set_champs_start), ("set_champs_end", set_champs_end)]
+    for field_name, value in date_fields:
+        try:
+            datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            await interaction.followup.send(
+                f"⚠️ `{field_name}` must be YYYY-MM-DD, got `{value}`.", ephemeral=True
+            )
+            return
+
+    loop = asyncio.get_running_loop()
+
+    # 1. Create new season tabs in the League spreadsheet
+    try:
+        created = await loop.run_in_executor(None, create_season_sheets, new_season)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Failed to create sheet tabs: {e}", ephemeral=True)
+        return
+
+    # 2. Update Bot State with new season values
+    try:
+        new_state_values = {
+            'season':                new_season,
+            'season_start_date':     start_date,
+            'season_end_date':       end_date,
+            'set_champs_start_date': set_champs_start,
+            'set_champs_end_date':   set_champs_end,
+        }
+        def _update_state():
+            state = load_bot_state()
+            state.update(new_state_values)
+            save_bot_state(state)
+            return state
+        new_state = await loop.run_in_executor(None, _update_state)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Sheet tabs created but failed to update Bot State: {e}", ephemeral=True)
+        return
+
+    # 3. Reload season in memory
+    season.init(new_state)
+
+    # 4. Confirm
+    tab_lines = "\n".join(f"  • {t}" for t in created) if created else "  (all tabs already existed)"
+    skipped = 4 - len(created)
+    skip_note = f"\n⚠️ {skipped} tab(s) already existed and were skipped." if skipped else ""
+    await interaction.followup.send(
+        f"✅ **Season rolled over to {new_season}**\n\n"
+        f"**New tabs created in League sheet:**\n{tab_lines}{skip_note}\n\n"
+        f"**Season window:** {start_date} → {end_date}\n"
+        f"**Set Champs:** {set_champs_start} → {set_champs_end}",
+        ephemeral=True,
+    )
+
+
 # ── /help ─────────────────────────────────────────────────────
 @tree.command(name="help", description="Show all GTA Lorcana bot commands")
 async def help_command(interaction: discord.Interaction):
@@ -1766,6 +1844,7 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="/sync-roles", value="Compute and apply Uncommon/Rare role upgrades from current standings", inline=False)
     embed.add_field(name="/invitational-roles", value="Assign Legendary/Super Rare from an invitational event", inline=False)
     embed.add_field(name="/wheretoplay", value="Manually push the Where to Play post", inline=False)
+    embed.add_field(name="/season-rollover", value="Create new season sheet tabs, update Bot State, and reload season config in memory", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 

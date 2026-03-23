@@ -180,6 +180,20 @@ class GoogleSheetsApi:
         except HttpError as error:
             raise
 
+    def add_sheet(self, spreadsheet_id: str, title: str) -> None:
+        """
+        Add a new tab to the spreadsheet.
+        Raises HttpError if a sheet with that title already exists.
+        """
+        try:
+            self.service.spreadsheets().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body={"requests": [{"addSheet": {"properties": {"title": title}}}]},
+            ).execute()
+            print(f"  Sheet '{title}' created")
+        except HttpError as error:
+            raise
+
     def append_values(self, spreadsheet_id, range_name, value_input_option, _values):
         try:
             body = {"values": _values}
