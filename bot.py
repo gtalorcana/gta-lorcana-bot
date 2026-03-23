@@ -126,8 +126,8 @@ _sheet_lock = asyncio.Lock()
 _shopify:             _ShopifyApi | None = None
 _etb_price_rule_id:  int | None         = None
 
-# Set Champs Discord message ID — restored from Bot State on ready, saved after each post.
-_set_champs_msg_id: int | None = None
+# Set Champs Discord message IDs — one per day, restored from Bot State on ready.
+_set_champs_msg_ids: list[int | None] = []
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -380,33 +380,48 @@ async def where_to_play_weekly():
 
 # ── Set Championships ────────────────────────────────────────────────────────
 
-def _build_set_champs_message(rows: list, as_of: date) -> str:
-    """Format Set Champs rows into a Discord message."""
-    lines = [
-        f"🏆 **GTA Lorcana — {season.CURRENT_SEASON} Set Championships**",
-        f"*Last updated: {as_of.strftime('%b %-d, %Y')}*",
-        "",
-    ]
-    for row in rows:
-        event_date = date.fromisoformat(row[0])
-        date_str   = event_date.strftime('%A, %b %-d')
-        store      = row[2]
-        city       = row[3]
-        fmt        = row[5]
-        cap        = row[4]
-        url        = row[7]
-        cap_str    = f" · Cap {cap}" if cap else ""
-        lines.append(f"**{date_str}** — {store} ({city})")
-        lines.append(f"{fmt}{cap_str} · [Register ↗]({url})")
-        lines.append("")
+def _build_set_champs_messages(rows: list, as_of: date) -> list[str]:
+    """
+    Format Set Champs rows into a list of Discord messages — one per unique date,
+    preceded by a header message.
+    """
+    from collections import defaultdict
+
+    header = (
+        f"🏆 **GTA Lorcana — {season.CURRENT_SEASON} Set Championships**\n"
+        f"*Last updated: {as_of.strftime('%b %-d, %Y')}*"
+    )
+
     if not rows:
-        lines.append("*No Set Championship events found for this season yet.*")
-    return "\n".join(lines).strip()
+        return [header + "\n\n*No Set Championship events found yet.*"]
+
+    by_date = defaultdict(list)
+    for row in rows:
+        by_date[row[0]].append(row)
+
+    messages = [header]
+    for date_str in sorted(by_date.keys()):
+        event_date = date.fromisoformat(date_str)
+        day_label  = event_date.strftime('%A, %b %-d')
+        lines      = [f"**{day_label}**", ""]
+        for row in by_date[date_str]:
+            store   = row[2]
+            city    = row[3]
+            fmt     = row[5]
+            cap     = row[4]
+            url     = row[7]
+            cap_str = f" · Cap {cap}" if cap else ""
+            lines.append(f"**{store}** ({city})")
+            lines.append(f"{fmt}{cap_str} · [Register ↗]({url})")
+            lines.append("")
+        messages.append("\n".join(lines).strip())
+
+    return messages
 
 
 async def _post_set_champs(rows: list, loop) -> None:
-    """Post or edit the Set Champs message in the Set Champs channel."""
-    global _set_champs_msg_id
+    """Post or edit Set Champs messages (one per day) in the Set Champs channel."""
+    global _set_champs_msg_ids
     guild = bot.guilds[0] if bot.guilds else None
     if not guild:
         return
@@ -415,21 +430,35 @@ async def _post_set_champs(rows: list, loop) -> None:
         print(f"  ⚠ Set Champs channel {SET_CHAMPS_CHANNEL_ID} not found")
         return
 
-    content = _build_set_champs_message(rows, date.today())
+    messages = _build_set_champs_messages(rows, date.today())
+    new_ids  = []
 
-    if _set_champs_msg_id:
-        try:
-            msg = await channel.fetch_message(_set_champs_msg_id)
-            await msg.edit(content=content)
-            print(f"  ✓ Set Champs Discord message updated (id={_set_champs_msg_id})")
-            return
-        except discord.NotFound:
-            _set_champs_msg_id = None
+    for i, content in enumerate(messages):
+        msg_id = _set_champs_msg_ids[i] if i < len(_set_champs_msg_ids) else None
+        if msg_id:
+            try:
+                existing = await channel.fetch_message(msg_id)
+                await existing.edit(content=content)
+                new_ids.append(msg_id)
+                continue
+            except discord.NotFound:
+                pass
+        msg = await channel.send(content)
+        new_ids.append(msg.id)
 
-    msg = await channel.send(content)
-    _set_champs_msg_id = msg.id
-    await loop.run_in_executor(None, set_bot_state_key, 'set_champs_msg_id', str(msg.id))
-    print(f"  ✓ Set Champs Discord message posted (id={msg.id})")
+    # Delete orphaned messages if day count decreased
+    for old_id in _set_champs_msg_ids[len(messages):]:
+        if old_id:
+            try:
+                old_msg = await channel.fetch_message(old_id)
+                await old_msg.delete()
+            except discord.NotFound:
+                pass
+
+    _set_champs_msg_ids = new_ids
+    ids_str = ','.join(str(i) for i in new_ids)
+    await loop.run_in_executor(None, set_bot_state_key, 'set_champs_msg_ids', ids_str)
+    print(f"  ✓ Set Champs Discord updated ({len(messages)} message(s))")
 
 
 @tasks.loop(minutes=1)
@@ -751,14 +780,14 @@ async def on_ready():
     except Exception as e:
         print(f"  ⚠ Could not restore where-to-play message IDs: {e}")
 
-    # Restore persisted Set Champs message ID
-    global _set_champs_msg_id
+    # Restore persisted Set Champs message IDs
+    global _set_champs_msg_ids
     try:
-        raw = state.get('set_champs_msg_id', '')
-        _set_champs_msg_id = int(raw) if raw else None
-        print(f"  ✓ Restored Set Champs message ID: {_set_champs_msg_id}")
+        raw = state.get('set_champs_msg_ids', '')
+        _set_champs_msg_ids = [int(x) for x in raw.split(',') if x] if raw else []
+        print(f"  ✓ Restored Set Champs message IDs: {_set_champs_msg_ids}")
     except Exception as e:
-        print(f"  ⚠ Could not restore Set Champs message ID: {e}")
+        print(f"  ⚠ Could not restore Set Champs message IDs: {e}")
 
     if not keepalive.is_running():
         keepalive.start()
