@@ -329,8 +329,10 @@ async def _post_where_to_play(channel, messages: list[str], loop) -> None:
     _where_to_play_msg_ids = new_ids + [None] * (4 - len(new_ids))
     def _save_wtp_ids():
         state = load_bot_state()
+        state['wtp_msg_ids'] = '|'.join(str(i) for i in new_ids)
+        # Remove legacy per-index keys if present
         for i in range(4):
-            state[f'wtp_msg_{i}'] = str(new_ids[i]) if i < len(new_ids) else ''
+            state.pop(f'wtp_msg_{i}', None)
         save_bot_state(state)
     await loop.run_in_executor(None, _save_wtp_ids)
 
@@ -771,12 +773,17 @@ async def on_ready():
 
     # Restore persisted where-to-play message IDs so edits work after restarts
     try:
-        ids = [
-            int(state[f'wtp_msg_{i}']) if f'wtp_msg_{i}' in state and state[f'wtp_msg_{i}'] else None
-            for i in range(4)
-        ]
-        _where_to_play_msg_ids = ids
-        print(f"  ✓ Restored where-to-play message IDs: {ids}")
+        raw = state.get('wtp_msg_ids', '')
+        if not raw:
+            # Fall back to legacy per-index keys for one-time migration
+            raw_ids = [
+                int(state[f'wtp_msg_{i}']) if state.get(f'wtp_msg_{i}') else None
+                for i in range(4)
+            ]
+        else:
+            raw_ids = [int(x) for x in raw.split('|') if x]
+        _where_to_play_msg_ids = raw_ids + [None] * (4 - len(raw_ids))
+        print(f"  ✓ Restored where-to-play message IDs: {_where_to_play_msg_ids}")
     except Exception as e:
         print(f"  ⚠ Could not restore where-to-play message IDs: {e}")
 
