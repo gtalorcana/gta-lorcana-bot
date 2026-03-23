@@ -54,17 +54,13 @@ def _fetch_event_rows_and_standings(input_rows):
             print(f"    ⚠ No matching event returned for {event_id} (filtered out or not found)")
 
         for event in events:
-            gameplay_format_name = event['gameplay_format']['name']
-            if note == "Format: Core Constructed":
-                gameplay_format_name = "Core Constructed"
-
             event_row = [
                 rph_url,
                 thread_id,
                 note,
                 event['start_datetime'][:10],
                 event['store']['name'],
-                gameplay_format_name,
+                event['gameplay_format']['name'],
                 event['starting_player_count'],
             ]
 
@@ -73,11 +69,9 @@ def _fetch_event_rows_and_standings(input_rows):
                 continue
 
             last_phase = event['tournament_phases'][-1]
-            if note == "No Single Elimination Phase":
-                last_phase = event['tournament_phases'][-2]
-            elif (last_phase['round_type'] == 'RANKED_SINGLE_ELIMINATION'
-                  and not last_phase['rounds']
-                  and len(event['tournament_phases']) >= 2):
+            if (last_phase['round_type'] == 'RANKED_SINGLE_ELIMINATION'
+                    and not last_phase['rounds']
+                    and len(event['tournament_phases']) >= 2):
                 print(f"    ⚠ Last phase is unplayed SE — auto-using previous phase")
                 last_phase = event['tournament_phases'][-2]
                 event_row[2] = "Auto: unplayed SE phase skipped"
@@ -87,16 +81,12 @@ def _fetch_event_rows_and_standings(input_rows):
                 continue
 
             last_round_id = last_phase['rounds'][-1]['id']
-            if note == "Remove Last Round":
-                last_round_id = last_phase['rounds'][-2]['id']
 
             print(f"    → Fetching standings for round {last_round_id}...")
             standings = _rph_api.get_standings_from_tournament_round_id(str(last_round_id))
             print(f"    ✓ {len(standings)} standings retrieved for {event['store']['name']} {event['start_datetime'][:10]}")
 
-            # Auto-detect all-draw last round (e.g. everyone IDs except byes).
-            # Skip manual-override case — note already handled it above.
-            if note != "Remove Last Round" and len(last_phase['rounds']) >= 2:
+            if len(last_phase['rounds']) >= 2:
                 matches = _rph_api.get_matches_from_tournament_round_id(str(last_round_id))
                 if _is_all_draw_round(matches):
                     print(f"    ⚠ Last round detected as all-draw — auto-using second-to-last round")
