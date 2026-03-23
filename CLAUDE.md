@@ -39,6 +39,15 @@ player registry, rarity roles, RPH watcher) is already generic league logic.
 
 ---
 
+## TODO
+
+- **Update league-rules Discord post on season rollover**: `discord/league-rules.md` is manually
+  updated each season but still needs to be pushed to Discord. Plan: store the message ID in Bot
+  State, add a `/update-league-post` command that reads the file and edits the message in-place.
+  Message is a plain Discord message (not an embed). Do this after confirming message ID.
+
+---
+
 ## Key Design Notes
 
 - `ADMIN_USER_IDS` is a list (not set) — supports indexing for pings and `in` checks
