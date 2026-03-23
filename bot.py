@@ -47,7 +47,7 @@ from datetime import datetime, timezone, date, timedelta
 
 from clients import gs as _gs, rph_api as _rph_api
 from results import process_event_data, remove_event_data
-from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, refresh_set_champs, set_bot_state_key, delete_bot_state_key, fetch_event_status, create_season_sheets
+from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, refresh_set_champs, set_bot_state_key, delete_bot_state_key, fetch_event_status, create_season_sheets, archive_season_data
 
 from constants import (
     DISCORD_BOT_TOKEN,
@@ -1822,6 +1822,39 @@ async def season_rollover(
     )
 
 
+# ── /archive-season ───────────────────────────────────────────
+@tree.command(name="archive-season", description="Copy a completed season's tabs from the League sheet to the Archive spreadsheet (admins only)")
+@app_commands.describe(season_name="Season to archive, e.g. S11")
+async def archive_season(interaction: discord.Interaction, season_name: str):
+    if not _is_admin(interaction):
+        await interaction.response.send_message("⚠️ Admins only.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    loop = asyncio.get_running_loop()
+    try:
+        archived = await loop.run_in_executor(None, archive_season_data, season_name)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Archive failed: {e}", ephemeral=True)
+        return
+
+    if not archived:
+        await interaction.followup.send(
+            f"⚠️ No data was archived for **{season_name}** — all tabs were empty or missing.",
+            ephemeral=True,
+        )
+        return
+
+    tab_lines = "\n".join(f"  • {t}" for t in archived)
+    await interaction.followup.send(
+        f"✅ **{season_name} archived** ({len(archived)} tab(s))\n\n{tab_lines}\n\n"
+        f"Data has been copied to the Archive spreadsheet. "
+        f"The League sheet tabs are unchanged — delete them manually when ready.",
+        ephemeral=True,
+    )
+
+
 # ── /help ─────────────────────────────────────────────────────
 @tree.command(name="help", description="Show all GTA Lorcana bot commands")
 async def help_command(interaction: discord.Interaction):
@@ -1845,6 +1878,7 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="/invitational-roles", value="Assign Legendary/Super Rare from an invitational event", inline=False)
     embed.add_field(name="/wheretoplay", value="Manually push the Where to Play post", inline=False)
     embed.add_field(name="/season-rollover", value="Create new season sheet tabs, update Bot State, and reload season config in memory", inline=False)
+    embed.add_field(name="/archive-season", value="Copy a completed season's tabs from the League sheet to the Archive spreadsheet", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 

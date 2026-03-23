@@ -35,6 +35,8 @@ import season
 from clients import gs as _gs, rph_api as _rph_api
 from constants import (
     BOT_DATABASE_SPREADSHEET_ID,
+    LEAGUE_SPREADSHEET_ID,
+    ARCHIVE_SPREADSHEET_ID,
     STORE_CLASSIFICATIONS_RANGE_NAME,
     STORE_OVERRIDES_RANGE_NAME,
     BOT_STATE_RANGE_NAME,
@@ -736,6 +738,52 @@ def create_season_sheets(new_season: str) -> list[str]:
             else:
                 raise
     return created
+
+
+def archive_season_data(season_name: str) -> list[str]:
+    """
+    Copy all four season tabs from the League spreadsheet into the Archive spreadsheet.
+
+    Reads A1:end from each League tab to capture headers + data, creates matching
+    tabs in the Archive spreadsheet (skips if already existing), then writes the data.
+
+    Returns a list of tab titles that were written.
+    """
+    from googleapiclient.errors import HttpError as _HttpError
+
+    tabs = [
+        (f"{season_name} Standings - User Reported", "A1:G"),
+        (f"{season_name} Events - User Reported",    "A1:G"),
+        (f"{season_name} Leaderboard",               "A1:D"),
+        (f"{season_name} Set Champs",                "A1:H"),
+    ]
+
+    archived = []
+    for title, col_range in tabs:
+        read_range = f"{title}!{col_range}"
+
+        print(f"  → Reading {read_range} from League sheet...")
+        result = _gs.get_values(LEAGUE_SPREADSHEET_ID, read_range)
+        rows   = result.get('values', [])
+
+        if not rows:
+            print(f"  ⚠ {title} is empty — skipping")
+            continue
+
+        try:
+            _gs.add_sheet(ARCHIVE_SPREADSHEET_ID, title)
+        except _HttpError as e:
+            if e.status_code == 400 and 'ALREADY_EXISTS' in str(e):
+                print(f"  Archive tab '{title}' already exists — overwriting data")
+            else:
+                raise
+
+        write_range = f"{title}!A1"
+        _gs.update_values(ARCHIVE_SPREADSHEET_ID, write_range, "USER_ENTERED", rows)
+        print(f"  ✓ Archived '{title}' ({len(rows)} rows)")
+        archived.append(title)
+
+    return archived
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
