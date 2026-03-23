@@ -317,9 +317,12 @@ async def _post_where_to_play(channel, messages: list[str], loop) -> None:
                 pass
 
     _where_to_play_msg_ids = new_ids + [None] * (4 - len(new_ids))
-    await loop.run_in_executor(None, save_bot_state,
-        {f'wtp_msg_{i}': str(new_ids[i]) if i < len(new_ids) else '' for i in range(4)}
-    )
+    def _save_wtp_ids():
+        state = load_bot_state()
+        for i in range(4):
+            state[f'wtp_msg_{i}'] = str(new_ids[i]) if i < len(new_ids) else ''
+        save_bot_state(state)
+    await loop.run_in_executor(None, _save_wtp_ids)
 
 # Pending mod-channel reaction prompts keyed by message ID.
 # link suggestions: playhub_id, display_name, discord_id, discord_name
