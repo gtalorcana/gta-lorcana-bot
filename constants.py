@@ -39,6 +39,7 @@ EVENTS_URL_RE = r'https://tcg.ravensburgerplay.com/events/[0-9]+'
 RPH_GAME_STORES_URL = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/game-stores/?"
 RPH_EVENTS_URL      = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/events/?"
 RPH_STANDINGS_URL   = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/tournament-rounds/{round_id}/standings"
+RPH_MATCHES_URL     = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/tournament-rounds/{round_id}/matches"
 RPH_USERS_URL        = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/users/"
 SHOPIFY_CLIENT_ID    = os.getenv("SHOPIFY_CLIENT_ID", "132adedeb9577449a68365ecb67722ff")
 SHOPIFY_STORE_DOMAIN = os.getenv("SHOPIFY_STORE_DOMAIN", "enter-the-battlefield.myshopify.com")
