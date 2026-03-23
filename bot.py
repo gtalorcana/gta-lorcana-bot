@@ -1534,8 +1534,7 @@ async def etb_discount(interaction: discord.Interaction, rph_username: str, emai
             f"Discount code: `{_ETB_DISCOUNT_CODE}`\n"
             f"Shop: enterthebattlefield.ca\n\n"
             f"Your account ({email}) has been activated.\n"
-            f"The code will work at checkout on your next visit.\n\n"
-            f"Questions? Ask in #store-discounts."
+            f"The code will work at checkout on your next visit."
         )
         await interaction.followup.send(
             "✅ You're approved! Check your DMs for the discount code.",
@@ -1548,8 +1547,7 @@ async def etb_discount(interaction: discord.Interaction, rph_username: str, emai
             f"Discount code: `{_ETB_DISCOUNT_CODE}`\n"
             f"Shop: enterthebattlefield.ca\n\n"
             f"Your account ({email}) has been activated.\n"
-            f"The code will work at checkout on your next visit.\n\n"
-            f"Questions? Ask in #store-discounts.",
+            f"The code will work at checkout on your next visit.",
             ephemeral=True,
         )
 
