@@ -54,13 +54,17 @@ def _fetch_event_rows_and_standings(input_rows):
             print(f"    ⚠ No matching event returned for {event_id} (filtered out or not found)")
 
         for event in events:
+            gameplay_format_name = event['gameplay_format']['name']
+            if note == "Format: Core Constructed":
+                gameplay_format_name = "Core Constructed"
+
             event_row = [
                 rph_url,
                 thread_id,
                 note,
                 event['start_datetime'][:10],
                 event['store']['name'],
-                event['gameplay_format']['name'],
+                gameplay_format_name,
                 event['starting_player_count'],
             ]
 
