@@ -1091,4 +1091,4 @@ def refresh_set_champs() -> int:
 
     _gs.update_values(BOT_DATABASE_SPREADSHEET_ID, season.SET_CHAMPS_EVENTS_RANGE_NAME, "USER_ENTERED", rows)
     print(f"  ✓ Set Champs sheet updated ({len(rows)} row(s))")
-    return len(rows)
+    return len(rows), rows

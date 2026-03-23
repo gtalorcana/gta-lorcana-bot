@@ -56,6 +56,7 @@ from constants import (
     WORKER_SECRET,
     CHANNELS,
     MOD_CHANNEL_ID,
+    SET_CHAMPS_CHANNEL_ID,
     EVENTS_URL_RE,
     RPH_RETRY_DELAY,
     RPH_RETRY_ATTEMPTS,
@@ -123,6 +124,9 @@ _sheet_lock = asyncio.Lock()
 # Price rule ID for ETBGTALORCANA is fetched once at startup and cached here.
 _shopify:             _ShopifyApi | None = None
 _etb_price_rule_id:  int | None         = None
+
+# Set Champs Discord message ID — restored from Bot State on ready, saved after each post.
+_set_champs_msg_id: int | None = None
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -373,7 +377,59 @@ async def where_to_play_weekly():
             print(f"  ✗ Failed to update {_ch('where_to_play')}: {e}")
 
 
-# ── Set Championships daily refresh ─────────────────────────────────────────
+# ── Set Championships ────────────────────────────────────────────────────────
+
+def _build_set_champs_message(rows: list, as_of: date) -> str:
+    """Format Set Champs rows into a Discord message."""
+    lines = [
+        f"🏆 **GTA Lorcana — {season.CURRENT_SEASON} Set Championships**",
+        f"*Last updated: {as_of.strftime('%b %-d, %Y')}*",
+        "",
+    ]
+    for row in rows:
+        event_date = date.fromisoformat(row[0])
+        date_str   = event_date.strftime('%A, %b %-d')
+        store      = row[2]
+        city       = row[3]
+        fmt        = row[5]
+        cap        = row[4]
+        url        = row[7]
+        cap_str    = f" · Cap {cap}" if cap else ""
+        lines.append(f"**{date_str}** — {store} ({city})")
+        lines.append(f"{fmt}{cap_str} · [Register ↗]({url})")
+        lines.append("")
+    if not rows:
+        lines.append("*No Set Championship events found for this season yet.*")
+    return "\n".join(lines).strip()
+
+
+async def _post_set_champs(rows: list, loop) -> None:
+    """Post or edit the Set Champs message in the Set Champs channel."""
+    global _set_champs_msg_id
+    guild = bot.guilds[0] if bot.guilds else None
+    if not guild:
+        return
+    channel = guild.get_channel(SET_CHAMPS_CHANNEL_ID)
+    if not channel:
+        print(f"  ⚠ Set Champs channel {SET_CHAMPS_CHANNEL_ID} not found")
+        return
+
+    content = _build_set_champs_message(rows, date.today())
+
+    if _set_champs_msg_id:
+        try:
+            msg = await channel.fetch_message(_set_champs_msg_id)
+            await msg.edit(content=content)
+            print(f"  ✓ Set Champs Discord message updated (id={_set_champs_msg_id})")
+            return
+        except discord.NotFound:
+            _set_champs_msg_id = None
+
+    msg = await channel.send(content)
+    _set_champs_msg_id = msg.id
+    await loop.run_in_executor(None, set_bot_state_key, 'set_champs_msg_id', str(msg.id))
+    print(f"  ✓ Set Champs Discord message posted (id={msg.id})")
+
 
 @tasks.loop(minutes=1)
 async def set_champs_daily():
@@ -395,9 +451,10 @@ async def set_champs_daily():
     print(f"  🏆 set_champs_daily: refreshing Set Champs sheet for {now_et.date()}...")
     loop = asyncio.get_running_loop()
     try:
-        count = await loop.run_in_executor(None, refresh_set_champs)
+        count, rows = await loop.run_in_executor(None, refresh_set_champs)
         gc.collect()  # TODO: remove when upgraded to 1GB RAM — refresh_set_champs fetches a date range of RPH events
         print(f"  ✓ Set Champs sheet refreshed ({count} event(s))")
+        await _post_set_champs(rows, loop)
     except Exception as e:
         print(f"  ✗ set_champs_daily failed: {e}")
 
@@ -692,6 +749,15 @@ async def on_ready():
         print(f"  ✓ Restored where-to-play message IDs: {ids}")
     except Exception as e:
         print(f"  ⚠ Could not restore where-to-play message IDs: {e}")
+
+    # Restore persisted Set Champs message ID
+    global _set_champs_msg_id
+    try:
+        raw = state.get('set_champs_msg_id', '')
+        _set_champs_msg_id = int(raw) if raw else None
+        print(f"  ✓ Restored Set Champs message ID: {_set_champs_msg_id}")
+    except Exception as e:
+        print(f"  ⚠ Could not restore Set Champs message ID: {e}")
 
     if not keepalive.is_running():
         keepalive.start()
@@ -2116,6 +2182,23 @@ async def wheretoplay_command(interaction: discord.Interaction):
         await _post_where_to_play(channel, messages, loop)
         await interaction.followup.send(f"✅ {_ch('where_to_play')} updated ({len(messages)} messages).", ephemeral=True)
 
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
+
+@tree.command(name="setchamps", description="Manually refresh and post the Set Champs update (admins only)")
+async def setchamps_command(interaction: discord.Interaction):
+    if not _is_admin(interaction):
+        await interaction.response.send_message("❌ Admins only.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    loop = asyncio.get_running_loop()
+    try:
+        count, rows = await loop.run_in_executor(None, refresh_set_champs)
+        gc.collect()
+        await _post_set_champs(rows, loop)
+        await interaction.followup.send(f"✅ Set Champs updated ({count} event(s)).", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
