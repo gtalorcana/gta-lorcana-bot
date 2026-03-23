@@ -1,5 +1,5 @@
 """
-Whos-Going & Where-to-Play utility module.
+Where-to-Play utility module.
 
 Analyses current season RPH event data to classify Ontario Lorcana store events
 as Regular or Semi-Regular, persists state to Google Sheets, and determines which
@@ -13,8 +13,8 @@ Grouping key:
   A ~ prefix is added when raw times vary within a group.
 
 Classification rules (symmetric):
-  Regular    — current consecutive streak >= WHOS_GOING_MIN_CONSECUTIVE_WEEKS
-  Semi-Regular — has some history but streak < WHOS_GOING_MIN_CONSECUTIVE_WEEKS
+  Regular    — current consecutive streak >= WHERE_TO_PLAY_MIN_CONSECUTIVE_WEEKS
+  Semi-Regular — has some history but streak < WHERE_TO_PLAY_MIN_CONSECUTIVE_WEEKS
 
 State persistence:
   Classifications are read from and written back to the

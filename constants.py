@@ -28,8 +28,7 @@ LEGENDARY_ROLE_ID  = int(os.getenv("LEGENDARY_ROLE_ID",  1347683767367503953))
 # All accounts authorised to run admin/mod bot commands
 ADMIN_USER_IDS = [904550642213875723, 361716209324130305]
 
-# Who's-Going & Where-to-Play settings
-# Override via .env for local testing, e.g. WHOS_GOING_POST_HOUR_ET=9
+# Where-to-Play settings
 WHERE_TO_PLAY_POST_DAY        = 6   # Sunday (0=Mon … 6=Sun)
 WHERE_TO_PLAY_POST_HOUR_ET    = int(os.getenv("WHERE_TO_PLAY_POST_HOUR_ET", 23))  # 11PM ET Sunday
 WHERE_TO_PLAY_MIN_CONSECUTIVE_WEEKS    = 2   # weeks in a row to become Regular

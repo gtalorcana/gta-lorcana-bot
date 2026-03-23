@@ -54,7 +54,6 @@ DISCORD_BOT_TOKEN=...
 WORKER_URL=...
 WORKER_SECRET=...
 MOD_CHANNEL_ID=...
-WHOS_GOING_POST_HOUR_ET=9
 WHERE_TO_PLAY_POST_HOUR_ET=23
 ```
 
@@ -82,7 +81,6 @@ Set `TEST_STORE_SPREADSHEET_ID` in the script to a spreadsheet ID with a blank `
 | `RARE_ROLE_ID` | *(hardcoded)* | |
 | `SUPER_RARE_ROLE_ID` | *(hardcoded)* | |
 | `LEGENDARY_ROLE_ID` | *(hardcoded)* | |
-| `WHOS_GOING_POST_HOUR_ET` | `7` | Hour (ET) to post daily polls |
 | `WHERE_TO_PLAY_POST_HOUR_ET` | `23` | Hour (ET) to post Sunday where-to-play |
 | `CURRENT_SEASON` | `S11` | Used in sheet tab names |
 | `RPH_RETRY_ATTEMPTS` | `2` | Auto-retry attempts on RPH API failure |
