@@ -13,6 +13,22 @@ from constants import (
 # these are shared rather than constructed per-module.
 
 
+def _is_all_draw_round(standings_curr: list, standings_prev: list) -> bool:
+    """
+    Returns True if the current round appears to be an all-draw round —
+    i.e. every matched player (non-bye) gained exactly 1 match point.
+    Byes/wins gain 3 points and are excluded from the check.
+    """
+    prev_pts = {s['player']['id']: s['match_points'] for s in standings_prev}
+    matched_diffs = []
+    for s in standings_curr:
+        pid  = s['player']['id']
+        diff = s['match_points'] - prev_pts.get(pid, s['match_points'])
+        if diff != 3:  # 3 = win or bye
+            matched_diffs.append(diff)
+    return bool(matched_diffs) and all(d == 1 for d in matched_diffs)
+
+
 def _fetch_event_rows_and_standings(input_rows):
     """
     Fetch RPH data for every URL in input_rows.
@@ -68,6 +84,15 @@ def _fetch_event_rows_and_standings(input_rows):
             print(f"    → Fetching standings for round {last_round_id}...")
             standings = _rph_api.get_standings_from_tournament_round_id(str(last_round_id))
             print(f"    ✓ {len(standings)} standings retrieved for {event['store']['name']} {event['start_datetime'][:10]}")
+
+            # Auto-detect all-draw last round (e.g. everyone IDs except byes).
+            # Skip manual-override case — note already handled it above.
+            if note != "Remove Last Round" and len(last_phase['rounds']) >= 2:
+                prev_round_id = last_phase['rounds'][-2]['id']
+                prev_standings = _rph_api.get_standings_from_tournament_round_id(str(prev_round_id))
+                if _is_all_draw_round(standings, prev_standings):
+                    print(f"    ⚠ Last round detected as all-draw — auto-using second-to-last round")
+                    standings = prev_standings
 
             for standing in standings:
                 standing_rows.append([
