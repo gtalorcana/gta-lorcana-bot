@@ -70,7 +70,7 @@ from constants import (
     SUPER_RARE_ROLE_ID,
     LEAGUE_SPREADSHEET_ID,
     DISCORD_GUILD_ID,
-    SHOPIFY_TOKEN,
+    SHOPIFY_CLIENT_ID,
     SHOPIFY_STORE_DOMAIN,
 )
 import season
@@ -118,6 +118,11 @@ tree = bot.tree
 
 # Serializes all sheet writes — prevents concurrent threads from overwriting each other
 _sheet_lock = asyncio.Lock()
+
+# Shopify client — initialized in on_ready if credentials are available.
+# Price rule ID for ETBGTALORCANA is fetched once at startup and cached here.
+_shopify:             _ShopifyApi | None = None
+_etb_price_rule_id:  int | None         = None
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -661,6 +666,21 @@ async def on_ready():
                 "⚠️ **Season dates not configured.** Bot State is missing `season_start_date` / `season_end_date`. "
                 "Run `/season-rollover` to configure the current season."
             )
+
+    # Initialise Shopify client and pre-cache token + price rule ID
+    global _shopify, _etb_price_rule_id
+    shopify_secret = os.getenv('SHOPIFY_CLIENT_SECRET')
+    if SHOPIFY_CLIENT_ID and shopify_secret:
+        _shopify = _ShopifyApi(SHOPIFY_CLIENT_ID, shopify_secret, SHOPIFY_STORE_DOMAIN)
+        try:
+            await loop.run_in_executor(None, _shopify.prefetch_token)
+            _etb_price_rule_id = await loop.run_in_executor(None, _shopify.get_price_rule_id, _ETB_DISCOUNT_CODE)
+            print(f"  ✓ Shopify token cached, price rule ID: {_etb_price_rule_id}")
+        except Exception as e:
+            print(f"  ⚠ Shopify init failed: {e} — /link-rph Shopify steps will be skipped")
+            _shopify = None
+    else:
+        print(f"  ⚠ SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET not set — /link-rph Shopify steps stubbed")
 
     # Restore persisted where-to-play message IDs so edits work after restarts
     try:
@@ -1356,12 +1376,11 @@ async def link_rph(interaction: discord.Interaction, rph_username: str, email: s
         return
 
     # ── Steps 4 & 5: Shopify customer lookup + whitelist check ─
-    shopify = _ShopifyApi(SHOPIFY_TOKEN, SHOPIFY_STORE_DOMAIN) if SHOPIFY_TOKEN else None
     customer = None
 
-    if shopify:
+    if _shopify and _etb_price_rule_id:
         try:
-            customer = await loop.run_in_executor(None, shopify.lookup_customer_by_email, email)
+            customer = await loop.run_in_executor(None, _shopify.lookup_customer_by_email, email)
         except Exception as e:
             print(f"  ✗ /link-rph Shopify lookup failed: {e}")
             await interaction.followup.send(
@@ -1378,8 +1397,16 @@ async def link_rph(interaction: discord.Interaction, rph_username: str, email: s
             )
             return
 
-        # Step 5: already whitelisted in Shopify
-        if shopify.is_whitelisted(customer):
+        # Step 5: already whitelisted in Shopify — recover Bot State and confirm
+        try:
+            already = await loop.run_in_executor(
+                None, _shopify.is_whitelisted, _etb_price_rule_id, customer['id']
+            )
+        except Exception as e:
+            print(f"  ✗ /link-rph whitelist check failed: {e}")
+            already = False  # safe to proceed — worst case we add them again (no-op)
+
+        if already:
             record = json.dumps({
                 'rph_username': rph_username,
                 'rph_id':       rph_id,
@@ -1395,15 +1422,16 @@ async def link_rph(interaction: discord.Interaction, rph_username: str, email: s
             )
             return
     else:
-        print(f"STUB: Shopify token not configured — skipping customer lookup and whitelist for rph_id={rph_id}")
+        print(f"  ⚠ /link-rph: Shopify not configured — skipping Steps 4–6 for rph_id={rph_id}")
 
     # ── Step 6: Apply Shopify whitelist ───────────────────────
-    if shopify and customer is not None:
+    if _shopify and _etb_price_rule_id and customer is not None:
         try:
-            await loop.run_in_executor(None, shopify.whitelist_customer, customer)
+            await loop.run_in_executor(
+                None, _shopify.add_to_whitelist, _etb_price_rule_id, customer['id']
+            )
         except Exception as e:
-            print(f"  ✗ /link-rph Shopify whitelist failed for rph_id={rph_id}: {e}")
-            # Notify Ryan (first admin ID)
+            print(f"  ✗ /link-rph add_to_whitelist failed for rph_id={rph_id}: {e}")
             try:
                 ryan = await bot.fetch_user(ADMIN_USER_IDS[0])
                 await ryan.send(
@@ -1418,8 +1446,6 @@ async def link_rph(interaction: discord.Interaction, rph_username: str, email: s
                 ephemeral=True,
             )
             return
-    else:
-        print(f"STUB: Shopify whitelist skipped — token not configured")
 
     # ── Step 7: Store in Bot State and DM ─────────────────────
     record = json.dumps({
