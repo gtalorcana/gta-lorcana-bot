@@ -878,13 +878,14 @@ async def _run_process_event_data(thread: discord.Thread, rph_url: str) -> list[
             waiter_count = len(_sheet_lock._waiters)
             print(f"  ⏳ Sheet lock acquired for '{thread.name}' ({waiter_count} thread(s) were waiting)")
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, process_event_data, rph_url, thread.id)
+        standing_rows, warnings = await loop.run_in_executor(None, process_event_data, rph_url, thread.id)
+        return standing_rows, warnings
 
 
-async def process_results_reporting_thread(thread: discord.Thread) -> list[list]:
+async def process_results_reporting_thread(thread: discord.Thread) -> tuple[list[list], list[str]]:
     """
     Validate the thread starter message URL and run the results processing pipeline.
-    Returns the full standing_rows written this run.
+    Returns (standing_rows, warnings).
     Raises ValueError on bad URL, RuntimeError on API/sheet failure.
     """
     starter = await thread.fetch_message(thread.id)
@@ -952,13 +953,16 @@ async def run_results_reporting_pipeline(
             pass
 
     try:
-        standing_rows = await process_results_reporting_thread(thread)
+        standing_rows, warnings = await process_results_reporting_thread(thread)
 
         # ── Success ───────────────────────────────────────────
+        description = "Your results have been successfully processed!"
+        if warnings:
+            description += "\n\n" + "\n".join(warnings)
         await thread.send(
             embed=make_embed(
                 title="✅ Results Processed",
-                description="Your results have been successfully processed!",
+                description=description,
                 colour=discord.Colour.green()
             )
         )
@@ -1069,12 +1073,15 @@ async def _schedule_auto_retry(
     print(f"  🔄 Auto-retry {attempt}/{RPH_RETRY_ATTEMPTS} for '{thread.name}'...")
 
     try:
-        standing_rows = await _run_process_event_data(thread, starter_msg.content.strip())
+        standing_rows, warnings = await _run_process_event_data(thread, starter_msg.content.strip())
 
+        description = f"Results successfully processed on retry {attempt}/{RPH_RETRY_ATTEMPTS}!"
+        if warnings:
+            description += "\n\n" + "\n".join(warnings)
         await thread.send(
             embed=make_embed(
                 title="✅ Results Processed",
-                description=f"Results successfully processed on retry {attempt}/{RPH_RETRY_ATTEMPTS}!",
+                description=description,
                 colour=discord.Colour.green()
             )
         )

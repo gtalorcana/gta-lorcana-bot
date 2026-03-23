@@ -33,11 +33,13 @@ def _is_all_draw_round(matches: list) -> bool:
 def _fetch_event_rows_and_standings(input_rows):
     """
     Fetch RPH data for every URL in input_rows.
-    Returns (event_rows, standing_rows).
+    Returns (event_rows, standing_rows, warnings).
+    warnings is a list of human-readable strings describing auto-corrections made.
     Raises RuntimeError if any individual RPH API call fails all retries.
     """
     event_rows    = []
     standing_rows = []
+    warnings      = []
 
     for row in input_rows:
         rph_url   = row[0]
@@ -79,6 +81,7 @@ def _fetch_event_rows_and_standings(input_rows):
                 print(f"    ⚠ Last phase is unplayed SE — auto-using previous phase")
                 last_phase = event['tournament_phases'][-2]
                 event_row[2] = "Auto: unplayed SE phase skipped"
+                warnings.append("⚠️ Unplayed single-elimination phase detected and skipped automatically.")
 
             if not last_phase['rounds']:
                 event_rows.append(event_row)
@@ -97,6 +100,7 @@ def _fetch_event_rows_and_standings(input_rows):
                     last_round_id = last_phase['rounds'][-2]['id']
                     standings = _rph_api.get_standings_from_tournament_round_id(str(last_round_id))
                     event_row[2] = "Auto: all-draw last round removed"
+                    warnings.append("⚠️ Last round was all-draws — standings taken from the previous round automatically.")
 
             event_rows.append(event_row)
 
@@ -111,7 +115,7 @@ def _fetch_event_rows_and_standings(input_rows):
                     str(standing['player']['id']),  # playhub_id — col G
                 ])
 
-    return event_rows, standing_rows
+    return event_rows, standing_rows, warnings
 
 
 def process_event_data(rph_url, thread_id):
@@ -155,7 +159,7 @@ def process_event_data(rph_url, thread_id):
 
     # ── Step 3: Fetch all RPH data ────────────────────────────
     # RuntimeError raised here if any API call fails all retries
-    event_rows, standing_rows = _fetch_event_rows_and_standings(full_input_rows)
+    event_rows, standing_rows, warnings = _fetch_event_rows_and_standings(full_input_rows)
 
     # ── Step 4: Validate count ────────────────────────────────
     if len(event_rows) != expected_count:
@@ -180,7 +184,7 @@ def process_event_data(rph_url, thread_id):
     _gs.update_values(LEAGUE_SPREADSHEET_ID, season.EVENTS_TIMESTAMP_RANGE_NAME, "USER_ENTERED", [['Last updated', local_dt]])
 
     print(f"  ✓ All sheets updated successfully")
-    return standing_rows
+    return standing_rows, warnings
 
 
 def remove_event_data(thread_id):
@@ -206,7 +210,7 @@ if __name__ == "__main__":
     existing_data = _gs.get_values(LEAGUE_SPREADSHEET_ID, season.EVENTS_RANGE_NAME)
     existing_rows = existing_data.get('values', [])
 
-    event_rows, standing_rows = _fetch_event_rows_and_standings(existing_rows)
+    event_rows, standing_rows, _ = _fetch_event_rows_and_standings(existing_rows)
 
     _gs.update_values(LEAGUE_SPREADSHEET_ID, season.EVENTS_RANGE_NAME, "USER_ENTERED", event_rows)
     _gs.update_values(LEAGUE_SPREADSHEET_ID, season.STANDINGS_RANGE_NAME, "USER_ENTERED", standing_rows)
