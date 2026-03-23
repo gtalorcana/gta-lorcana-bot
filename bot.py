@@ -466,7 +466,7 @@ async def _post_set_champs(rows: list, loop) -> None:
 @tasks.loop(minutes=1)
 async def set_champs_daily():
     """
-    Refreshes the Set Champs sheet once daily at noon ET during the set champs window.
+    Refreshes the Set Champs sheet once daily at 7:00 AM ET during the set champs window.
     No-ops outside of SET_CHAMPS_START_DATE to SET_CHAMPS_END_DATE.
     """
     now_et = _now_et()
