@@ -403,16 +403,17 @@ def _build_set_champs_messages(rows: list, as_of: date) -> list[str]:
     for date_str in sorted(by_date.keys()):
         event_date = date.fromisoformat(date_str)
         day_label  = event_date.strftime('%A, %b %-d')
-        lines      = [f"**{day_label}**", ""]
+        lines      = ["─────────────────────", f"**{day_label}**", ""]
         for row in by_date[date_str]:
             store   = row[2]
             city    = row[3]
+            time    = row[1]
             fmt     = row[5]
             cap     = row[4]
             url     = row[7]
             cap_str = f" · Cap {cap}" if cap else ""
             lines.append(f"**{store}** ({city})")
-            lines.append(f"{fmt}{cap_str} · [Register ↗]({url})")
+            lines.append(f"{time} · {fmt}{cap_str} · <{url}>")
             lines.append("")
         messages.append("\n".join(lines).strip())
 
@@ -438,12 +439,12 @@ async def _post_set_champs(rows: list, loop) -> None:
         if msg_id:
             try:
                 existing = await channel.fetch_message(msg_id)
-                await existing.edit(content=content)
+                await existing.edit(content=content, suppress=True)
                 new_ids.append(msg_id)
                 continue
             except discord.NotFound:
                 pass
-        msg = await channel.send(content)
+        msg = await channel.send(content, suppress_embeds=True)
         new_ids.append(msg.id)
 
     # Delete orphaned messages if day count decreased
