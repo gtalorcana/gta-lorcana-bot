@@ -30,7 +30,7 @@ from datetime import datetime
 from util.rph_api_utils import RphApi
 from util.google_sheets_api_utils import GoogleSheetsApi
 import season
-from constants import LEAGUE_SPREADSHEET_ID
+from constants import BOT_DATABASE_SPREADSHEET_ID
 from stores import _parse_city
 
 _TZ_TORONTO = ZoneInfo("America/Toronto")
@@ -125,7 +125,7 @@ if __name__ == '__main__':
     print(f"\n  {len(rows)} row(s) ready to write.")
 
     if WRITE_TO_SHEET:
-        gs.update_values(LEAGUE_SPREADSHEET_ID, season.SET_CHAMPS_EVENTS_RANGE_NAME, "USER_ENTERED", rows)
+        gs.update_values(BOT_DATABASE_SPREADSHEET_ID, season.SET_CHAMPS_EVENTS_RANGE_NAME, "USER_ENTERED", rows)
         print(f"  ✓ Written to sheet.")
     else:
         print(f"\n  ⚠ WRITE_TO_SHEET = False — set to True to write to the sheet.")

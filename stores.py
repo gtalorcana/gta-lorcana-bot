@@ -786,14 +786,13 @@ def create_season_sheets(new_season: str) -> list[str]:
     """
     from googleapiclient.errors import HttpError as _HttpError
 
-    titles = [
+    league_titles = [
         f"{new_season} Standings - User Reported",
         f"{new_season} Events - User Reported",
         f"{new_season} Leaderboard",
-        f"{new_season} Set Champs",
     ]
     created = []
-    for title in titles:
+    for title in league_titles:
         try:
             _gs.add_sheet(LEAGUE_SPREADSHEET_ID, title)
             created.append(title)
@@ -802,6 +801,17 @@ def create_season_sheets(new_season: str) -> list[str]:
                 print(f"  Sheet '{title}' already exists — skipping")
             else:
                 raise
+
+    set_champs_title = f"{new_season} Set Champs"
+    try:
+        _gs.add_sheet(BOT_DATABASE_SPREADSHEET_ID, set_champs_title)
+        created.append(set_champs_title)
+    except _HttpError as e:
+        if e.status_code == 400 and 'ALREADY_EXISTS' in str(e):
+            print(f"  Sheet '{set_champs_title}' already exists — skipping")
+        else:
+            raise
+
     return created
 
 
@@ -816,19 +826,43 @@ def archive_season_data(season_name: str) -> list[str]:
     """
     from googleapiclient.errors import HttpError as _HttpError
 
-    tabs = [
+    league_tabs = [
         (f"{season_name} Standings - User Reported", "A1:G"),
         (f"{season_name} Events - User Reported",    "A1:G"),
         (f"{season_name} Leaderboard",               "A1:D"),
-        (f"{season_name} Set Champs",                "A1:H"),
+    ]
+    db_tabs = [
+        (f"{season_name} Set Champs", "A1:H"),
     ]
 
     archived = []
-    for title, col_range in tabs:
+    for title, col_range in league_tabs:
         read_range = f"{title}!{col_range}"
-
         print(f"  → Reading {read_range} from League sheet...")
         result = _gs.get_values(LEAGUE_SPREADSHEET_ID, read_range)
+        rows   = result.get('values', [])
+
+        if not rows:
+            print(f"  ⚠ {title} is empty — skipping")
+            continue
+
+        try:
+            _gs.add_sheet(ARCHIVE_SPREADSHEET_ID, title)
+        except _HttpError as e:
+            if e.status_code == 400 and 'ALREADY_EXISTS' in str(e):
+                print(f"  Archive tab '{title}' already exists — overwriting data")
+            else:
+                raise
+
+        write_range = f"{title}!A1"
+        _gs.update_values(ARCHIVE_SPREADSHEET_ID, write_range, "USER_ENTERED", rows)
+        print(f"  ✓ Archived '{title}' ({len(rows)} rows)")
+        archived.append(title)
+
+    for title, col_range in db_tabs:
+        read_range = f"{title}!{col_range}"
+        print(f"  → Reading {read_range} from Bot Database sheet...")
+        result = _gs.get_values(BOT_DATABASE_SPREADSHEET_ID, read_range)
         rows   = result.get('values', [])
 
         if not rows:
@@ -1055,6 +1089,6 @@ def refresh_set_champs() -> int:
 
     rows.sort(key=lambda r: (r[0], r[1]))  # sort by date then time
 
-    _gs.update_values(LEAGUE_SPREADSHEET_ID, season.SET_CHAMPS_EVENTS_RANGE_NAME, "USER_ENTERED", rows)
+    _gs.update_values(BOT_DATABASE_SPREADSHEET_ID, season.SET_CHAMPS_EVENTS_RANGE_NAME, "USER_ENTERED", rows)
     print(f"  ✓ Set Champs sheet updated ({len(rows)} row(s))")
     return len(rows)
