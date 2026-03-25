@@ -30,21 +30,24 @@ def _is_all_draw_round(matches: list) -> bool:
     )
 
 
-def _fetch_event_rows_and_standings(input_rows):
+def _fetch_event_rows_and_standings(input_rows, warn_from_index=0):
     """
     Fetch RPH data for every URL in input_rows.
     Returns (event_rows, standing_rows, warnings).
-    warnings is a list of human-readable strings describing auto-corrections made.
+    warnings is a list of human-readable strings describing auto-corrections made,
+    collected only for rows at index >= warn_from_index (so existing events don't
+    bleed warnings into a new submission's embed).
     Raises RuntimeError if any individual RPH API call fails all retries.
     """
     event_rows    = []
     standing_rows = []
     warnings      = []
 
-    for row in input_rows:
+    for idx, row in enumerate(input_rows):
         rph_url   = row[0]
         thread_id = row[1] if len(row) > 1 else None
         note      = row[2] if len(row) > 2 else None
+        emit_warnings = idx >= warn_from_index
 
         # 40 is the length of "https://tcg.ravensburgerplay.com/events/"
         event_id = rph_url[40:]
@@ -60,11 +63,23 @@ def _fetch_event_rows_and_standings(input_rows):
             if note == "Format: Core Constructed":
                 gameplay_format_name = "Core Constructed"
 
+            event_date = event['start_datetime'][:10]
+
+            if emit_warnings:
+                if season.SEASON_START_DATE and event_date < season.SEASON_START_DATE:
+                    raise ValueError(
+                        f"Event date {event_date} is before the current season start ({season.SEASON_START_DATE})."
+                    )
+                if season.SEASON_END_DATE and event_date > season.SEASON_END_DATE:
+                    raise ValueError(
+                        f"Event date {event_date} is after the current season end ({season.SEASON_END_DATE})."
+                    )
+
             event_row = [
                 rph_url,
                 thread_id,
                 note,
-                event['start_datetime'][:10],
+                event_date,
                 event['store']['name'],
                 gameplay_format_name,
                 event['starting_player_count'],
@@ -81,7 +96,8 @@ def _fetch_event_rows_and_standings(input_rows):
                 print(f"    ⚠ Last phase is unplayed SE — auto-using previous phase")
                 last_phase = event['tournament_phases'][-2]
                 event_row[2] = "Auto: unplayed SE phase skipped"
-                warnings.append("⚠️ Unplayed single-elimination phase detected and skipped automatically.")
+                if emit_warnings:
+                    warnings.append("⚠️ Unplayed single-elimination phase detected and skipped automatically.")
 
             if not last_phase['rounds']:
                 event_rows.append(event_row)
@@ -100,7 +116,8 @@ def _fetch_event_rows_and_standings(input_rows):
                     last_round_id = last_phase['rounds'][-2]['id']
                     standings = _rph_api.get_standings_from_tournament_round_id(str(last_round_id))
                     event_row[2] = "Auto: all-draw last round removed"
-                    warnings.append("⚠️ Last round was all-draws — standings taken from the previous round automatically.")
+                    if emit_warnings:
+                        warnings.append("⚠️ Last round was all-draws — standings taken from the previous round automatically.")
 
             event_rows.append(event_row)
 
@@ -159,7 +176,7 @@ def process_event_data(rph_url, thread_id):
 
     # ── Step 3: Fetch all RPH data ────────────────────────────
     # RuntimeError raised here if any API call fails all retries
-    event_rows, standing_rows, warnings = _fetch_event_rows_and_standings(full_input_rows)
+    event_rows, standing_rows, warnings = _fetch_event_rows_and_standings(full_input_rows, warn_from_index=len(existing_rows))
 
     # ── Step 4: Validate count ────────────────────────────────
     if len(event_rows) != expected_count:
