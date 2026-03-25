@@ -30,107 +30,125 @@ def _is_all_draw_round(matches: list) -> bool:
     )
 
 
-def _fetch_event_rows_and_standings(input_rows, warn_from_index=0):
+def _fetch_single_event(rph_url, thread_id, note=None, validate_date=False):
+    """
+    Fetch RPH data for a single event URL.
+    Returns (event_row, standing_rows, warnings).
+
+    note:          optional value for event_row[2] (e.g. 'Format: Core Constructed').
+                   Auto-corrections will overwrite this if they fire.
+    validate_date: if True, raises ValueError when the event date is outside
+                   the current season window.
+
+    Raises RuntimeError if the API call fails all retries or returns no event.
+    Raises ValueError  if validate_date=True and the event is out of season.
+    """
+    warnings      = []
+    standing_rows = []
+
+    # 40 is the length of "https://tcg.ravensburgerplay.com/events/"
+    event_id = rph_url[40:]
+
+    print(f"    → Fetching RPH event {event_id}...")
+    events = _rph_api.get_event_by_id(event_id)
+
+    if not events:
+        raise RuntimeError(
+            f"No matching event returned from RPH for {event_id} "
+            f"(filtered out or not found)."
+        )
+
+    event = events[0]
+    gameplay_format_name = event['gameplay_format']['name']
+    if note == "Format: Core Constructed":
+        gameplay_format_name = "Core Constructed"
+
+    event_date = event['start_datetime'][:10]
+
+    if validate_date:
+        if season.SEASON_START_DATE and event_date < season.SEASON_START_DATE:
+            raise ValueError(
+                f"Event date {event_date} is before the current season start ({season.SEASON_START_DATE})."
+            )
+        if season.SEASON_END_DATE and event_date > season.SEASON_END_DATE:
+            raise ValueError(
+                f"Event date {event_date} is after the current season end ({season.SEASON_END_DATE})."
+            )
+
+    event_row = [
+        rph_url,
+        str(thread_id) if thread_id is not None else None,
+        note,
+        event_date,
+        event['store']['name'],
+        gameplay_format_name,
+        event['starting_player_count'],
+    ]
+
+    if not event['tournament_phases']:
+        return event_row, standing_rows, warnings
+
+    last_phase = event['tournament_phases'][-1]
+    if (last_phase['round_type'] == 'RANKED_SINGLE_ELIMINATION'
+            and not last_phase['rounds']
+            and len(event['tournament_phases']) >= 2):
+        print(f"    ⚠ Last phase is unplayed SE — auto-using previous phase")
+        last_phase = event['tournament_phases'][-2]
+        event_row[2] = "Auto: unplayed SE phase skipped"
+        warnings.append("⚠️ Unplayed single-elimination phase detected and skipped automatically.")
+
+    if not last_phase['rounds']:
+        return event_row, standing_rows, warnings
+
+    last_round_id = last_phase['rounds'][-1]['id']
+
+    print(f"    → Fetching standings for round {last_round_id}...")
+    standings = _rph_api.get_standings_from_tournament_round_id(str(last_round_id))
+    print(f"    ✓ {len(standings)} standings retrieved for {event['store']['name']} {event_date}")
+
+    if len(last_phase['rounds']) >= 2:
+        matches = _rph_api.get_matches_from_tournament_round_id(str(last_round_id))
+        if _is_all_draw_round(matches):
+            print(f"    ⚠ Last round detected as all-draw — auto-using second-to-last round")
+            last_round_id = last_phase['rounds'][-2]['id']
+            standings = _rph_api.get_standings_from_tournament_round_id(str(last_round_id))
+            event_row[2] = "Auto: all-draw last round removed"
+            warnings.append("⚠️ Last round was all-draws — standings taken from the previous round automatically.")
+
+    for standing in standings:
+        standing_rows.append([
+            event_date,
+            event['store']['name'],
+            standing['rank'],
+            standing['user_event_status']['best_identifier'],
+            standing['record'],
+            standing['match_points'],
+            str(standing['player']['id']),  # playhub_id — col G
+        ])
+
+    return event_row, standing_rows, warnings
+
+
+def _fetch_event_rows_and_standings(input_rows):
     """
     Fetch RPH data for every URL in input_rows.
     Returns (event_rows, standing_rows, warnings).
-    warnings is a list of human-readable strings describing auto-corrections made,
-    collected only for rows at index >= warn_from_index (so existing events don't
-    bleed warnings into a new submission's embed).
+    Used by the standalone __main__ refresh path only.
     Raises RuntimeError if any individual RPH API call fails all retries.
     """
     event_rows    = []
     standing_rows = []
     warnings      = []
 
-    for idx, row in enumerate(input_rows):
+    for row in input_rows:
         rph_url   = row[0]
         thread_id = row[1] if len(row) > 1 else None
         note      = row[2] if len(row) > 2 else None
-        emit_warnings = idx >= warn_from_index
 
-        # 40 is the length of "https://tcg.ravensburgerplay.com/events/"
-        event_id = rph_url[40:]
-
-        print(f"    → Fetching RPH event {event_id}...")
-        events = _rph_api.get_event_by_id(event_id)
-
-        if not events:
-            print(f"    ⚠ No matching event returned for {event_id} (filtered out or not found)")
-
-        for event in events:
-            gameplay_format_name = event['gameplay_format']['name']
-            if note == "Format: Core Constructed":
-                gameplay_format_name = "Core Constructed"
-
-            event_date = event['start_datetime'][:10]
-
-            if emit_warnings:
-                if season.SEASON_START_DATE and event_date < season.SEASON_START_DATE:
-                    raise ValueError(
-                        f"Event date {event_date} is before the current season start ({season.SEASON_START_DATE})."
-                    )
-                if season.SEASON_END_DATE and event_date > season.SEASON_END_DATE:
-                    raise ValueError(
-                        f"Event date {event_date} is after the current season end ({season.SEASON_END_DATE})."
-                    )
-
-            event_row = [
-                rph_url,
-                thread_id,
-                note,
-                event_date,
-                event['store']['name'],
-                gameplay_format_name,
-                event['starting_player_count'],
-            ]
-
-            if not event['tournament_phases']:
-                event_rows.append(event_row)
-                continue
-
-            last_phase = event['tournament_phases'][-1]
-            if (last_phase['round_type'] == 'RANKED_SINGLE_ELIMINATION'
-                    and not last_phase['rounds']
-                    and len(event['tournament_phases']) >= 2):
-                print(f"    ⚠ Last phase is unplayed SE — auto-using previous phase")
-                last_phase = event['tournament_phases'][-2]
-                event_row[2] = "Auto: unplayed SE phase skipped"
-                if emit_warnings:
-                    warnings.append("⚠️ Unplayed single-elimination phase detected and skipped automatically.")
-
-            if not last_phase['rounds']:
-                event_rows.append(event_row)
-                continue
-
-            last_round_id = last_phase['rounds'][-1]['id']
-
-            print(f"    → Fetching standings for round {last_round_id}...")
-            standings = _rph_api.get_standings_from_tournament_round_id(str(last_round_id))
-            print(f"    ✓ {len(standings)} standings retrieved for {event['store']['name']} {event['start_datetime'][:10]}")
-
-            if len(last_phase['rounds']) >= 2:
-                matches = _rph_api.get_matches_from_tournament_round_id(str(last_round_id))
-                if _is_all_draw_round(matches):
-                    print(f"    ⚠ Last round detected as all-draw — auto-using second-to-last round")
-                    last_round_id = last_phase['rounds'][-2]['id']
-                    standings = _rph_api.get_standings_from_tournament_round_id(str(last_round_id))
-                    event_row[2] = "Auto: all-draw last round removed"
-                    if emit_warnings:
-                        warnings.append("⚠️ Last round was all-draws — standings taken from the previous round automatically.")
-
-            event_rows.append(event_row)
-
-            for standing in standings:
-                standing_rows.append([
-                    event['start_datetime'][:10],
-                    event['store']['name'],
-                    standing['rank'],
-                    standing['user_event_status']['best_identifier'],
-                    standing['record'],
-                    standing['match_points'],
-                    str(standing['player']['id']),  # playhub_id — col G
-                ])
+        e_row, s_rows, w = _fetch_single_event(rph_url, thread_id, note=note)
+        event_rows.append(e_row)
+        standing_rows.extend(s_rows)
+        warnings.extend(w)
 
     return event_rows, standing_rows, warnings
 
@@ -140,14 +158,16 @@ def process_event_data(rph_url, thread_id):
     Main entry point called by bot.py when a new results thread is submitted.
 
     Flow:
-      1. Read existing event data from the sheet
+      1. Read existing event data from the sheet (for duplicate check only —
+         existing events are never re-fetched from RPH)
       2. Duplicate check — same URL from a different thread raises ValueError.
-         Same URL from the same thread is a retry after a partial failure and is allowed.
-      3. Build full input list = existing rows + new entry
-      4. Fetch RPH data for all entries (with retries per call)
-      5. Validate fetched event count matches expected input count
-      6. Write standings first, then events — if a crash occurs between the two,
-         the event row won't exist so /recheck can safely retry the thread.
+         Same URL from the same thread is a retry after a partial failure and
+         is allowed (is_retry=True).
+      3. Fetch RPH data for the new event only
+      4. Write event row first, then append standings.
+         On retry: overwrite the event row in place and clear any standings
+         already written for this event before re-appending, so there are no
+         duplicates regardless of where a previous attempt crashed.
     """
     print(f"  → process_event_data: reading existing events from sheet...")
     existing_data = _gs.get_values(LEAGUE_SPREADSHEET_ID, season.EVENTS_RANGE_NAME)
@@ -156,11 +176,16 @@ def process_event_data(rph_url, thread_id):
     # ── Step 1: Duplicate check ───────────────────────────────
     # Same URL + different thread = true duplicate, reject.
     # Same URL + same thread = retry after a failure, allow it to overwrite.
-    for row in existing_rows:
+    is_retry       = False
+    retry_sheet_row = None  # 1-based sheet row number of the existing event row
+
+    for idx, row in enumerate(existing_rows):
         if row[0] == rph_url:
             existing_thread_id = row[1] if len(row) > 1 else None
             if str(existing_thread_id) == str(thread_id):
-                print(f"  ↩ Same thread retry detected for {rph_url} — overwriting previous partial write")
+                print(f"  ↩ Same thread retry detected for {rph_url} — will overwrite in place")
+                is_retry        = True
+                retry_sheet_row = idx + 2  # sheet rows start at A2
                 break
             thread_url = RESULTS_REPORTING_CHANNEL_URL + str(existing_thread_id) if existing_thread_id else "unknown"
             raise ValueError(
@@ -169,32 +194,46 @@ def process_event_data(rph_url, thread_id):
                 f"Previously submitted in: {thread_url}"
             )
 
-    # ── Step 2: Build full input list (existing + new) ────────
-    full_input_rows = existing_rows + [[rph_url, str(thread_id)]]
-    expected_count  = len(full_input_rows)
-    print(f"  → Fetching RPH data for {expected_count} event(s) ({len(existing_rows)} existing + 1 new)...")
+    # ── Step 2: Fetch new event from RPH ─────────────────────
+    # Only the submitted event is fetched — historical events are not re-fetched
+    # because playhub_id (not display name) is stored, so player identity is stable.
+    print(f"  → Fetching RPH data for new event...")
+    event_row, standing_rows, warnings = _fetch_single_event(
+        rph_url, thread_id, validate_date=True
+    )
+    event_date = event_row[3]
+    store_name = event_row[4]
+    print(f"  ✓ RPH data fetched: {store_name} {event_date}, {len(standing_rows)} standings rows")
 
-    # ── Step 3: Fetch all RPH data ────────────────────────────
-    # RuntimeError raised here if any API call fails all retries
-    event_rows, standing_rows, warnings = _fetch_event_rows_and_standings(full_input_rows, warn_from_index=len(existing_rows))
+    # ── Step 3: Write event row ───────────────────────────────
+    # Event row is written before standings so that any crash between the two
+    # leaves the event row present, letting the next retry detect same-thread
+    # and re-append standings cleanly.
+    if is_retry:
+        retry_range = season.EVENTS_SHEET_NAME + f"!A{retry_sheet_row}:G{retry_sheet_row}"
+        print(f"  → Overwriting event row at sheet row {retry_sheet_row}...")
+        _gs.update_values(LEAGUE_SPREADSHEET_ID, retry_range, "USER_ENTERED", [event_row])
 
-    # ── Step 4: Validate count ────────────────────────────────
-    if len(event_rows) != expected_count:
-        raise RuntimeError(
-            f"RPH data incomplete — expected {expected_count} event(s) but only retrieved {len(event_rows)}. "
-            f"Sheet was not updated to prevent data loss."
-        )
-    print(f"  ✓ RPH data validated: {len(event_rows)} event(s), {len(standing_rows)} standings rows")
+        # Clear any standings already written for this event (from a previous
+        # attempt that crashed after the standings write) before re-appending.
+        standings_data     = _gs.get_values(LEAGUE_SPREADSHEET_ID, season.STANDINGS_RANGE_NAME)
+        existing_standings = standings_data.get('values', [])
+        to_clear = [
+            {"range": season.STANDINGS_SHEET_NAME + f"!A{idx + 3}:G{idx + 3}", "values": [[""] * 7]}
+            for idx, row in enumerate(existing_standings)
+            if len(row) >= 2 and row[0] == event_date and row[1] == store_name
+        ]
+        if to_clear:
+            print(f"  ↩ Clearing {len(to_clear)} existing standings row(s) for {store_name} {event_date}...")
+            _gs.batch_update_values(LEAGUE_SPREADSHEET_ID, to_clear)
+    else:
+        print(f"  → Appending event row...")
+        _gs.append_values(LEAGUE_SPREADSHEET_ID, season.EVENTS_RANGE_NAME, "USER_ENTERED", [event_row])
 
-    # ── Step 5: Write all sheets ──────────────────────────────
-    # Standings are written first intentionally — if an OOM or crash occurs
-    # mid-write, the event row won't exist yet so the duplicate check won't
-    # trigger and the thread can be safely retried via /recheck.
-    print(f"  → Writing {len(standing_rows)} standings rows to sheet...")
-    _gs.update_values(LEAGUE_SPREADSHEET_ID, season.STANDINGS_RANGE_NAME, "USER_ENTERED", standing_rows)
-
-    print(f"  → Writing {len(event_rows)} event rows to sheet...")
-    _gs.update_values(LEAGUE_SPREADSHEET_ID, season.EVENTS_RANGE_NAME, "USER_ENTERED", event_rows)
+    # ── Step 4: Append standings ──────────────────────────────
+    if standing_rows:
+        print(f"  → Appending {len(standing_rows)} standings rows...")
+        _gs.append_values(LEAGUE_SPREADSHEET_ID, season.STANDINGS_RANGE_NAME, "USER_ENTERED", standing_rows)
 
     utc_dt   = datetime.now(timezone.utc)
     local_dt = utc_dt.astimezone().isoformat()
@@ -225,7 +264,7 @@ if __name__ == "__main__":
     # Reads whatever URLs are currently in the sheet and rewrites everything.
     print("Running standalone standings refresh...")
     existing_data = _gs.get_values(LEAGUE_SPREADSHEET_ID, season.EVENTS_RANGE_NAME)
-    existing_rows = existing_data.get('values', [])
+    existing_rows = [row for row in existing_data.get('values', []) if row and row[0]]
 
     event_rows, standing_rows, _ = _fetch_event_rows_and_standings(existing_rows)
 
