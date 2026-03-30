@@ -30,7 +30,7 @@
 | `season_start_date` | `2026-02-13` | Season start date (used to filter RPH events) |
 | `season_end_date` | `2026-04-24` | Season end date |
 | `set_champs_start_date` | `2026-04-04` | Set Champs window start |
-| `set_champs_end_date` | `2026-04-24` | Set Champs window end |
+| `set_champs_end_date` | `2026-04-26` | Set Champs window end |
 | `wtp_msg_0` / `wtp_msg_1` / `wtp_msg_2` | Discord message ID | Persists `#where-to-play` message IDs across restarts so the bot edits in-place rather than reposting |
 | `recheck:<thread_id>` | `1` | Crash-loop guard — set before a startup recheck attempt, cleared on success |
 | `rph_watch:<event_id>` | JSON `{name, end_date, subscribers: [user_id, ...]}` | Active event spot watchers — one key per watched event |

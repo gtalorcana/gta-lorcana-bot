@@ -11,7 +11,26 @@ NOT via:
     from season import CURRENT_SEASON   # wrong — captures value at import time
 """
 
+from datetime import date, datetime, time, timedelta
+from urllib.parse import quote
+from zoneinfo import ZoneInfo
+
 import constants as _c
+
+_TZ_ET = ZoneInfo(_c.TIMEZONE_ET)
+
+
+def _start_of_day_utc(iso_date: str) -> str:
+    """Return URL-encoded UTC timestamp for midnight ET on the given date."""
+    dt = datetime.combine(date.fromisoformat(iso_date), time.min, tzinfo=_TZ_ET)
+    return quote(dt.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+
+
+def _end_of_day_utc(iso_date: str) -> str:
+    """Return URL-encoded UTC timestamp for 11:59:59.999 PM ET on the given date."""
+    dt = datetime.combine(date.fromisoformat(iso_date) + timedelta(days=1), time.min, tzinfo=_TZ_ET)
+    dt -= timedelta(milliseconds=1)
+    return quote(dt.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z")
 
 # ── Raw season values ──────────────────────────────────────────────────────────
 
@@ -63,11 +82,11 @@ def init(bot_state: dict) -> None:
     SET_CHAMPS_START_DATE = bot_state.get('set_champs_start_date') or None
     SET_CHAMPS_END_DATE   = bot_state.get('set_champs_end_date')   or None
 
-    # Derived datetime strings — None if dates not configured
-    SEASON_START_DT     = (SEASON_START_DATE     + _c.START_OF_DAY) if SEASON_START_DATE     else None
-    SEASON_END_DT       = (SEASON_END_DATE       + _c.END_OF_DAY)   if SEASON_END_DATE       else None
-    SET_CHAMPS_START_DT = (SET_CHAMPS_START_DATE + _c.START_OF_DAY) if SET_CHAMPS_START_DATE else None
-    SET_CHAMPS_END_DT   = (SET_CHAMPS_END_DATE   + _c.END_OF_DAY)   if SET_CHAMPS_END_DATE   else None
+    # Derived datetime strings (DST-aware) — None if dates not configured
+    SEASON_START_DT     = _start_of_day_utc(SEASON_START_DATE)     if SEASON_START_DATE     else None
+    SEASON_END_DT       = _end_of_day_utc(SEASON_END_DATE)         if SEASON_END_DATE       else None
+    SET_CHAMPS_START_DT = _start_of_day_utc(SET_CHAMPS_START_DATE) if SET_CHAMPS_START_DATE else None
+    SET_CHAMPS_END_DT   = _end_of_day_utc(SET_CHAMPS_END_DATE)    if SET_CHAMPS_END_DATE   else None
 
     STANDINGS_SHEET_NAME         = CURRENT_SEASON + " Standings - User Reported"
     EVENTS_SHEET_NAME            = CURRENT_SEASON + " Events - User Reported"

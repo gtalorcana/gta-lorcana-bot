@@ -9,7 +9,7 @@ See README.md for project structure and links to all docs in docs/.
 - Season: S11
 - Start: 2026-02-13
 - End: 2026-04-24
-- Set Champs: 2026-04-04 → 2026-04-24
+- Set Champs: 2026-04-04 → 2026-04-26
 
 ---
 

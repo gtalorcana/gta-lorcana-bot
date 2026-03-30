@@ -55,9 +55,8 @@ UPCOMING_EVENTS_JSON_URL   = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/
 # These are overridden at runtime by Bot State values via season.init()
 CURRENT_SEASON      = os.getenv("CURRENT_SEASON", "S11")
 
-# RPH API date suffix helpers — used by season.py to build datetime strings
-START_OF_DAY = "T05%3A00%3A00.000Z"
-END_OF_DAY   = "T04%3A59%3A59.999Z"
+# Timezone used for converting dates to UTC timestamps for the RPH API
+TIMEZONE_ET = "America/Toronto"
 
 # Google Sheets Constants
 LEAGUE_SPREADSHEET_ID = "1dSv5lzVwhot1DR0e2FghyS7R1Vm1ODZtH3d8e3C55Zo"
