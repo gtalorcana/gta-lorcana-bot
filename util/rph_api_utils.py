@@ -63,14 +63,22 @@ class RphApi:
             current_page = _get_with_retry(self.session, RPH_GAME_STORES_URL, params)
             yield current_page['results']
 
-    def get_events(self, start_date_after, start_date_before, extra_params=None):
+    def get_events(self, start_date_after, start_date_before, extra_params=None, require_started=True):
+        """
+        Fetch RPH events and filter to Canadian stores.
+
+        require_started: if True (default), also drop events with starting_player_count == 0.
+            Set to False when pulling upcoming events (e.g. Set Champs preview) — upcoming
+            events haven't started, so their starting_player_count is always 0.
+        """
         results = []
         for page_results in self.fetch_events(start_date_after, start_date_before, extra_params=extra_params):
             for event in page_results:
-                # filter on Ontario, Canada stores and events with more than 0 people
-                if (event['store']['country'] == "CA" and
-                        event['starting_player_count'] > 0):
-                    results.append(event)
+                if event['store']['country'] != "CA":
+                    continue
+                if require_started and event['starting_player_count'] <= 0:
+                    continue
+                results.append(event)
         return results
 
     def fetch_events(self, start_date_after, start_date_before, extra_params=None):

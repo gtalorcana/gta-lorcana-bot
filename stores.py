@@ -1041,6 +1041,7 @@ def refresh_set_champs() -> tuple[int, list]:
         start_date_after=season.SET_CHAMPS_START_DT,
         start_date_before=season.SET_CHAMPS_END_DT,
         extra_params=override_params,
+        require_started=False,
     )
 
     filtered = [

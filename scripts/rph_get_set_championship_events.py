@@ -83,6 +83,7 @@ if __name__ == '__main__':
         start_date_after=season.SET_CHAMPS_START_DT,
         start_date_before=season.SET_CHAMPS_END_DT,
         extra_params=override_params,
+        require_started=False,
     )
 
     if not events:
