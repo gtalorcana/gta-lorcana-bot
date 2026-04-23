@@ -2,7 +2,8 @@ import time
 
 import requests
 
-from constants import RPH_EVENTS_URL, RPH_GAME_STORES_URL, RPH_STANDINGS_URL, RPH_MATCHES_URL, RPH_USERS_URL
+from constants import RPH_EVENTS_URL, RPH_EVENT_URL, RPH_GAME_STORES_URL, RPH_STANDINGS_URL, RPH_MATCHES_URL, \
+    RPH_USERS_URL
 
 _MAX_RETRIES = 3
 _RETRY_DELAY = 2  # seconds between retries
@@ -108,24 +109,18 @@ class RphApi:
             yield current_page['results']
 
     def get_event_by_id(self, event_id, extra_params=None):
-        results = []
-        for page_results in self.fetch_event_by_id(event_id, extra_params=extra_params):
-            for event in page_results:
-                # filter on Ontario, Canada stores and events with more than 0 people
-                if (event['store']['country'] == "CA" and
-                        event['starting_player_count'] > 0):
-                    results.append(event)
-        return results
 
-    def fetch_event_by_id(self, event_id, extra_params=None):
-        params = {'id': event_id}
-        if extra_params:
-            params.update(extra_params)
-            # Remove any keys explicitly set to None
-            params = {k: v for k, v in params.items() if v is not None}
+        result = None
+        event = self.fetch_event_by_id(event_id)
 
-        current_page = _get_with_retry(self.session, RPH_EVENTS_URL, params)
-        yield current_page['results']
+        # filter on Ontario, Canada stores and events with more than 0 people
+        if (event['store']['country'] == "CA" and event['starting_player_count'] > 0):
+            result = event
+        return result
+
+    def fetch_event_by_id(self, event_id):
+        current_page = _get_with_retry(self.session, RPH_EVENT_URL.format(event_id=event_id))
+        return current_page
 
     def get_standings_from_tournament_round_id(self, round_id):
         url = RPH_STANDINGS_URL.format(round_id=round_id)

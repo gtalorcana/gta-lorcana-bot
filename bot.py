@@ -1987,16 +1987,15 @@ async def invitational_roles(interaction: discord.Interaction, event_url: str):
 
     loop = asyncio.get_running_loop()
     try:
-        events = await loop.run_in_executor(None, _rph_api.get_event_by_id, event_id)
+        event = await loop.run_in_executor(None, _rph_api.get_event_by_id, event_id)
     except Exception as e:
         await interaction.followup.send(f"❌ Failed to fetch event: {e}", ephemeral=True)
         return
 
-    if not events:
+    if not event:
         await interaction.followup.send(f"❌ No event found for ID `{event_id}`.", ephemeral=True)
         return
 
-    event = events[0]
     if not event.get('tournament_phases') or not event['tournament_phases'][-1].get('rounds'):
         await interaction.followup.send("❌ Event has no tournament rounds.", ephemeral=True)
         return
