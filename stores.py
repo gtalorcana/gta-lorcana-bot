@@ -956,11 +956,9 @@ def fetch_event_status(event_id: int) -> dict | None:
         }
     """
     try:
-        pages = list(_rph_api.fetch_event_by_id(event_id))
-        results = [e for page in pages for e in page]
-        if not results:
+        event = _rph_api.fetch_event_by_id(event_id)
+        if not event:
             return None
-        event = results[0]
         registered = event.get('registered_user_count', 0)
         capacity   = event.get('capacity', 0)
         queue      = event.get('queue_status', '')

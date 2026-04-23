@@ -108,19 +108,17 @@ class RphApi:
             current_page = _get_with_retry(self.session, RPH_EVENTS_URL, params)
             yield current_page['results']
 
-    def get_event_by_id(self, event_id, extra_params=None):
-
-        result = None
+    def get_event_by_id(self, event_id):
         event = self.fetch_event_by_id(event_id)
-
+        if not event or 'store' not in event:
+            return None
         # filter on Ontario, Canada stores and events with more than 0 people
-        if (event['store']['country'] == "CA" and event['starting_player_count'] > 0):
-            result = event
-        return result
+        if event['store']['country'] == "CA" and event['starting_player_count'] > 0:
+            return event
+        return None
 
     def fetch_event_by_id(self, event_id):
-        current_page = _get_with_retry(self.session, RPH_EVENT_URL.format(event_id=event_id))
-        return current_page
+        return _get_with_retry(self.session, RPH_EVENT_URL.format(event_id=event_id))
 
     def get_standings_from_tournament_round_id(self, round_id):
         url = RPH_STANDINGS_URL.format(round_id=round_id)

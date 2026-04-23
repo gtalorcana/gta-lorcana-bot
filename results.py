@@ -258,23 +258,19 @@ def remove_event_data(thread_id):
     raise ValueError(f"No event data found for thread ID: {thread_id}")
 
 if __name__ == "__main__":
-    _fetch_single_event("https://tcg.ravensburgerplay.com/events/514678",1496686899673301002)
+    # Standalone: re-fetch and rewrite all standings without adding a new event.
+    # Reads whatever URLs are currently in the sheet and rewrites everything.
+    print("Running standalone standings refresh...")
+    existing_data = _gs.get_values(LEAGUE_SPREADSHEET_ID, season.EVENTS_RANGE_NAME)
+    existing_rows = [row for row in existing_data.get('values', []) if row and row[0]]
 
+    event_rows, standing_rows, _ = _fetch_event_rows_and_standings(existing_rows)
 
-# if __name__ == "__main__":
-#     # Standalone: re-fetch and rewrite all standings without adding a new event.
-#     # Reads whatever URLs are currently in the sheet and rewrites everything.
-#     print("Running standalone standings refresh...")
-#     existing_data = _gs.get_values(LEAGUE_SPREADSHEET_ID, season.EVENTS_RANGE_NAME)
-#     existing_rows = [row for row in existing_data.get('values', []) if row and row[0]]
-#
-#     event_rows, standing_rows, _ = _fetch_event_rows_and_standings(existing_rows)
-#
-#     _gs.update_values(LEAGUE_SPREADSHEET_ID, season.EVENTS_RANGE_NAME, "USER_ENTERED", event_rows)
-#     _gs.update_values(LEAGUE_SPREADSHEET_ID, season.STANDINGS_RANGE_NAME, "USER_ENTERED", standing_rows)
-#
-#     utc_dt   = datetime.now(timezone.utc)
-#     local_dt = utc_dt.astimezone().isoformat()
-#     _gs.update_values(LEAGUE_SPREADSHEET_ID, season.EVENTS_TIMESTAMP_RANGE_NAME, "USER_ENTERED", [['Last updated', local_dt]])
-#
-#     print(f"Done — {len(event_rows)} events, {len(standing_rows)} standings rows written.")
+    _gs.update_values(LEAGUE_SPREADSHEET_ID, season.EVENTS_RANGE_NAME, "USER_ENTERED", event_rows)
+    _gs.update_values(LEAGUE_SPREADSHEET_ID, season.STANDINGS_RANGE_NAME, "USER_ENTERED", standing_rows)
+
+    utc_dt   = datetime.now(timezone.utc)
+    local_dt = utc_dt.astimezone().isoformat()
+    _gs.update_values(LEAGUE_SPREADSHEET_ID, season.EVENTS_TIMESTAMP_RANGE_NAME, "USER_ENTERED", [['Last updated', local_dt]])
+
+    print(f"Done — {len(event_rows)} events, {len(standing_rows)} standings rows written.")
