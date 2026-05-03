@@ -2063,7 +2063,7 @@ async def invitational_roles(interaction: discord.Interaction, event_url: str):
         'super_rare': sr_entries,
     }
     await interaction.followup.send(
-        f"Check {_ch('mod') if MOD_CHANNEL_ID else '#mod-channel'} to confirm.", ephemeral=True
+        f"Check {mod_ch.mention} to confirm.", ephemeral=True
     )
 
 
