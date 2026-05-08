@@ -2090,17 +2090,34 @@ async def season_rollover(
 
     await interaction.response.defer(ephemeral=True)
 
+    if not re.match(r'^S\d+$', new_season):
+        await interaction.followup.send(
+            f"⚠️ `new_season` must look like `S12` (got `{new_season}`).", ephemeral=True
+        )
+        return
+
     # Validate date formats before touching anything
     date_fields = [("start_date", start_date), ("end_date", end_date),
                    ("set_champs_start", set_champs_start), ("set_champs_end", set_champs_end)]
+    parsed = {}
     for field_name, value in date_fields:
         try:
-            datetime.strptime(value, "%Y-%m-%d")
+            parsed[field_name] = datetime.strptime(value, "%Y-%m-%d").date()
         except ValueError:
             await interaction.followup.send(
                 f"⚠️ `{field_name}` must be YYYY-MM-DD, got `{value}`.", ephemeral=True
             )
             return
+
+    if not (parsed["start_date"] <= parsed["set_champs_start"]
+            <= parsed["set_champs_end"] <= parsed["end_date"]):
+        await interaction.followup.send(
+            f"⚠️ Dates must be ordered "
+            f"`start_date` ≤ `set_champs_start` ≤ `set_champs_end` ≤ `end_date`. "
+            f"Got {start_date} / {set_champs_start} / {set_champs_end} / {end_date}.",
+            ephemeral=True,
+        )
+        return
 
     loop = asyncio.get_running_loop()
 
