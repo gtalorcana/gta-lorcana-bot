@@ -2133,12 +2133,21 @@ async def season_rollover(
             )
             return
 
-    if not (parsed["start_date"] <= parsed["set_champs_start"]
-            <= parsed["set_champs_end"] <= parsed["end_date"]):
+    # Set Champs may end *after* the season end (e.g. S11: season ended Apr 24,
+    # set champs Apr 26). But it must start during the season.
+    ordered = (
+        parsed["start_date"] <= parsed["end_date"]
+        and parsed["start_date"] <= parsed["set_champs_start"] <= parsed["set_champs_end"]
+        and parsed["set_champs_start"] <= parsed["end_date"]
+    )
+    if not ordered:
         await interaction.followup.send(
-            f"⚠️ Dates must be ordered "
-            f"`start_date` ≤ `set_champs_start` ≤ `set_champs_end` ≤ `end_date`. "
-            f"Got {start_date} / {set_champs_start} / {set_champs_end} / {end_date}.",
+            f"⚠️ Date ordering invalid. Required: "
+            f"`start_date` ≤ `end_date`, "
+            f"`start_date` ≤ `set_champs_start` ≤ `set_champs_end`, and "
+            f"`set_champs_start` ≤ `end_date`. "
+            f"Got start={start_date}, end={end_date}, "
+            f"sc_start={set_champs_start}, sc_end={set_champs_end}.",
             ephemeral=True,
         )
         return
