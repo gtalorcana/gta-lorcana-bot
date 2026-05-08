@@ -1306,7 +1306,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 member = guild.get_member(suggestion['discord_id'])
                 if member:
                     current = {r.id for r in member.roles if r.id in rarity_id_set}
-                    for role_id, season in role_seasons.items():
+                    for role_id in role_seasons:
                         if role_id not in current:
                             role = guild.get_role(role_id)
                             if role:
@@ -1847,13 +1847,13 @@ async def link_command(interaction: discord.Interaction, member: discord.Member,
     if role_seasons:
         rarity_id_set = set(RARITY_ROLE_IDS)
         current = {r.id for r in member.roles if r.id in rarity_id_set}
-        for role_id, season in role_seasons.items():
+        for role_id, season_label in role_seasons.items():
             if role_id not in current:
                 discord_role = interaction.guild.get_role(role_id)
                 if discord_role:
                     try:
                         await member.add_roles(discord_role, reason="link-command")
-                        roles_assigned.append(f"**{RARITY_ROLE_NAMES.get(role_id, str(role_id))}** ({season})")
+                        roles_assigned.append(f"**{RARITY_ROLE_NAMES.get(role_id, str(role_id))}** ({season_label})")
                     except discord.HTTPException as e:
                         print(f"  ⚠ link: failed to assign role {role_id} to {member.display_name}: {e}")
 
@@ -1941,7 +1941,7 @@ async def sync_roles(interaction: discord.Interaction):
             continue
 
         current = {r.id for r in member.roles if r.id in rarity_id_set}
-        for role_id, season in role_seasons.items():
+        for role_id, season_label in role_seasons.items():
             if role_id not in current:
                 discord_role = interaction.guild.get_role(role_id)
                 if discord_role:
