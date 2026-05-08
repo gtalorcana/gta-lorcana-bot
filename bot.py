@@ -40,6 +40,7 @@ import gc
 import json
 import os
 import re
+import traceback
 
 import aiohttp
 import discord
@@ -117,6 +118,29 @@ bot = GtaLorcanaBot(
     intents=intents,
 )
 tree = bot.tree
+
+
+@tree.error
+async def on_app_command_error(
+    interaction: discord.Interaction,
+    error: app_commands.AppCommandError,
+):
+    """Surface slash-command crashes back to the invoker so it doesn't hang on 'thinking…'."""
+    inner = getattr(error, "original", error)
+    cmd = interaction.command.name if interaction.command else "?"
+    tb = "".join(traceback.format_exception(type(inner), inner, inner.__traceback__))
+    print(f"  ✗ /{cmd} crashed:\n{tb}")
+
+    summary = f"❌ `/{cmd}` crashed: `{type(inner).__name__}: {inner}`"
+    tb_block = f"```\n{tb[-1500:]}\n```"  # last ~1.5KB so we stay under Discord's 2000-char limit
+    body = summary + "\n" + tb_block
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(body, ephemeral=True)
+        else:
+            await interaction.response.send_message(body, ephemeral=True)
+    except discord.HTTPException:
+        pass  # interaction expired or message too long — log already captured above
 
 # Serializes all sheet writes — prevents concurrent threads from overwriting each other
 _sheet_lock = asyncio.Lock()
