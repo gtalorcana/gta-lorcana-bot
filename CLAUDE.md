@@ -6,10 +6,10 @@ See README.md for project structure and links to all docs in docs/.
 
 ## Current Season
 
-- Season: S11
-- Start: 2026-02-13
-- End: 2026-04-24
-- Set Champs: 2026-04-04 → 2026-04-26
+- Season: S12
+- Start: 2026-05-08
+- End: 2026-06-26
+- Set Champs: 2026-06-06 → 2026-07-05
 
 ---
 

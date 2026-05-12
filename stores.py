@@ -60,11 +60,18 @@ _DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _fetch_current_season_events() -> list:
-    """Fetch all Ontario Lorcana events for the current season from RPH."""
-    if not season.SEASON_START_DT or not season.SEASON_END_DT:
+    """Fetch Ontario Lorcana events for the current season (with lookback) from RPH.
+
+    Extends the query window back by WHERE_TO_PLAY_MIN_CONSECUTIVE_WEEKS before
+    the season start so that streaks spanning a season boundary are preserved.
+    """
+    if not season.SEASON_START_DATE or not season.SEASON_END_DT:
         raise RuntimeError("Season dates not configured — run /season-rollover to set them in Bot State.")
-    print(f"  → Fetching current season RPH events...")
-    events = _rph_api.get_events(season.SEASON_START_DT, season.SEASON_END_DT)
+    lookback_date = (date.fromisoformat(season.SEASON_START_DATE)
+                     - timedelta(weeks=WHERE_TO_PLAY_MIN_CONSECUTIVE_WEEKS))
+    start_dt = season._start_of_day_utc(lookback_date.isoformat())
+    print(f"  → Fetching RPH events ({lookback_date} → {season.SEASON_END_DATE})...")
+    events = _rph_api.get_events(start_dt, season.SEASON_END_DT)
     print(f"  ✓ {len(events)} events fetched")
     return events
 
