@@ -28,6 +28,6 @@ Admin commands are also accessible to any Discord user ID listed in `ADMIN_USER_
 | Task | When | What it does |
 |------|------|-------------|
 | `where_to_play_weekly` | Sundays at 11 PM ET | Edits (or posts) the `#where-to-play` messages |
-| `set_champs_daily` | Daily at 7 AM ET, 2 weeks before `SET_CHAMPS_START_DATE` through `SET_CHAMPS_END_DATE` | Refreshes the Set Champs tab in the League sheet from RPH |
+| `set_champs_daily` | Daily at 7 AM ET, from `SEASON_START_DATE` through `SET_CHAMPS_END_DATE` | Refreshes the Set Champs tab in the League sheet from RPH |
 | `rph_watcher` | Every 15 min | Checks watched events for open spots and DMs subscribers |
 | `keepalive` | Every 30 min | Heartbeat log |

@@ -22,7 +22,7 @@ The `set_champs_daily` task calls `refresh_set_champs()` in `stores.py` every mo
 Date | Time (Toronto) | Store Name | Full Address | Player Cap | Format | Event Name | RPH Link
 ```
 
-The task starts **2 weeks before** `SET_CHAMPS_START_DATE` so the sheet is populated ahead of time as stores register their events on RPH.
+The task starts on `SEASON_START_DATE` so the sheet is populated as soon as stores register their events on RPH (some post on day 1 of the season).
 
 **Manual run** (inspect output before writing):
 ```bash

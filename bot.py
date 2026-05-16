@@ -491,15 +491,15 @@ async def _post_set_champs(rows: list, loop) -> None:
 async def set_champs_daily():
     """
     Refreshes the Set Champs sheet once daily at 7:00 AM ET during the set champs window.
-    No-ops outside of SET_CHAMPS_START_DATE to SET_CHAMPS_END_DATE.
+    No-ops outside of SEASON_START_DATE to SET_CHAMPS_END_DATE.
     """
     now_et = _now_et()
     if now_et.hour != 7 or now_et.minute != 0:
         return
-    if not season.SET_CHAMPS_START_DATE or not season.SET_CHAMPS_END_DATE:
+    if not season.SEASON_START_DATE or not season.SET_CHAMPS_END_DATE:
         print(f"  ⚠ set_champs_daily: season dates not configured — skipping")
         return
-    _start = date.fromisoformat(season.SET_CHAMPS_START_DATE) - timedelta(weeks=2)
+    _start = date.fromisoformat(season.SEASON_START_DATE)
     _end   = date.fromisoformat(season.SET_CHAMPS_END_DATE)
     if not (_start <= now_et.date() <= _end):
         return
@@ -828,8 +828,7 @@ async def on_ready():
         print(f"  ♻ Where-to-play weekly task started (fires Sundays at {WHERE_TO_PLAY_POST_HOUR_ET}:00 ET)")
     if not set_champs_daily.is_running():
         set_champs_daily.start()
-        _sc_window_start = (date.fromisoformat(season.SET_CHAMPS_START_DATE) - timedelta(weeks=2)).isoformat() if season.SET_CHAMPS_START_DATE else '?'
-        print(f"  ♻ Set Champs daily task started (fires 7AM ET, {_sc_window_start} → {season.SET_CHAMPS_END_DATE})")
+        print(f"  ♻ Set Champs daily task started (fires 7AM ET, {season.SEASON_START_DATE} → {season.SET_CHAMPS_END_DATE})")
     if not rph_watcher.is_running():
         rph_watcher.start()
         print(f"  ♻ RPH event watcher started (polls every 15 min)")
