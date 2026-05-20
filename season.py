@@ -52,6 +52,7 @@ SET_CHAMPS_END_DT:   str = None
 STANDINGS_SHEET_NAME:         str = None
 EVENTS_SHEET_NAME:            str = None
 LEADERBOARD_SHEET_NAME:       str = None
+RESULTS_SHEET_NAME:           str = None
 SET_CHAMPS_EVENTS_SHEET_NAME: str = None
 
 # ── Derived range names ────────────────────────────────────────────────────────
@@ -60,6 +61,7 @@ STANDINGS_RANGE_NAME:         str = None
 EVENTS_RANGE_NAME:            str = None
 EVENTS_TIMESTAMP_RANGE_NAME:  str = None
 LEADERBOARD_RANGE_NAME:       str = None
+RESULTS_RANGE_NAME:           str = None
 SET_CHAMPS_EVENTS_RANGE_NAME: str = None
 
 
@@ -72,9 +74,9 @@ def init(bot_state: dict) -> None:
     global SET_CHAMPS_START_DATE, SET_CHAMPS_END_DATE
     global SEASON_START_DT, SEASON_END_DT, SET_CHAMPS_START_DT, SET_CHAMPS_END_DT
     global STANDINGS_SHEET_NAME, EVENTS_SHEET_NAME, LEADERBOARD_SHEET_NAME
-    global SET_CHAMPS_EVENTS_SHEET_NAME
+    global RESULTS_SHEET_NAME, SET_CHAMPS_EVENTS_SHEET_NAME
     global STANDINGS_RANGE_NAME, EVENTS_RANGE_NAME, EVENTS_TIMESTAMP_RANGE_NAME
-    global LEADERBOARD_RANGE_NAME, SET_CHAMPS_EVENTS_RANGE_NAME
+    global LEADERBOARD_RANGE_NAME, RESULTS_RANGE_NAME, SET_CHAMPS_EVENTS_RANGE_NAME
 
     CURRENT_SEASON        = bot_state.get('season',                _c.CURRENT_SEASON)
     SEASON_START_DATE     = bot_state.get('season_start_date')     or None
@@ -88,15 +90,17 @@ def init(bot_state: dict) -> None:
     SET_CHAMPS_START_DT = _start_of_day_utc(SET_CHAMPS_START_DATE) if SET_CHAMPS_START_DATE else None
     SET_CHAMPS_END_DT   = _end_of_day_utc(SET_CHAMPS_END_DATE)    if SET_CHAMPS_END_DATE   else None
 
-    STANDINGS_SHEET_NAME         = CURRENT_SEASON + " Standings - User Reported"
-    EVENTS_SHEET_NAME            = CURRENT_SEASON + " Events - User Reported"
+    STANDINGS_SHEET_NAME         = CURRENT_SEASON + " Standings"
+    EVENTS_SHEET_NAME            = CURRENT_SEASON + " Events"
     LEADERBOARD_SHEET_NAME       = CURRENT_SEASON + " Leaderboard"
+    RESULTS_SHEET_NAME           = CURRENT_SEASON + " Results"
     SET_CHAMPS_EVENTS_SHEET_NAME = CURRENT_SEASON + " Set Champs"
 
     STANDINGS_RANGE_NAME         = STANDINGS_SHEET_NAME         + "!A3:G"
     EVENTS_RANGE_NAME            = EVENTS_SHEET_NAME            + "!A2:G"
     EVENTS_TIMESTAMP_RANGE_NAME  = EVENTS_SHEET_NAME            + "!J1:K1"
     LEADERBOARD_RANGE_NAME       = LEADERBOARD_SHEET_NAME       + "!A2:D"
+    RESULTS_RANGE_NAME           = RESULTS_SHEET_NAME           + "!A2:O"
     SET_CHAMPS_EVENTS_RANGE_NAME = SET_CHAMPS_EVENTS_SHEET_NAME + "!A2:H"
 
     print(f"  ♻ Season: {CURRENT_SEASON}  ({SEASON_START_DATE} → {SEASON_END_DATE})")

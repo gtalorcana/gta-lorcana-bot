@@ -20,7 +20,8 @@ Example:
 ```
 
 What it does:
-- Creates four tabs in the League spreadsheet: `S12 Standings - User Reported`, `S12 Events - User Reported`, `S12 Leaderboard`, `S12 Set Champs`
+- Creates five tabs: `S12 Standings`, `S12 Events`, `S12 Leaderboard`, `S12 Results` (in the League spreadsheet), and `S12 Set Champs` (in the Bot Database spreadsheet)
+- Writes column headers into the `Results` tab
 - Updates the season keys in the Bot State sheet
 - Calls `season.init()` in memory — no redeploy needed
 
@@ -38,7 +39,7 @@ Example:
 ```
 
 What it does:
-- Reads all four season tabs from the League spreadsheet
+- Reads all four season tabs from the League spreadsheet (`Standings`, `Events`, `Leaderboard`, `Results`)
 - Creates matching tabs in the Archive spreadsheet and writes the data
 - If a tab already exists in the archive, data is overwritten (safe to re-run)
 - League sheet tabs are left intact — delete them manually when ready

@@ -764,16 +764,23 @@ def get_player_event_count(rph_username: str) -> tuple[int, str | None]:
 
 def create_season_sheets(new_season: str) -> list[str]:
     """
-    Create the four standard season tabs in the League spreadsheet for new_season.
-    Skips any tab that already exists (catches HttpError 400 with ALREADY_EXISTS).
-    Returns list of tab titles that were created.
+    Create the standard season tabs (Standings, Events, Leaderboard, Results in
+    the League sheet; Set Champs in the Bot Database sheet) for new_season.
+
+    Freshly-created Results and Leaderboard tabs are seeded with column headers
+    and the spill/per-row formulas operators rely on (column A spills players,
+    B–O are filled in row 2 and dragged down as the season progresses).
+
+    Skips any tab that already exists (catches HttpError 400 with ALREADY_EXISTS)
+    and does not re-seed those tabs. Returns list of tab titles that were created.
     """
     from googleapiclient.errors import HttpError as _HttpError
 
     league_titles = [
-        f"{new_season} Standings - User Reported",
-        f"{new_season} Events - User Reported",
+        f"{new_season} Standings",
+        f"{new_season} Events",
         f"{new_season} Leaderboard",
+        f"{new_season} Results",
     ]
     created = []
     for title in league_titles:
@@ -785,6 +792,73 @@ def create_season_sheets(new_season: str) -> list[str]:
                 print(f"  Sheet '{title}' already exists — skipping")
             else:
                 raise
+
+    # Seed headers + formulas into freshly-created Results and Leaderboard tabs.
+    # Per-row formulas (Results B2, L2, M2, N2, O2) are written only on row 2;
+    # the league operator drags them down as the player list (column A spill) grows.
+    leaderboard_title = f"{new_season} Leaderboard"
+    results_title     = f"{new_season} Results"
+    seed_ranges: list[dict] = []
+
+    if results_title in created:
+        seed_ranges.extend([
+            {
+                "range":  f"{results_title}!A1",
+                "values": [[
+                    "Players", "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th",
+                    "Points", "Events Attended",
+                    "Last Event of top 10 results", "Ranking of Last Event of top 10",
+                ]],
+            },
+            {
+                "range":  f"{results_title}!A2",
+                "values": [[f"=SORT(UNIQUE('{new_season} Standings'!D2:D))"]],
+            },
+            {
+                "range":  f"{results_title}!B2",
+                "values": [[
+                    f"=TRANSPOSE(FILTER(SORTN(FILTER('{new_season} Standings'!A:G,"
+                    f"('{new_season} Standings'!D:D=A2)),10,0,15,FALSE),{{0,0,0,0,0,1,0}}))"
+                ]],
+            },
+            {"range": f"{results_title}!L2", "values": [["=SUM(B2:K2)"]]},
+            {
+                "range":  f"{results_title}!M2",
+                "values": [[f"=COUNTIF('{new_season} Standings'!D:D,A2)"]],
+            },
+            {
+                "range":  f"{results_title}!N2",
+                "values": [[
+                    f"=MAX(FILTER(SORTN(FILTER('{new_season} Standings'!A:N,"
+                    f"('{new_season} Standings'!D:D=A2)),10,0,14,FALSE),"
+                    f"{{1,0,0,0,0,0,0,0,0,0,0,0,0,0}}))"
+                ]],
+            },
+            {
+                "range":  f"{results_title}!O2",
+                "values": [[
+                    f"=FILTER(FILTER('{new_season} Standings'!A:P,"
+                    f"('{new_season} Standings'!D:D=A2),"
+                    f"('{new_season} Standings'!A:A=N2)),"
+                    f"{{0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0}})"
+                ]],
+            },
+        ])
+
+    if leaderboard_title in created:
+        seed_ranges.append({
+            "range":  f"{leaderboard_title}!B1",
+            "values": [[
+                f"=FILTER(SORT(FILTER('{new_season} Results'!A2:O,"
+                f"(LEN('{new_season} Results'!A2:A)>0) * "
+                f"ISERROR(MATCH('{new_season} Results'!A2:A, 'Ban List'!A2:A,0))),"
+                f"12,FALSE,14,True,15,True),"
+                f"{{1,0,0,0,0,0,0,0,0,0,0,1,1,0,0}})"
+            ]],
+        })
+
+    if seed_ranges:
+        _gs.batch_update_values(LEAGUE_SPREADSHEET_ID, seed_ranges)
 
     set_champs_title = f"{new_season} Set Champs"
     try:
@@ -811,9 +885,10 @@ def archive_season_data(season_name: str) -> list[str]:
     from googleapiclient.errors import HttpError as _HttpError
 
     league_tabs = [
-        (f"{season_name} Standings - User Reported", "A1:G"),
-        (f"{season_name} Events - User Reported",    "A1:G"),
-        (f"{season_name} Leaderboard",               "A1:D"),
+        (f"{season_name} Standings",   "A1:G"),
+        (f"{season_name} Events",      "A1:G"),
+        (f"{season_name} Leaderboard", "A1:D"),
+        (f"{season_name} Results",     "A1:O"),
     ]
     db_tabs = [
         (f"{season_name} Set Champs", "A1:H"),
