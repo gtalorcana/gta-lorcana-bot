@@ -62,6 +62,12 @@ def _fetch_single_event(rph_url, thread_id, note=None, validate_date=False):
     if note == "Format: Core Constructed":
         gameplay_format_name = "Core Constructed"
 
+    if gameplay_format_name not in ["Core Constructed", "Infinity Constructed"]:
+        raise ValueError(
+            f"Event format {gameplay_format_name} is not (Core Constructed, Infinity Constructed)."
+        )
+
+
     event_date = event['start_datetime'][:10]
 
     if validate_date:
