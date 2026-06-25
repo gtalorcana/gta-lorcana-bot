@@ -2,7 +2,7 @@ import time
 
 import requests
 
-from constants import RPH_EVENTS_URL, RPH_EVENT_URL, RPH_GAME_STORES_URL, RPH_STANDINGS_URL, RPH_MATCHES_URL, \
+from constants import RPH_EVENTS_URL, RPH_EVENT_URL, RPH_GAME_STORES_URL, RPH_STANDINGS_URL, \
     RPH_USERS_URL
 
 _MAX_RETRIES = 3
@@ -124,11 +124,6 @@ class RphApi:
         url = RPH_STANDINGS_URL.format(round_id=round_id)
         data = _get_with_retry(self.session, url)
         return data['standings']
-
-    def get_matches_from_tournament_round_id(self, round_id):
-        url = RPH_MATCHES_URL.format(round_id=round_id)
-        data = _get_with_retry(self.session, url)
-        return data['matches']
 
     def lookup_user_by_username(self, username: str) -> dict | None:
         """

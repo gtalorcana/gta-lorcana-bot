@@ -13,21 +13,32 @@ from constants import (
 # these are shared rather than constructed per-module.
 
 
-def _is_all_draw_round(matches: list) -> bool:
+def _is_all_draw_round(last_standings: list, prev_standings: list) -> bool:
     """
-    Returns True if every completed non-bye match in the round was a draw
-    (intentional or unintentional). Uses the /matches endpoint directly.
+    Returns True if every non-bye match in the last round was a draw
+    (intentional or unintentional).
+
+    Derived from the still-anonymous /standings endpoint rather than /matches
+    (which RPH locked behind auth — it now 401s for anonymous requests).
+    `match_points` is a per-round cumulative snapshot, so the per-player delta
+    between the last two rounds recovers each player's last-round result:
+        +3 = win or bye (at most one bye per round)
+        +1 = draw (both players get +1)
+        +0 = loss
+    A real game always produces a +3/+0 pair, never +1/+1, so this can only
+    fail toward "not all-draw" (e.g. a player who dropped before the last round
+    shows +0) — never a false positive that would wrongly drop a real round.
     """
-    completed = [
-        m for m in matches
-        if m.get('status') == 'COMPLETE' and not m.get('match_is_bye')
+    prev_points = {s['player']['id']: s['match_points'] for s in prev_standings}
+    deltas = [
+        s['match_points'] - prev_points.get(s['player']['id'], 0)
+        for s in last_standings
     ]
-    if not completed:
-        return False
-    return all(
-        m.get('match_is_intentional_draw') or m.get('match_is_unintentional_draw')
-        for m in completed
-    )
+    byes = [d for d in deltas if d == 3]
+    non_bye = [d for d in deltas if d != 3]
+    # All-draw: at least one real match played, every non-bye player drew (+1),
+    # and at most one bye (+3) in the round.
+    return len(byes) <= 1 and len(non_bye) > 0 and all(d == 1 for d in non_bye)
 
 
 def _fetch_single_event(rph_url, thread_id, note=None, validate_date=False):
@@ -112,11 +123,12 @@ def _fetch_single_event(rph_url, thread_id, note=None, validate_date=False):
     print(f"    ✓ {len(standings)} standings retrieved for {event['store']['name']} {event_date}")
 
     if len(last_phase['rounds']) >= 2:
-        matches = _rph_api.get_matches_from_tournament_round_id(str(last_round_id))
-        if _is_all_draw_round(matches):
+        prev_round_id = last_phase['rounds'][-2]['id']
+        prev_standings = _rph_api.get_standings_from_tournament_round_id(str(prev_round_id))
+        if _is_all_draw_round(standings, prev_standings):
             print(f"    ⚠ Last round detected as all-draw — auto-using second-to-last round")
-            last_round_id = last_phase['rounds'][-2]['id']
-            standings = _rph_api.get_standings_from_tournament_round_id(str(last_round_id))
+            last_round_id = prev_round_id
+            standings = prev_standings
             event_row[2] = "Auto: all-draw last round removed"
             warnings.append("⚠️ Last round was all-draws — standings taken from the previous round automatically.")
 
