@@ -1694,12 +1694,12 @@ async def _find_and_reprocess_missed_threads(
     if after_date:
         threads = [t for t in threads if t.created_at and t.created_at >= after_date]
 
-    # Load startup-recheck state once up front
+    # Load existing recheck guard keys once up front (both modes): startup uses
+    # them to skip crash-looping threads; manual recheck uses them to clear any
+    # lingering guard key on success.
     loop = asyncio.get_running_loop()
-    attempted_keys: set[str] = set()
-    if startup:
-        state = await loop.run_in_executor(None, load_bot_state)
-        attempted_keys = {k for k in state if k.startswith('recheck:')}
+    state = await loop.run_in_executor(None, load_bot_state)
+    attempted_keys = {k for k in state if k.startswith('recheck:')}
 
     missed = []
     for thread in threads:
@@ -1747,8 +1747,11 @@ async def _find_and_reprocess_missed_threads(
         await thread.join()
         success = await run_results_reporting_pipeline(thread, starter_msg, is_retry=False)
 
-        if startup and success:
-            # Completed cleanly — remove the marker so it doesn't linger
+        if success and (startup or state_key in attempted_keys):
+            # Completed cleanly — remove the guard key so it doesn't linger.
+            # startup: clears the key we just set. manual: clears a stale key
+            # left by a prior failed startup attempt (only when one exists, so
+            # ordinary threads don't trigger a needless Bot State write).
             await loop.run_in_executor(None, delete_bot_state_key, state_key)
 
     return len(missed), len(threads)
