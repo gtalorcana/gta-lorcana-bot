@@ -106,6 +106,19 @@ def init(bot_state: dict) -> None:
     print(f"  ♻ Season: {CURRENT_SEASON}  ({SEASON_START_DATE} → {SEASON_END_DATE})")
 
 
+def is_past_reporting_cutoff(when: datetime) -> bool:
+    """
+    True if `when` (a timezone-aware datetime, e.g. a thread's created_at) falls
+    after the season-end date, evaluated in ET. Results must be reported by the
+    end of the season's final day — there is no reporting buffer, so the cutoff
+    is simply the season end. Always False when the season end is not configured.
+    """
+    if not SEASON_END_DATE:
+        return False
+    when_et_date = when.astimezone(_TZ_ET).date()
+    return when_et_date > date.fromisoformat(SEASON_END_DATE)
+
+
 # Initialise from constants defaults immediately so the module is usable
 # before on_ready fires (e.g. in tests or standalone scripts).
 init({})

@@ -912,6 +912,15 @@ async def process_results_reporting_thread(thread: discord.Thread) -> tuple[list
     Returns (standing_rows, warnings).
     Raises ValueError on bad URL, RuntimeError on API/sheet failure.
     """
+    # Reporting cutoff — reject threads created after the season's final day,
+    # regardless of whether the event itself is valid. Uses the thread's creation
+    # time (not "now") so on-time threads can still be retried/reprocessed later.
+    if season.is_past_reporting_cutoff(thread.created_at):
+        raise ValueError(
+            f"Results reporting closed at the end of {season.SEASON_END_DATE}.\n"
+            f"This thread was created after that, so it will not be processed."
+        )
+
     starter = await thread.fetch_message(thread.id)
     rph_url = starter.content.strip()
 

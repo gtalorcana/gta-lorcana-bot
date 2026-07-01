@@ -11,7 +11,14 @@
       "Bash(python3 -c \":*)",
       "Bash(python -c \":*)",
       "Bash(curl -s \"https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/tournament-rounds/107312/standings\")",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(git pull *)",
+      "Bash(git stash *)",
+      "Bash(python *)",
+      "Bash(git checkout *)",
+      "Bash(git merge *)",
+      "Bash(git branch *)",
+      "Bash(git *)"
     ]
   }
 }
