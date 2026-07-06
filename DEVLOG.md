@@ -82,10 +82,13 @@ instead of display name. RPH display names change over time, but the Discord↔P
 link is permanent — name matching silently missed renamed players.
 
 ### Changes
-- **`stores.py`** (`create_season_sheets`): seed a `Player ID` column on the `Results` tab
-  (col P, `VLOOKUP` display_name→playhub_id from Standings), and rebuild the `Leaderboard`
-  spill at `B1` using `CHOOSECOLS` (which can reorder) to output
-  `Player ID, Name, Points, Events` → new layout `A=Rank, B=Player ID, C=Name, D=Points, E=Events`.
+- **`stores.py`** (`create_season_sheets`): insert a `Player ID` column at `Results!A`
+  (name shifts to B; ID mirrors the name spill via `ARRAYFORMULA(VLOOKUP)` from Standings D→G),
+  and shift the per-row formulas right one column (C2/M2/N2/O2/P2). The `Leaderboard` now
+  seeds a header row (`A1:E1`) and a mask-based spill at `B2`
+  (`FILTER(SORT(FILTER(Results!A2:P,…),13,15,16),{1,1,…,1,1,0,0})`) →
+  layout `A=Rank, B=Player ID, C=Name, D=Points, E=Events`. Anchoring at B2 (row 1 = header)
+  keeps it aligned with `/sync-roles` reading from row 2.
 - **`season.py`**: `LEADERBOARD_RANGE_NAME` `A2:D`→`A2:E`, `RESULTS_RANGE_NAME` `A2:O`→`A2:P`.
 - **`bot.py`** (`sync_roles`): read new column positions, key earners by ID (name fallback),
   pass `playhub_id` into `batch_upsert_player_roles` so registry writes match by ID too.

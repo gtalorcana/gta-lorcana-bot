@@ -794,8 +794,9 @@ def create_season_sheets(new_season: str) -> list[str]:
                 raise
 
     # Seed headers + formulas into freshly-created Results and Leaderboard tabs.
-    # Per-row formulas (Results B2, L2, M2, N2, O2) are written only on row 2;
-    # the league operator drags them down as the player list (column A spill) grows.
+    # Columns A (Player ID) and B (Players) auto-spill; the per-row formulas
+    # (Results C2, M2, N2, O2, P2) are written only on row 2 and the operator
+    # drags them down as the player list grows.
     leaderboard_title = f"{new_season} Leaderboard"
     results_title     = f"{new_season} Results"
     seed_ranges: list[dict] = []
@@ -805,70 +806,76 @@ def create_season_sheets(new_season: str) -> list[str]:
             {
                 "range":  f"{results_title}!A1",
                 "values": [[
-                    "Players", "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th",
+                    "Player ID", "Players",
+                    "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th",
                     "Points", "Events Attended",
                     "Last Event of top 10 results", "Ranking of Last Event of top 10",
-                    "Player ID",
                 ]],
-            },
-            {
-                "range":  f"{results_title}!A2",
-                "values": [[f"=SORT(UNIQUE('{new_season} Standings'!D2:D))"]],
             },
             {
                 "range":  f"{results_title}!B2",
+                "values": [[f"=SORT(UNIQUE('{new_season} Standings'!D2:D))"]],
+            },
+            {
+                # Player ID (col A) looked up from Standings by display name (D→G),
+                # mirroring the name spill in B. Stable key for /sync-roles registry
+                # matching — RPH display names can change, IDs don't.
+                "range":  f"{results_title}!A2",
+                "values": [[
+                    f"=ARRAYFORMULA(IF(LEN(B2:B),IFERROR(VLOOKUP(B2:B,"
+                    f"{{'{new_season} Standings'!D:D,'{new_season} Standings'!G:G}},2,FALSE),),))"
+                ]],
+            },
+            {
+                "range":  f"{results_title}!C2",
                 "values": [[
                     f"=TRANSPOSE(FILTER(SORTN(FILTER('{new_season} Standings'!A:G,"
-                    f"('{new_season} Standings'!D:D=A2)),10,0,15,FALSE),{{0,0,0,0,0,1,0}}))"
+                    f"('{new_season} Standings'!D:D=B2)),10,0,15,FALSE),{{0,0,0,0,0,1,0}}))"
                 ]],
             },
-            {"range": f"{results_title}!L2", "values": [["=SUM(B2:K2)"]]},
-            {
-                "range":  f"{results_title}!M2",
-                "values": [[f"=COUNTIF('{new_season} Standings'!D:D,A2)"]],
-            },
+            {"range": f"{results_title}!M2", "values": [["=SUM(C2:L2)"]]},
             {
                 "range":  f"{results_title}!N2",
-                "values": [[
-                    f"=MAX(FILTER(SORTN(FILTER('{new_season} Standings'!A:N,"
-                    f"('{new_season} Standings'!D:D=A2)),10,0,14,FALSE),"
-                    f"{{1,0,0,0,0,0,0,0,0,0,0,0,0,0}}))"
-                ]],
+                "values": [[f"=COUNTIF('{new_season} Standings'!D:D,B2)"]],
             },
             {
                 "range":  f"{results_title}!O2",
                 "values": [[
-                    f"=FILTER(FILTER('{new_season} Standings'!A:P,"
-                    f"('{new_season} Standings'!D:D=A2),"
-                    f"('{new_season} Standings'!A:A=N2)),"
-                    f"{{0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0}})"
+                    f"=MAX(FILTER(SORTN(FILTER('{new_season} Standings'!A:N,"
+                    f"('{new_season} Standings'!D:D=B2)),10,0,14,FALSE),"
+                    f"{{1,0,0,0,0,0,0,0,0,0,0,0,0,0}}))"
                 ]],
             },
             {
-                # Player ID looked up from Standings by display name (D→G).
-                # Stable key for /sync-roles registry matching — names can change, IDs don't.
                 "range":  f"{results_title}!P2",
                 "values": [[
-                    f"=IFERROR(VLOOKUP(A2,"
-                    f"{{'{new_season} Standings'!D:D,'{new_season} Standings'!G:G}},"
-                    f"2,FALSE),\"\")"
+                    f"=FILTER(FILTER('{new_season} Standings'!A:P,"
+                    f"('{new_season} Standings'!D:D=B2),"
+                    f"('{new_season} Standings'!A:A=O2)),"
+                    f"{{0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0}})"
                 ]],
             },
         ])
 
     if leaderboard_title in created:
-        # Rank lives in column A (operator-filled). The spill starts at B1 and
-        # produces Player ID, Name, Points, Events (in that order) via CHOOSECOLS,
-        # which — unlike a column mask — can reorder the ID ahead of the name.
-        # Source Results!A2:P columns picked: 16=Player ID, 1=Players, 12=Points, 13=Events.
+        # Row 1 is a header row and the spill is anchored at B2, so /sync-roles
+        # reads data from row 2 (range A2:E). Column A (Rank) is operator-filled.
+        # Layout: A=Rank, B=Player ID, C=Name, D=Points, E=Events Attended.
         seed_ranges.append({
-            "range":  f"{leaderboard_title}!B1",
+            "range":  f"{leaderboard_title}!A1",
+            "values": [["Rank", "Player ID", "Name", "Points", "Events Attended"]],
+        })
+        # Ban-filter players from Results (by name, col B), sort by Points (col 13)
+        # with Last-Event/Ranking tiebreakers (15, 16), and keep ID, Name, Points,
+        # Events (source cols 1, 2, 13, 14) via the column mask.
+        seed_ranges.append({
+            "range":  f"{leaderboard_title}!B2",
             "values": [[
-                f"=CHOOSECOLS(SORT(FILTER('{new_season} Results'!A2:P,"
-                f"(LEN('{new_season} Results'!A2:A)>0) * "
-                f"ISERROR(MATCH('{new_season} Results'!A2:A, 'Ban List'!A2:A,0))),"
-                f"12,FALSE,14,True,15,True),"
-                f"16,1,12,13)"
+                f"=FILTER(SORT(FILTER('{new_season} Results'!A2:P,"
+                f"(LEN('{new_season} Results'!B2:B)>0) * "
+                f"ISERROR(MATCH('{new_season} Results'!B2:B, 'Ban List'!A2:A,0))),"
+                f"13,FALSE,15,True,16,True),"
+                f"{{1,1,0,0,0,0,0,0,0,0,0,0,1,1,0,0}})"
             ]],
         })
 
