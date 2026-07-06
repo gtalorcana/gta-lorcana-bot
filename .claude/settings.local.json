@@ -18,7 +18,11 @@
       "Bash(git checkout *)",
       "Bash(git merge *)",
       "Bash(git branch *)",
-      "Bash(git *)"
+      "Bash(git *)",
+      "Bash(fly version *)",
+      "Bash(fly auth *)",
+      "PowerShell($fly = \"C:\\\\Users\\\\Ryan\\\\.fly\\\\bin\\\\flyctl.exe\"; & $fly auth whoami)",
+      "Bash(PYTHONIOENCODING=utf-8 python *)"
     ]
   }
 }
