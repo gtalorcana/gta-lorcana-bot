@@ -764,8 +764,9 @@ def get_player_event_count(rph_username: str) -> tuple[int, str | None]:
 
 def create_season_sheets(new_season: str) -> list[str]:
     """
-    Create the standard season tabs (Standings, Events, Leaderboard, Results in
-    the League sheet; Set Champs in the Bot Database sheet) for new_season.
+    Create the standard season tabs in the League sheet (left-to-right:
+    Leaderboard, Results, Standings, Events) plus Set Champs in the Bot Database
+    sheet, for new_season.
 
     Freshly-created tabs are seeded with their column headers. Results and
     Leaderboard also get the spill/per-row formulas operators rely on (Results
@@ -777,16 +778,17 @@ def create_season_sheets(new_season: str) -> list[str]:
     """
     from googleapiclient.errors import HttpError as _HttpError
 
+    # Left-to-right tab order when opening the sheet: Leaderboard first.
     league_titles = [
-        f"{new_season} Standings",
-        f"{new_season} Events",
         f"{new_season} Leaderboard",
         f"{new_season} Results",
+        f"{new_season} Standings",
+        f"{new_season} Events",
     ]
     created = []
-    for title in league_titles:
+    for idx, title in enumerate(league_titles):
         try:
-            _gs.add_sheet(LEAGUE_SPREADSHEET_ID, title)
+            _gs.add_sheet(LEAGUE_SPREADSHEET_ID, title, index=idx)
             created.append(title)
         except _HttpError as e:
             if e.status_code == 400 and 'ALREADY_EXISTS' in str(e):
