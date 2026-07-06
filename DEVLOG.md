@@ -96,6 +96,8 @@ link is permanent — name matching silently missed renamed players.
   Added a final pass that calls `_merge_duplicate_rows` for each touched Discord ID the
   registry snapshot shows more than once — collapsing pre-existing duplicate rows in the same
   run (scoped to matched rows, so it's not a full read per player). Reported in the summary.
+- **`stores.py`** also now seeds header rows (row 1) for the `Standings` and `Events` tabs on
+  rollover — previously they were created blank and the operator added titles by hand.
 - **Docs**: `google-sheets.md` (new League Sheet Tabs section), `roles.md`.
 
 ### Rollout note

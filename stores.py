@@ -767,9 +767,10 @@ def create_season_sheets(new_season: str) -> list[str]:
     Create the standard season tabs (Standings, Events, Leaderboard, Results in
     the League sheet; Set Champs in the Bot Database sheet) for new_season.
 
-    Freshly-created Results and Leaderboard tabs are seeded with column headers
-    and the spill/per-row formulas operators rely on (column A spills players,
-    B–O are filled in row 2 and dragged down as the season progresses).
+    Freshly-created tabs are seeded with their column headers. Results and
+    Leaderboard also get the spill/per-row formulas operators rely on (Results
+    cols A/B auto-spill, C–P are dragged down; Leaderboard spills from B2).
+    Standings and Events get header rows only — the results pipeline fills them.
 
     Skips any tab that already exists (catches HttpError 400 with ALREADY_EXISTS)
     and does not re-seed those tabs. Returns list of tab titles that were created.
@@ -884,6 +885,22 @@ def create_season_sheets(new_season: str) -> list[str]:
                 f"13,FALSE,15,True,16,True),"
                 f"{{1,1,0,0,0,0,0,0,0,0,0,0,1,1,0,0}})"
             ]],
+        })
+
+    # Standings and Events are written by the results pipeline; seed only their
+    # column headers (row 1). Standings data starts at row 3 (A3:G), Events at
+    # row 2 (A2:G) — see season.py range names.
+    standings_title = f"{new_season} Standings"
+    events_title    = f"{new_season} Events"
+    if standings_title in created:
+        seed_ranges.append({
+            "range":  f"{standings_title}!A1",
+            "values": [["Date", "Store", "Rank", "Players", "Match Record", "Points", "Playhub User ID"]],
+        })
+    if events_title in created:
+        seed_ranges.append({
+            "range":  f"{events_title}!A1",
+            "values": [["RPH Link", "Discord Thread ID", "Notes", "Date", "Store", "Format", "# Players"]],
         })
 
     if seed_ranges:
