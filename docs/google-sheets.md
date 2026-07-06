@@ -25,6 +25,11 @@ Created by `/season-rollover`. `Standings` and `Events` are written by the resul
 > registry by **Player ID** (col B), falling back to Name only when the ID is blank — because RPH
 > display names change over time but the Discord↔Playhub ID link is permanent.
 
+**`Ban List`** — a persistent (non-season) tab in the League sheet. Banned players are listed by
+**Playhub ID in column A** (col B is a free-text name for reference). The Leaderboard formula
+excludes any Results row whose Player ID matches `Ban List!A2:A`. `/season-rollover` recreates the
+tab (empty) if it's ever missing, since a broken reference would `#REF!` the whole Leaderboard.
+
 ---
 
 ## Bot Database Sheet Tabs

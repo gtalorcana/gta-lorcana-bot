@@ -875,15 +875,15 @@ def create_season_sheets(new_season: str) -> list[str]:
             "range":  f"{leaderboard_title}!A2",
             "values": [["=ARRAYFORMULA(IF(LEN(C2:C),SEQUENCE(ROWS(C2:C)),\"\"))"]],
         })
-        # Ban-filter players from Results (by name, col B), sort by Points (col 13)
-        # with Last-Event/Ranking tiebreakers (15, 16), and keep ID, Name, Points,
-        # Events (source cols 1, 2, 13, 14) via the column mask.
+        # Ban-filter by Player ID (Results col A vs Ban List col A) — RPH IDs are
+        # stable, display names aren't. Sort by Points (col 13) with Last-Event/
+        # Ranking tiebreakers (15, 16), keep ID/Name/Points/Events (cols 1,2,13,14).
         seed_ranges.append({
             "range":  f"{leaderboard_title}!B2",
             "values": [[
                 f"=FILTER(SORT(FILTER('{new_season} Results'!A2:P,"
                 f"(LEN('{new_season} Results'!B2:B)>0) * "
-                f"ISERROR(MATCH('{new_season} Results'!B2:B, 'Ban List'!A2:A,0))),"
+                f"ISERROR(MATCH('{new_season} Results'!A2:A, 'Ban List'!A2:A,0))),"
                 f"13,FALSE,15,True,16,True),"
                 f"{{1,1,0,0,0,0,0,0,0,0,0,0,1,1,0,0}})"
             ]],
@@ -904,6 +904,22 @@ def create_season_sheets(new_season: str) -> list[str]:
             "range":  f"{events_title}!A1",
             "values": [["RPH Link", "Discord Thread ID", "Notes", "Date", "Store", "Format", "# Players"]],
         })
+
+    # Ensure the persistent (non-season) Ban List tab exists — the Leaderboard
+    # formula references it, so a missing tab would #REF the whole leaderboard.
+    # Banned players are matched by Playhub ID (col A). Created empty if absent;
+    # left untouched (content preserved) if it already exists.
+    try:
+        _gs.add_sheet(LEAGUE_SPREADSHEET_ID, "Ban List")
+        seed_ranges.append({
+            "range":  "Ban List!A1",
+            "values": [["Playhub ID", "Player Name (reference)"]],
+        })
+    except _HttpError as e:
+        if e.status_code == 400 and 'ALREADY_EXISTS' in str(e):
+            print("  Sheet 'Ban List' already exists — skipping")
+        else:
+            raise
 
     if seed_ranges:
         _gs.batch_update_values(LEAGUE_SPREADSHEET_ID, seed_ranges)

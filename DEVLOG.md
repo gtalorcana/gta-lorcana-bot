@@ -97,7 +97,11 @@ link is permanent — name matching silently missed renamed players.
   registry snapshot shows more than once — collapsing pre-existing duplicate rows in the same
   run (scoped to matched rows, so it's not a full read per player). Reported in the summary.
 - **`stores.py`** also now seeds header rows (row 1) for the `Standings` and `Events` tabs on
-  rollover — previously they were created blank and the operator added titles by hand.
+  rollover — previously they were created blank and the operator added titles by hand. The four
+  League tabs are created left-to-right as Leaderboard/Results/Standings/Events (via a new
+  `index` arg on `add_sheet`), and rollover ensures a persistent `Ban List` tab exists.
+- The Leaderboard **ban filter matches by Playhub ID** (Results col A vs `Ban List!A2:A`), not
+  display name — stable key, consistent with the sync-roles change.
 - **Docs**: `google-sheets.md` (new League Sheet Tabs section), `roles.md`.
 
 ### Rollout note
