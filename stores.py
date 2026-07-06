@@ -859,11 +859,18 @@ def create_season_sheets(new_season: str) -> list[str]:
 
     if leaderboard_title in created:
         # Row 1 is a header row and the spill is anchored at B2, so /sync-roles
-        # reads data from row 2 (range A2:E). Column A (Rank) is operator-filled.
+        # reads data from row 2 (range A2:E).
         # Layout: A=Rank, B=Player ID, C=Name, D=Points, E=Events Attended.
         seed_ranges.append({
             "range":  f"{leaderboard_title}!A1",
             "values": [["Rank", "Player ID", "Name", "Points", "Events Attended"]],
+        })
+        # Rank = sequential leaderboard position (1..N), auto-sized to the spill.
+        # Keyed on Name (col C), which is always present — Player ID (col B) can be
+        # blank if a lookup missed, which would break the numbering.
+        seed_ranges.append({
+            "range":  f"{leaderboard_title}!A2",
+            "values": [["=ARRAYFORMULA(IF(LEN(C2:C),SEQUENCE(ROWS(C2:C)),\"\"))"]],
         })
         # Ban-filter players from Results (by name, col B), sort by Points (col 13)
         # with Last-Event/Ranking tiebreakers (15, 16), and keep ID, Name, Points,

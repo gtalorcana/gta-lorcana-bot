@@ -19,7 +19,7 @@ Created by `/season-rollover`. `Standings` and `Events` are written by the resul
 |-----|---------|-------|
 | `S## Standings` | date, store, rank, display_name, record, match_points, playhub_id | A–G; one row per player per event |
 | `S## Results` | **Player ID**, Players, 1st…10th, Points, Events Attended, Last Event…, Ranking… | A–P; Player ID (col A) `VLOOKUP`ed from Standings (display_name → playhub_id), mirroring the name spill in col B |
-| `S## Leaderboard` | Rank, **Player ID**, Name, Points, Events Attended | A–E; row 1 = header, A is operator-filled, B–E spill from a mask formula at `B2` |
+| `S## Leaderboard` | Rank, **Player ID**, Name, Points, Events Attended | A–E; row 1 = header, A auto-sequences (1..N) off the spill, B–E spill from a mask formula at `B2` |
 
 > `/sync-roles` reads the Leaderboard by column position (`A2:E`) and matches players to the
 > registry by **Player ID** (col B), falling back to Name only when the ID is blank — because RPH
