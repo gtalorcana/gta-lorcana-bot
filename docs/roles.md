@@ -15,7 +15,7 @@ Members earn rarity roles based on league participation. Roles are additive — 
 ## How It Works
 
 1. Every time results are processed, the bot fuzzy-matches any new Playhub players against Discord members and posts suggestions to the mod channel. Mods react ✅/❌ to confirm or skip each match.
-2. At season end, run `/sync-roles` to compute and apply Uncommon/Rare upgrades based on the full standings.
+2. At season end, run `/sync-roles` to compute and apply Uncommon/Rare upgrades based on the full standings. It reads the `Leaderboard` tab and matches each earner to the registry by **Playhub ID** (the `Player ID` column), falling back to display name only when the ID is blank — so a player who renamed on RPH since linking still gets their roles.
 3. After an invitational, run `/invitational-roles <event_url>` to preview and assign Super Rare / Legendary.
 
 ---

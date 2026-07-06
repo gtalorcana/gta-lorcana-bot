@@ -808,6 +808,7 @@ def create_season_sheets(new_season: str) -> list[str]:
                     "Players", "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th",
                     "Points", "Events Attended",
                     "Last Event of top 10 results", "Ranking of Last Event of top 10",
+                    "Player ID",
                 ]],
             },
             {
@@ -843,17 +844,31 @@ def create_season_sheets(new_season: str) -> list[str]:
                     f"{{0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0}})"
                 ]],
             },
+            {
+                # Player ID looked up from Standings by display name (D→G).
+                # Stable key for /sync-roles registry matching — names can change, IDs don't.
+                "range":  f"{results_title}!P2",
+                "values": [[
+                    f"=IFERROR(VLOOKUP(A2,"
+                    f"{{'{new_season} Standings'!D:D,'{new_season} Standings'!G:G}},"
+                    f"2,FALSE),\"\")"
+                ]],
+            },
         ])
 
     if leaderboard_title in created:
+        # Rank lives in column A (operator-filled). The spill starts at B1 and
+        # produces Player ID, Name, Points, Events (in that order) via CHOOSECOLS,
+        # which — unlike a column mask — can reorder the ID ahead of the name.
+        # Source Results!A2:P columns picked: 16=Player ID, 1=Players, 12=Points, 13=Events.
         seed_ranges.append({
             "range":  f"{leaderboard_title}!B1",
             "values": [[
-                f"=FILTER(SORT(FILTER('{new_season} Results'!A2:O,"
+                f"=CHOOSECOLS(SORT(FILTER('{new_season} Results'!A2:P,"
                 f"(LEN('{new_season} Results'!A2:A)>0) * "
                 f"ISERROR(MATCH('{new_season} Results'!A2:A, 'Ban List'!A2:A,0))),"
                 f"12,FALSE,14,True,15,True),"
-                f"{{1,0,0,0,0,0,0,0,0,0,0,1,1,0,0}})"
+                f"16,1,12,13)"
             ]],
         })
 

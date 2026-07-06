@@ -85,6 +85,7 @@ from roles import (
     link_player,
     upsert_player_roles,
     batch_upsert_player_roles,
+    _merge_duplicate_rows,
     compute_earned_roles,
     RARITY_ROLE_IDS,
     RARITY_ROLE_NAMES,
@@ -1926,30 +1927,45 @@ async def sync_roles(interaction: discord.Interaction):
     )
     leaderboard_rows = lb_data.get('values', [])
 
-    # 2. Build earned dict: {player_name_lower: (display_name, {role_id: CURRENT_SEASON})}
-    earned_by_name: dict[str, tuple[str, dict[int, str]]] = {}
+    # 2. Build earners from the leaderboard.
+    #    Layout: A=rank, B=Player ID, C=Name, D=Points, E=Events Attended.
+    #    Player ID is the stable key — RPH display names change over time, so we
+    #    match players to the registry by ID (name only as a fallback).
+    earners_meta = []   # [{'id', 'name', 'roles'}]
+    seen = set()
     for row in leaderboard_rows:
-        if len(row) < 2:
+        if len(row) < 3:
             continue
         try:
             rank = int(row[0])
         except (ValueError, IndexError):
             continue
-        player_name = row[1].strip()
+        playhub_id  = row[1].strip() if len(row) > 1 else ''
+        player_name = row[2].strip() if len(row) > 2 else ''
         try:
-            events_played = int(row[3]) if len(row) > 3 and row[3] else 0
+            events_played = int(row[4]) if len(row) > 4 and row[4] else 0
         except ValueError:
             events_played = 0
         earned = compute_earned_roles(rank, events_played)
-        if earned:
-            earned_by_name[player_name.lower()] = (player_name, {r: season.CURRENT_SEASON for r in earned})
+        if not earned:
+            continue
+        key = playhub_id or player_name.lower()   # collapse duplicate rows (e.g. a mid-season rename)
+        if key in seen:
+            continue
+        seen.add(key)
+        earners_meta.append({
+            'id':    playhub_id,
+            'name':  player_name,
+            'roles': {r: season.CURRENT_SEASON for r in earned},
+        })
 
-    if not earned_by_name:
+    if not earners_meta:
         await interaction.followup.send("✅ No players have earned roles this season.", ephemeral=True)
         return
 
-    # 3. Batch-upsert all role changes in one registry read + one API write
-    earners = [(name, roles, None) for name, roles in earned_by_name.values()]
+    # 3. Batch-upsert all role changes in one registry read + one API write.
+    #    Pass the Playhub ID so the registry matches by stable ID, not display name.
+    earners = [(m['name'], m['roles'], m['id'] or None) for m in earners_meta]
     try:
         await loop.run_in_executor(None, batch_upsert_player_roles, earners)
     except Exception as e:
@@ -1957,26 +1973,31 @@ async def sync_roles(interaction: discord.Interaction):
 
     # 4. Read registry once for Discord role assignment
     registry = await loop.run_in_executor(None, get_player_registry)
+    registry_by_id   = {r['playhub_id']: r for r in registry if r['playhub_id']}
     registry_by_name = {r['playhub_name'].lower(): r for r in registry}
 
     rarity_id_set = set(RARITY_ROLE_IDS)
     applied   = []   # (member_mention, role_name)
     unlinked  = []   # player names who earned roles but have no Discord link
+    matched_discord_ids: set[int] = set()   # linked players we touched — dup-row merge candidates
 
-    # 5. Assign Discord roles for linked players
-    for player_name_lower, (player_name_display, role_seasons) in earned_by_name.items():
-        reg_entry = registry_by_name.get(player_name_lower)
+    # 5. Assign Discord roles — match by Playhub ID first, name as fallback
+    for m in earners_meta:
+        reg_entry = registry_by_id.get(m['id']) if m['id'] else None
+        if reg_entry is None:
+            reg_entry = registry_by_name.get(m['name'].lower())
         if not reg_entry or not reg_entry['discord_id']:
-            unlinked.append(player_name_display)
+            unlinked.append(m['name'])
             continue
+        matched_discord_ids.add(reg_entry['discord_id'])
 
         member = interaction.guild.get_member(reg_entry['discord_id'])
         if not member:
-            unlinked.append(player_name_display)
+            unlinked.append(m['name'])
             continue
 
         current = {r.id for r in member.roles if r.id in rarity_id_set}
-        for role_id, season_label in role_seasons.items():
+        for role_id, season_label in m['roles'].items():
             if role_id not in current:
                 discord_role = interaction.guild.get_role(role_id)
                 if discord_role:
@@ -1985,6 +2006,23 @@ async def sync_roles(interaction: discord.Interaction):
                         applied.append((member.mention, RARITY_ROLE_NAMES.get(role_id, str(role_id))))
                     except discord.HTTPException as e:
                         print(f"  ⚠ sync-roles: failed to assign {role_id} to {member.display_name}: {e}")
+
+    # 6. Collapse any pre-existing duplicate registry rows for the players we
+    #    touched (same Discord ID spread across multiple rows). Scoped to matched
+    #    rows, and only fired when the snapshot already shows a duplicate — so we
+    #    don't pay a full registry read per player.
+    dup_counts: dict[int, int] = {}
+    for r in registry:
+        if r['discord_id']:
+            dup_counts[r['discord_id']] = dup_counts.get(r['discord_id'], 0) + 1
+    merged = 0
+    for did in matched_discord_ids:
+        if dup_counts.get(did, 0) > 1:
+            try:
+                await loop.run_in_executor(None, _merge_duplicate_rows, did)
+                merged += 1
+            except Exception as e:
+                print(f"  ⚠ sync-roles: dedupe failed for discord_id {did}: {e}")
 
     mod_ch = get_channel_by_id(interaction.guild, MOD_CHANNEL_ID)
     if mod_ch and (applied or unlinked):
@@ -2003,6 +2041,8 @@ async def sync_roles(interaction: discord.Interaction):
     summary = f"✅ Sync complete — {len(applied)} role(s) assigned"
     if unlinked:
         summary += f", {len(unlinked)} unlinked player(s) will get roles when they /link"
+    if merged:
+        summary += f", {merged} duplicate registry row(s) merged"
     await interaction.followup.send(summary + ".", ephemeral=True)
 
 

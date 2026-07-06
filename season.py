@@ -99,8 +99,8 @@ def init(bot_state: dict) -> None:
     STANDINGS_RANGE_NAME         = STANDINGS_SHEET_NAME         + "!A3:G"
     EVENTS_RANGE_NAME            = EVENTS_SHEET_NAME            + "!A2:G"
     EVENTS_TIMESTAMP_RANGE_NAME  = EVENTS_SHEET_NAME            + "!J1:K1"
-    LEADERBOARD_RANGE_NAME       = LEADERBOARD_SHEET_NAME       + "!A2:D"
-    RESULTS_RANGE_NAME           = RESULTS_SHEET_NAME           + "!A2:O"
+    LEADERBOARD_RANGE_NAME       = LEADERBOARD_SHEET_NAME       + "!A2:E"
+    RESULTS_RANGE_NAME           = RESULTS_SHEET_NAME           + "!A2:P"
     SET_CHAMPS_EVENTS_RANGE_NAME = SET_CHAMPS_EVENTS_SHEET_NAME + "!A2:H"
 
     print(f"  ♻ Season: {CURRENT_SEASON}  ({SEASON_START_DATE} → {SEASON_END_DATE})")

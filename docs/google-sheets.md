@@ -10,6 +10,23 @@
 
 ---
 
+## League Sheet Tabs (per season)
+
+Created by `/season-rollover`. `Standings` and `Events` are written by the results pipeline;
+`Results` and `Leaderboard` are formula-driven (seeded once, then dragged down by the operator).
+
+| Tab | Columns | Notes |
+|-----|---------|-------|
+| `S## Standings` | date, store, rank, display_name, record, match_points, playhub_id | A–G; one row per player per event |
+| `S## Results` | Players, 1st…10th, Points, Events Attended, Last Event…, Ranking…, **Player ID** | A–P; Player ID (col P) is `VLOOKUP`ed from Standings (display_name → playhub_id) |
+| `S## Leaderboard` | Rank, **Player ID**, Name, Points, Events Attended | A–E; A is operator-filled, B–E spill from a `CHOOSECOLS` formula at `B1` |
+
+> `/sync-roles` reads the Leaderboard by column position (`A2:E`) and matches players to the
+> registry by **Player ID** (col B), falling back to Name only when the ID is blank — because RPH
+> display names change over time but the Discord↔Playhub ID link is permanent.
+
+---
+
 ## Bot Database Sheet Tabs
 
 | Tab | Columns | Written by |

@@ -71,3 +71,30 @@ LEGENDARY_ROLE_ID
 - ≥ 75% similarity → auto-suggest with ✅/❌ reaction prompt in mod channel
 - 50–74% → surface for manual `/link`, no reaction prompt
 - < 50% → "unmatched player" notice, requires `/link`
+
+---
+
+## 2026-07-06 — Leaderboard carries Player ID; /sync-roles matches by ID
+
+### Overview
+`/sync-roles` now matches leaderboard earners to the Player Registry by **Playhub ID**
+instead of display name. RPH display names change over time, but the Discord↔Playhub ID
+link is permanent — name matching silently missed renamed players.
+
+### Changes
+- **`stores.py`** (`create_season_sheets`): seed a `Player ID` column on the `Results` tab
+  (col P, `VLOOKUP` display_name→playhub_id from Standings), and rebuild the `Leaderboard`
+  spill at `B1` using `CHOOSECOLS` (which can reorder) to output
+  `Player ID, Name, Points, Events` → new layout `A=Rank, B=Player ID, C=Name, D=Points, E=Events`.
+- **`season.py`**: `LEADERBOARD_RANGE_NAME` `A2:D`→`A2:E`, `RESULTS_RANGE_NAME` `A2:O`→`A2:P`.
+- **`bot.py`** (`sync_roles`): read new column positions, key earners by ID (name fallback),
+  pass `playhub_id` into `batch_upsert_player_roles` so registry writes match by ID too.
+  Added a final pass that calls `_merge_duplicate_rows` for each touched Discord ID the
+  registry snapshot shows more than once — collapsing pre-existing duplicate rows in the same
+  run (scoped to matched rows, so it's not a full read per player). Reported in the summary.
+- **Docs**: `google-sheets.md` (new League Sheet Tabs section), `roles.md`.
+
+### Rollout note
+New column layout only applies to tabs created by `/season-rollover` going forward (S13+).
+Deploy this before running `/season-rollover S13`; do not run `/sync-roles` against an
+old-layout leaderboard after deploying.
