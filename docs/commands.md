@@ -12,7 +12,8 @@
 | `/recheck` | Admin | Reprocess any unhandled threads in `#results-reporting` |
 | `/link @member playhub_id` | Admin | Manually link a Discord member to a Playhub ID |
 | `/sync-roles` | Admin | Compute and apply Uncommon/Rare upgrades from current standings |
-| `/invitational-roles` | Admin | Preview and assign Legendary/Super Rare from an invitational event |
+| `/invitational-roles [season]` | Admin | Preview and assign Legendary/Super Rare from an invitational event, and record them in the registry. Pass a season to backfill an older event |
+| `/tidy-registry` | Admin | Remove blank rows from the Player Registry and sort it by rarity tier, newest season first |
 | `/wheretoplay` | Admin | Manually trigger a `#where-to-play` refresh |
 | `/season-rollover` | Admin | Create new season tabs in League sheet, update Bot State, reload config in memory |
 | `/archive-season` | Admin | Copy a completed season's tabs from the League sheet to the Archive spreadsheet |

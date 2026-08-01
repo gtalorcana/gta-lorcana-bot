@@ -85,6 +85,7 @@ from roles import (
     link_player,
     upsert_player_roles,
     batch_upsert_player_roles,
+    compact_and_sort_registry,
     _merge_duplicate_rows,
     compute_earned_roles,
     RARITY_ROLE_IDS,
@@ -2318,6 +2319,41 @@ async def archive_season(interaction: discord.Interaction, season_name: str):
     )
 
 
+# ── /tidy-registry ────────────────────────────────────────────
+@tree.command(name="tidy-registry",
+              description="Remove blank rows and sort the Player Registry by rarity (admins only)")
+async def tidy_registry(interaction: discord.Interaction):
+    if not _is_admin(interaction):
+        await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    # Full-sheet rewrite — hold the sheet lock so it cannot interleave with a
+    # results import. Every other registry write touches a single row and is
+    # safe unsynchronised; this one is not.
+    async with _sheet_lock:
+        loop = asyncio.get_running_loop()
+        try:
+            stats = await loop.run_in_executor(None, compact_and_sort_registry)
+        except Exception as e:
+            print(f"  ✗ /tidy-registry failed: {e}")
+            await interaction.followup.send(
+                f"❌ Tidy failed — the registry is unchanged: `{e}`", ephemeral=True
+            )
+            return
+
+    await interaction.followup.send(
+        f"✅ **Player Registry tidied**\n"
+        f"• {stats['kept']} row(s) kept\n"
+        f"• {stats['blanks_removed']} blank row(s) removed\n"
+        f"• {stats['moved']} row(s) reordered\n\n"
+        f"Sorted Legendary → Super Rare → Rare → Uncommon, newest season first, "
+        f"unroled players last.",
+        ephemeral=True,
+    )
+
+
 # ── /help ─────────────────────────────────────────────────────
 @tree.command(name="help", description="Show all GTA Lorcana bot commands")
 async def help_command(interaction: discord.Interaction):
@@ -2338,6 +2374,7 @@ async def help_command(interaction: discord.Interaction):
                     value=f"Reprocess any missed threads in `{_ch('results_reporting')}`",
                     inline=False)
     embed.add_field(name="/link", value="Manually link a Discord member to a Playhub ID", inline=False)
+    embed.add_field(name="/tidy-registry", value="Remove blank rows and sort the Player Registry by rarity", inline=False)
     embed.add_field(name="/sync-roles", value="Compute and apply Uncommon/Rare role upgrades from current standings", inline=False)
     embed.add_field(name="/invitational-roles", value="Assign Legendary/Super Rare from an invitational event", inline=False)
     embed.add_field(name="/where-to-play", value="Manually push the Where to Play post", inline=False)

@@ -495,6 +495,65 @@ def batch_upsert_player_roles(earners: list[tuple[str, dict, str | None]],
         _gs.batch_update_values(BOT_DATABASE_SPREADSHEET_ID, value_ranges)
 
 
+def compact_and_sort_registry() -> dict:
+    """
+    Drop blank rows and re-sort the whole registry in place.
+
+    Order: highest rarity tier first (Legendary → Super Rare → Rare → Uncommon),
+    and within a tier by season newest first (S12 → S5). Players holding no role
+    sort last, alphabetically by Playhub name. Ties inside a season break on
+    name so the order is stable across runs.
+
+    Safe to run any time: nothing persists registry row indices — every other
+    function re-reads the sheet and recomputes row numbers from that read. It is
+    a full-sheet rewrite though, so the caller should hold the sheet lock.
+
+    Returns {'kept': int, 'blanks_removed': int, 'moved': int}.
+    """
+    data = _gs.get_values(BOT_DATABASE_SPREADSHEET_ID, PLAYER_REGISTRY_RANGE_NAME)
+    raw = data.get('values', [])
+    old_extent = len(raw)   # rows 2 .. old_extent+1 currently hold the table
+
+    rows = [list(r) + [''] * (10 - len(r)) for r in raw]
+    kept = [r for r in rows if any(str(v).strip() for v in r)]
+
+    # (tier index, role column) ordered highest rarity first. A row is filed
+    # under the highest tier it holds, and sorted by that tier's season.
+    tiers = [(0, 6), (1, 7), (2, 8), (3, 9)]
+
+    def sort_key(row):
+        for tier, col in tiers:
+            if row[col].strip():
+                # negative season so higher numbers (newer) come first
+                return (tier, -_season_num(row[col]), row[0].strip().lower())
+        return (len(tiers), 0, row[0].strip().lower())
+
+    ordered = sorted(kept, key=sort_key)
+
+    moved = sum(1 for before, after in zip(kept, ordered) if before is not after)
+
+    if ordered:
+        last_row = len(ordered) + 1
+        _gs.update_values(
+            BOT_DATABASE_SPREADSHEET_ID,
+            f"{PLAYER_REGISTRY_SHEET_NAME}!A2:J{last_row}",
+            'USER_ENTERED',
+            ordered,
+        )
+        # Clear whatever the table used to occupy below its new extent.
+        if old_extent > len(ordered):
+            _gs.clear_values(
+                BOT_DATABASE_SPREADSHEET_ID,
+                f"{PLAYER_REGISTRY_SHEET_NAME}!A{last_row + 1}:J{old_extent + 1}",
+            )
+
+    return {
+        'kept':           len(ordered),
+        'blanks_removed': len(rows) - len(kept),
+        'moved':          moved,
+    }
+
+
 def get_linked_playhub_ids() -> set[str]:
     """Return set of playhub_ids where discord_id is set."""
     registry = get_player_registry()
