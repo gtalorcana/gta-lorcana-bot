@@ -22,7 +22,8 @@
       "Bash(fly version *)",
       "Bash(fly auth *)",
       "PowerShell($fly = \"C:\\\\Users\\\\Ryan\\\\.fly\\\\bin\\\\flyctl.exe\"; & $fly auth whoami)",
-      "Bash(PYTHONIOENCODING=utf-8 python *)"
+      "Bash(PYTHONIOENCODING=utf-8 python *)",
+      "PowerShell($fly = \"C:\\\\Users\\\\Ryan\\\\.fly\\\\bin\\\\flyctl.exe\"; & $fly deploy --app gta-lorcana-bot)"
     ]
   }
 }
