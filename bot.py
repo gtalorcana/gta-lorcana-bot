@@ -1387,11 +1387,11 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             all_candidates = []
             if assignment['legendary']:
                 pid, name, member = assignment['legendary']
-                all_candidates.append((pid, name, member, legendary_role, "Legendary"))
+                all_candidates.append((pid, name, member, legendary_role, LEGENDARY_ROLE_ID, "Legendary"))
             for pid, name, member in assignment['super_rare']:
-                all_candidates.append((pid, name, member, sr_role, "Super Rare"))
+                all_candidates.append((pid, name, member, sr_role, SUPER_RARE_ROLE_ID, "Super Rare"))
 
-            for pid, name, member, role, role_name in all_candidates:
+            for pid, name, member, role, _role_id, role_name in all_candidates:
                 if not member or not role:
                     skipped.append(f"**{name}** (Playhub `{pid}`) — unlinked")
                     continue
@@ -1401,11 +1401,33 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 except discord.HTTPException as e:
                     skipped.append(f"{member.mention} — error: {e}")
 
+            # Record every finisher in the registry, including unlinked ones —
+            # link_player reads G–J back, so an unlinked finisher still gets the
+            # role the moment someone links them. prefer_earliest because a
+            # backfilled event can predate what is already recorded.
+            season_label = assignment['season']
+            earners = [
+                (name, {role_id: season_label}, pid or None)
+                for pid, name, _member, _role, role_id, _role_name in all_candidates
+            ]
+            registry_note = ""
+            try:
+                await loop.run_in_executor(
+                    None, lambda: batch_upsert_player_roles(earners, prefer_earliest=True)
+                )
+                registry_note = f"\n\nRecorded **{len(earners)}** finisher(s) as **{season_label}**."
+            except Exception as e:
+                print(f"  ⚠ invitational-roles: registry write failed: {e}")
+                registry_note = (
+                    f"\n\n⚠️ Discord roles applied, but the registry write failed: `{e}`\n"
+                    f"Re-run the command to retry — recording is idempotent."
+                )
+
             lines = assigned + (["\n**Could not assign (unlinked):**"] + skipped if skipped else [])
             if mod_ch:
                 await mod_ch.send(embed=make_embed(
                     title=f"🏆 Invitational Roles Assigned — {assignment['event_name']}",
-                    description="\n".join(lines) if lines else "No changes made.",
+                    description=("\n".join(lines) if lines else "No Discord roles changed.") + registry_note,
                     colour=discord.Colour.gold()
                 ))
         else:
@@ -2050,11 +2072,24 @@ async def sync_roles(interaction: discord.Interaction):
 # ── /invitational-roles ───────────────────────────────────────
 @tree.command(name="invitational-roles",
               description="Preview and assign Legendary/Super Rare from an invitational (mods only)")
-@app_commands.describe(event_url="RPH event URL or bare event ID")
-async def invitational_roles(interaction: discord.Interaction, event_url: str):
+@app_commands.describe(event_url="RPH event URL or bare event ID",
+                       season_label="Season to record in the registry, e.g. S11 (default: current season)")
+async def invitational_roles(interaction: discord.Interaction, event_url: str, season_label: str = None):
     if not _is_admin(interaction):
         await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
         return
+
+    # Backfilling an old invitational must record the season the event belongs
+    # to, not the season it is being replayed in.
+    if season_label:
+        season_label = season_label.strip().upper()
+        if not re.fullmatch(r"S\d+", season_label):
+            await interaction.response.send_message(
+                f"⚠️ `{season_label}` isn't a valid season — use the form `S11`.", ephemeral=True
+            )
+            return
+    else:
+        season_label = season.CURRENT_SEASON
 
     await interaction.response.defer(ephemeral=True)
 
@@ -2118,7 +2153,9 @@ async def invitational_roles(interaction: discord.Interaction, event_url: str):
 
     embed = make_embed(
         title=f"🏆 Invitational Role Assignment — {event_name}",
-        description="\n".join(lines) + "\n\nReact ✅ to confirm or ❌ to cancel.",
+        description="\n".join(lines)
+                    + f"\n\nRecording as **{season_label}** in the Player Registry."
+                    + "\n\nReact ✅ to confirm or ❌ to cancel.",
         colour=discord.Colour.gold()
     )
     try:
@@ -2134,6 +2171,7 @@ async def invitational_roles(interaction: discord.Interaction, event_url: str):
     await msg.add_reaction("❌")
     _pending_invitational_assignments[msg.id] = {
         'event_name': event_name,
+        'season':     season_label,
         'legendary':  legendary_entry,
         'super_rare': sr_entries,
     }

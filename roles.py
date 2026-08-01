@@ -106,6 +106,44 @@ def _dict_to_row(d: dict) -> list:
     ]
 
 
+def _next_free_sheet_row(rows: list) -> int:
+    """
+    Sheet row number of the first free row below the registry data.
+
+    PLAYER_REGISTRY_RANGE_NAME starts at row 2 and the API trims trailing empty
+    rows, so len(rows) counts through the last row holding data. Interior blanks
+    (left behind by _merge_duplicate_rows) come back as empty lists and still
+    count, so indices stay aligned with the sheet.
+
+    New rows are written here with update_values rather than values.append:
+    append picks its own anchor column via table detection, and /sync-roles
+    leaves rows holding data only in A and I (name + Rare season). That B–H gap
+    splits the bottom of A:J into two blocks, and append can anchor on the
+    right-hand one — which is how a confirmed link landed in I240:R240 instead
+    of A240:J240.
+    """
+    return len(rows) + 2
+
+
+def _should_write_season(existing: str, new: str, prefer_earliest: bool) -> bool:
+    """
+    Whether `new` should be written into a role column holding `existing`.
+
+    A blank cell always takes the new value. A populated cell is normally left
+    alone — seasons arrive in order, so the first value written is the earliest
+    earned. That breaks when backfilling an old event after a later one has
+    already been recorded, which is what prefer_earliest is for: it replaces the
+    existing value only when the new season is genuinely earlier.
+
+    An unparseable existing value scores 0 and is never overwritten.
+    """
+    if not existing.strip():
+        return True
+    if not prefer_earliest:
+        return False
+    return _season_num(new) < _season_num(existing)
+
+
 def _role_col_for(role_id: int) -> str | None:
     """Return the registry dict key for a role_id, or None."""
     return {
@@ -176,9 +214,10 @@ def upsert_player_roles(playhub_name: str, role_seasons: dict[int, str], playhub
             col = _ROLE_COL.get(role_id)
             if col is not None:
                 new_row[col] = season
-        _gs.append_values(
+        new_sheet_row = _next_free_sheet_row(rows)
+        _gs.update_values(
             BOT_DATABASE_SPREADSHEET_ID,
-            PLAYER_REGISTRY_RANGE_NAME,
+            f"{PLAYER_REGISTRY_SHEET_NAME}!A{new_sheet_row}:J{new_sheet_row}",
             'USER_ENTERED',
             [new_row],
         )
@@ -268,9 +307,10 @@ def link_player(
             link_method,
             '', '', '', '',
         ]
-        _gs.append_values(
+        new_sheet_row = _next_free_sheet_row(rows)
+        _gs.update_values(
             BOT_DATABASE_SPREADSHEET_ID,
-            PLAYER_REGISTRY_RANGE_NAME,
+            f"{PLAYER_REGISTRY_SHEET_NAME}!A{new_sheet_row}:J{new_sheet_row}",
             'USER_ENTERED',
             [new_row],
         )
@@ -364,13 +404,19 @@ def _merge_duplicate_rows(discord_id: int):
     _gs.batch_update_values(BOT_DATABASE_SPREADSHEET_ID, value_ranges)
 
 
-def batch_upsert_player_roles(earners: list[tuple[str, dict, str | None]]):
+def batch_upsert_player_roles(earners: list[tuple[str, dict, str | None]],
+                              prefer_earliest: bool = False):
     """
     Upsert role columns for multiple players in one read + one batch write.
     Far more efficient than calling upsert_player_roles() in a loop.
 
     earners: list of (playhub_name, role_seasons, playhub_id)
              role_seasons: {role_id: season_str}
+
+    prefer_earliest: replace an already-recorded season when the new one is
+        earlier, instead of leaving every populated cell alone. Set it when the
+        event being recorded may predate what is already in the sheet — i.e.
+        backfills. See _should_write_season.
     """
     if not earners:
         return
@@ -420,8 +466,8 @@ def batch_upsert_player_roles(earners: list[tuple[str, dict, str | None]]):
                 col = _ROLE_COL.get(role_id)
                 if col is None:
                     continue
-                if existing[col]:
-                    continue  # preserve earliest season
+                if not _should_write_season(existing[col], season, prefer_earliest):
+                    continue
                 existing[col] = season
                 changed = True
             if playhub_id and not existing[1].strip():
@@ -435,10 +481,18 @@ def batch_upsert_player_roles(earners: list[tuple[str, dict, str | None]]):
                 })
                 rows[row_idx] = existing  # keep local copy consistent for later earners
 
+    # New players go into consecutive rows below the data, folded into the same
+    # batch write as the existing-row updates.
+    next_sheet_row = _next_free_sheet_row(rows)
+    for offset, new_row in enumerate(new_rows):
+        sheet_row = next_sheet_row + offset
+        value_ranges.append({
+            'range': f"{PLAYER_REGISTRY_SHEET_NAME}!A{sheet_row}:J{sheet_row}",
+            'values': [new_row],
+        })
+
     if value_ranges:
         _gs.batch_update_values(BOT_DATABASE_SPREADSHEET_ID, value_ranges)
-    if new_rows:
-        _gs.append_values(BOT_DATABASE_SPREADSHEET_ID, PLAYER_REGISTRY_RANGE_NAME, 'USER_ENTERED', new_rows)
 
 
 def get_linked_playhub_ids() -> set[str]:
