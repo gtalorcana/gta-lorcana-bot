@@ -49,7 +49,9 @@ Stored in the `Player Registry` tab of the Bot Database sheet.
 | I | Rare | Season first earned |
 | J | Uncommon | Season first earned |
 
-Role columns are only written if blank — the earliest season earned is always preserved. `/record-legendary-and-super-rare` additionally replaces a recorded season with an earlier one, so backfilling old events can't be defeated by a later season already sitting in the cell.
+Role columns hold the **earliest** season earned. A blank cell always takes the new value; a populated one is replaced only by a genuinely earlier season, compared numerically so `S9` correctly beats `S10`.
+
+Recording seasons in order, that never triggers — the season being recorded is always later than what's stored, so the existing value stands. It matters only when an old season is recorded late (backfilling an invitational, or repointing `CURRENT_SEASON` to fix data that was missed). Both record commands follow this rule, so backfills are safe in any order and can't be defeated by a later season already sitting in the cell.
 
 New rows are written to an explicitly computed row (`A{n}:J{n}`), never via the Sheets `values.append` API. Append picks its own anchor column by table detection, and rows created by `/record-rare-and-uncommon` hold data only in A and I, leaving a B–H gap that can make it anchor on the wrong column.
 

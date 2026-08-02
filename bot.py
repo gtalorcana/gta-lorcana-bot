@@ -2086,9 +2086,18 @@ async def record_rare_and_uncommon(interaction: discord.Interaction):
 
     # 3. Batch-upsert all role changes in one registry read + one API write.
     #    Pass the Playhub ID so the registry matches by stable ID, not display name.
+    #
+    #    prefer_earliest: running seasons in order, this never fires — the season
+    #    being recorded is always later than what is stored, so a populated cell
+    #    is kept either way. It matters when an old season is recorded late, e.g.
+    #    repointing CURRENT_SEASON to fix data that was missed. Blank-only would
+    #    keep whatever later season got there first and permanently misattribute
+    #    the role; earliest-wins corrects it. Same rule the invitational path uses.
     earners = [(m['name'], m['roles'], m['id'] or None) for m in earners_meta]
     try:
-        await loop.run_in_executor(None, batch_upsert_player_roles, earners)
+        await loop.run_in_executor(
+            None, lambda: batch_upsert_player_roles(earners, prefer_earliest=True)
+        )
     except Exception as e:
         print(f"  ✗ record-rare-and-uncommon: batch upsert failed: {e}")
         await interaction.followup.send(
