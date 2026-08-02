@@ -970,6 +970,24 @@ def create_season_sheets(new_season: str) -> list[str]:
     return created
 
 
+def _archive_span(range_name: str) -> str:
+    """
+    Turn a season data range into the equivalent archive range, starting at row 1
+    so the header is copied too.
+
+      'S13 Results!A2:P'    -> 'A1:P'
+      'S13 Standings!A3:G'  -> 'A1:G'
+
+    Archiving previously hardcoded its own column letters, which drifted when
+    columns were added: Leaderboard was copied A1:D after it grew an "Events
+    Attended" column at E, and Results A1:O after it grew a column at P. Both
+    were silently dropped. Deriving the span from the live range keeps them
+    in step.
+    """
+    last_col = range_name.split('!', 1)[1].split(':')[1]
+    return f"A1:{last_col}"
+
+
 def archive_season_data(season_name: str) -> list[str]:
     """
     Copy all four season tabs from the League spreadsheet into the Archive spreadsheet.
@@ -981,14 +999,18 @@ def archive_season_data(season_name: str) -> list[str]:
     """
     from googleapiclient.errors import HttpError as _HttpError
 
+    # Column spans are derived from the live season ranges rather than hardcoded,
+    # so adding a column to a tab can't silently stop it being archived. Only the
+    # column span is borrowed — the tab name comes from season_name, which may be
+    # an older season than the one currently loaded.
     league_tabs = [
-        (f"{season_name} Standings",   "A1:G"),
-        (f"{season_name} Events",      "A1:G"),
-        (f"{season_name} Leaderboard", "A1:D"),
-        (f"{season_name} Results",     "A1:O"),
+        (f"{season_name} Standings",   _archive_span(season.STANDINGS_RANGE_NAME)),
+        (f"{season_name} Events",      _archive_span(season.EVENTS_RANGE_NAME)),
+        (f"{season_name} Leaderboard", _archive_span(season.LEADERBOARD_RANGE_NAME)),
+        (f"{season_name} Results",     _archive_span(season.RESULTS_RANGE_NAME)),
     ]
     db_tabs = [
-        (f"{season_name} Set Champs", "A1:H"),
+        (f"{season_name} Set Champs", _archive_span(season.SET_CHAMPS_EVENTS_RANGE_NAME)),
     ]
 
     archived = []
