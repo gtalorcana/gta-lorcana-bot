@@ -12,7 +12,7 @@ Features:
   - /link            — manually link a Discord member to a Playhub ID (admins only)
   - /record-rare-and-uncommon        — record Rare/Uncommon from the leaderboard (admins only)
   - /record-legendary-and-super-rare — record Legendary/Super Rare from an invitational (admins only)
-  - /award-roles-from-registry       — grant every rarity role the registry records (admins only)
+  - /assign-roles-from-registry      — assign every rarity role the registry records (admins only)
   - /where-to-play     — manually push the where-to-play post (admins only)
   - /set-champs      — manually refresh and post the Set Champs update (admins only)
   - on_member_join   — auto-assigns Common rarity role to new members
@@ -1310,6 +1310,54 @@ async def _post_linking_suggestions(guild: discord.Guild, new_players: list[tupl
             await mod_ch.send(embed=embed)
 
 
+async def _assign_recorded_roles(guild: discord.Guild,
+                                 member: discord.Member | None,
+                                 role_seasons: dict[int, str],
+                                 reason: str) -> tuple[list, list]:
+    """
+    Grant `member` every rarity role in role_seasons they don't already hold.
+
+    The single implementation of "make Discord match what the registry records".
+    /assign-roles-from-registry calls it for every row; /link and the ✅
+    fuzzy-confirm call it for one member so a freshly linked player gets their
+    roles immediately. Recording what a player earned is a separate step — this
+    only applies it.
+
+    Purely additive, matching the rule that rarity never downgrades, which makes
+    it idempotent and safe to run repeatedly.
+
+    role_seasons: {role_id: season_str}, as returned by link_player().
+    Returns (added, failed) — added is [(role_id, season)], failed [(role_id, err)].
+    """
+    if not guild or not member or not role_seasons:
+        return [], []
+
+    rarity_id_set = set(RARITY_ROLE_IDS)
+    current = {r.id for r in member.roles if r.id in rarity_id_set}
+    added, failed = [], []
+
+    for role_id, season_label in role_seasons.items():
+        if role_id in current:
+            continue
+        role = guild.get_role(role_id)
+        if not role:
+            print(f"  ⚠ assign-roles: role {role_id} not found in guild")
+            continue
+        try:
+            await member.add_roles(role, reason=reason)
+            added.append((role_id, season_label))
+        except discord.HTTPException as e:
+            print(f"  ⚠ assign-roles: failed {role_id} for {member.display_name}: {e}")
+            failed.append((role_id, str(e)))
+
+    return added, failed
+
+
+def _fmt_roles(pairs: list) -> str:
+    """Render [(role_id, season)] as 'Rare (S7), Uncommon (S8)'."""
+    return ", ".join(f"**{RARITY_ROLE_NAMES.get(rid, str(rid))}** ({s})" for rid, s in pairs)
+
+
 @bot.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     """Handle ✅/❌ reactions on pending link suggestions and invitational assignments."""
@@ -1335,27 +1383,15 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 'fuzzy-confirmed',
                 suggestion['playhub_id'], suggestion['display_name'],
             )
-            # Assign Discord roles for each role_id in role_seasons
-            if role_seasons and guild:
-                rarity_id_set = set(RARITY_ROLE_IDS)
-                member = guild.get_member(suggestion['discord_id'])
-                if member:
-                    current = {r.id for r in member.roles if r.id in rarity_id_set}
-                    for role_id in role_seasons:
-                        if role_id not in current:
-                            role = guild.get_role(role_id)
-                            if role:
-                                try:
-                                    await member.add_roles(role, reason="fuzzy-link-confirmed")
-                                except discord.HTTPException as e:
-                                    print(f"  ⚠ Could not assign role: {e}")
+            # Apply whatever the registry already records for them.
+            added, _failed = await _assign_recorded_roles(
+                guild,
+                guild.get_member(suggestion['discord_id']) if guild else None,
+                role_seasons,
+                "fuzzy-link-confirmed",
+            )
             if mod_ch:
-                roles_str = ""
-                if role_seasons:
-                    roles_str = "\nRoles assigned: " + ", ".join(
-                        f"**{RARITY_ROLE_NAMES.get(r, str(r))}** ({s})"
-                        for r, s in role_seasons.items()
-                    )
+                roles_str = f"\nRoles assigned: {_fmt_roles(added)}" if added else ""
                 await mod_ch.send(embed=make_embed(
                     title="✅ Link Confirmed",
                     description=(
@@ -1382,7 +1418,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
         if emoji == "✅":
             # Records only — the Discord roles are granted by
-            # /award-roles-from-registry, which reads columns G–J back out.
+            # /assign-roles-from-registry, which reads columns G–J back out.
             # Unlinked finishers are recorded too, so their role lands as soon
             # as they are linked. prefer_earliest because a backfilled event can
             # predate what is already in the sheet.
@@ -1423,7 +1459,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     description="\n".join(recorded)
                                 + (f"\n\n{unlinked_n} finisher(s) not yet linked — their role lands on link."
                                    if unlinked_n else "")
-                                + "\n\nRun `/award-roles-from-registry` to grant the Discord roles.",
+                                + "\n\nRun `/assign-roles-from-registry` to grant the Discord roles.",
                     colour=discord.Colour.gold()
                 ))
         else:
@@ -1968,23 +2004,13 @@ async def link_command(interaction: discord.Interaction, member: discord.Member,
         playhub_id, playhub_name,
     )
 
-    # Assign any earned Discord roles
-    roles_assigned = []
-    if role_seasons:
-        rarity_id_set = set(RARITY_ROLE_IDS)
-        current = {r.id for r in member.roles if r.id in rarity_id_set}
-        for role_id, season_label in role_seasons.items():
-            if role_id not in current:
-                discord_role = interaction.guild.get_role(role_id)
-                if discord_role:
-                    try:
-                        await member.add_roles(discord_role, reason="link-command")
-                        roles_assigned.append(f"**{RARITY_ROLE_NAMES.get(role_id, str(role_id))}** ({season_label})")
-                    except discord.HTTPException as e:
-                        print(f"  ⚠ link: failed to assign role {role_id} to {member.display_name}: {e}")
+    # Apply whatever the registry already records for them.
+    added, _failed = await _assign_recorded_roles(
+        interaction.guild, member, role_seasons, "link-command"
+    )
 
     id_str = f"ID `{playhub_id}`" if playhub_id else f"name `{playhub_name}`"
-    roles_str = ("\nRoles assigned: " + ", ".join(roles_assigned)) if roles_assigned else ""
+    roles_str = f"\nRoles assigned: {_fmt_roles(added)}" if added else ""
     await interaction.followup.send(
         f"✅ Linked **{member.display_name}** → Playhub {id_str}{roles_str}", ephemeral=True
     )
@@ -1995,7 +2021,7 @@ async def link_command(interaction: discord.Interaction, member: discord.Member,
             description=(
                 f"{member.mention} → Playhub {id_str}\n"
                 f"Linked by {interaction.user.mention}"
-                + (f"\nRoles assigned: {', '.join(roles_assigned)}" if roles_assigned else "")
+                + (f"\nRoles assigned: {_fmt_roles(added)}" if added else "")
             ),
             colour=discord.Colour.green()
         ))
@@ -2004,7 +2030,7 @@ async def link_command(interaction: discord.Interaction, member: discord.Member,
 # ── /record-rare-and-uncommon ─────────────────────────────────
 #
 # Records only — it writes the season into registry columns I and J and stops
-# there. Granting the Discord roles is /award-roles-from-registry, so the
+# there. Granting the Discord roles is /assign-roles-from-registry, so the
 # registry stays the single source of truth for who has earned what.
 @tree.command(name="record-rare-and-uncommon",
               description="Record Rare/Uncommon earned this season into the Player Registry (mods only)")
@@ -2110,7 +2136,7 @@ async def record_rare_and_uncommon(interaction: discord.Interaction):
             lines.extend(f"• {name}" for name in unlinked[:20])
             if len(unlinked) > 20:
                 lines.append(f"  *(and {len(unlinked) - 20} more)*")
-        lines.append("\nRun `/award-roles-from-registry` to grant the Discord roles.")
+        lines.append("\nRun `/assign-roles-from-registry` to grant the Discord roles.")
         await mod_ch.send(embed=make_embed(
             title=f"Rare/Uncommon Recorded — {season.CURRENT_SEASON}",
             description="\n".join(lines),
@@ -2123,7 +2149,7 @@ async def record_rare_and_uncommon(interaction: discord.Interaction):
     if merged:
         summary += f", {merged} duplicate registry row(s) merged"
     await interaction.followup.send(
-        summary + ".\n\nNow run `/award-roles-from-registry` to grant the Discord roles.",
+        summary + ".\n\nNow run `/assign-roles-from-registry` to grant the Discord roles.",
         ephemeral=True,
     )
 
@@ -2215,7 +2241,7 @@ async def invitational_roles(interaction: discord.Interaction, event_url: str, s
         title=f"🏆 Invitational Results — {event_name}",
         description="\n".join(lines)
                     + f"\n\nWill record these as **{season_label}** in the Player Registry."
-                    + "\nDiscord roles are granted separately by `/award-roles-from-registry`."
+                    + "\nDiscord roles are granted separately by `/assign-roles-from-registry`."
                     + "\n\nReact ✅ to confirm or ❌ to cancel.",
         colour=discord.Colour.gold()
     )
@@ -2379,19 +2405,19 @@ async def archive_season(interaction: discord.Interaction, season_name: str):
     )
 
 
-# ── /award-roles-from-registry ────────────────────────────────
+# ── /assign-roles-from-registry ───────────────────────────────
 #
-# The only command that grants rarity roles in bulk. It is the mirror of the two
-# record commands: they decide what a player has earned and write it to columns
-# G–J, this reads those columns back and makes Discord match.
+# Applies the registry across the whole server. The mirror of the two record
+# commands: they decide what a player has earned and write it to columns G–J,
+# this reads those columns back and makes Discord match.
 #
-# Purely additive — a role is never removed, matching the rule that rarity never
-# downgrades. That also makes it idempotent and safe to re-run, so it doubles as
-# the repair path when someone loses a role (left and rejoined, removed by hand,
-# or an add_roles call that failed and was only logged).
-@tree.command(name="award-roles-from-registry",
-              description="Grant every Discord rarity role recorded in the Player Registry (mods only)")
-async def award_roles_from_registry(interaction: discord.Interaction):
+# Shares _assign_recorded_roles with /link and the ✅ fuzzy-confirm, so there is
+# one implementation of role assignment regardless of what triggered it. Being
+# additive-only it is idempotent, which makes this the repair path when someone
+# loses a role — a rejoin, a manual removal, or an add_roles call that failed.
+@tree.command(name="assign-roles-from-registry",
+              description="Assign every Discord rarity role recorded in the Player Registry (mods only)")
+async def assign_roles_from_registry(interaction: discord.Interaction):
     if not _is_admin(interaction):
         await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
         return
@@ -2402,7 +2428,7 @@ async def award_roles_from_registry(interaction: discord.Interaction):
     try:
         registry = await loop.run_in_executor(None, get_player_registry)
     except Exception as e:
-        print(f"  ✗ award-roles-from-registry: registry read failed: {e}")
+        print(f"  ✗ assign-roles-from-registry: registry read failed: {e}")
         await interaction.followup.send(f"❌ Couldn't read the registry: `{e}`", ephemeral=True)
         return
 
@@ -2412,16 +2438,15 @@ async def award_roles_from_registry(interaction: discord.Interaction):
         (RARE_ROLE_ID,       'rare'),
         (UNCOMMON_ROLE_ID,   'uncommon'),
     ]
-    rarity_id_set = set(RARITY_ROLE_IDS)
 
-    granted   = []   # (mention, role_name, season)
-    failed    = []
-    gone      = []   # linked rows whose member is no longer in the guild
-    unlinked  = 0    # rows holding roles with no Discord ID at all
+    assigned = []   # (mention, role_id, season)
+    failed   = []
+    gone     = []   # linked rows whose member has left the server
+    unlinked = 0    # rows holding roles with no Discord ID at all
 
     for entry in registry:
-        earned = {rid: entry[key] for rid, key in role_key if entry[key]}
-        if not earned:
+        recorded = {rid: entry[key] for rid, key in role_key if entry[key]}
+        if not recorded:
             continue
         if not entry['discord_id']:
             unlinked += 1
@@ -2432,38 +2457,28 @@ async def award_roles_from_registry(interaction: discord.Interaction):
             gone.append(entry['playhub_name'])
             continue
 
-        current = {r.id for r in member.roles if r.id in rarity_id_set}
-        for role_id, season_label in earned.items():
-            if role_id in current:
-                continue
-            discord_role = interaction.guild.get_role(role_id)
-            if not discord_role:
-                continue
-            try:
-                await member.add_roles(discord_role, reason="award-roles-from-registry")
-                granted.append((member.mention, RARITY_ROLE_NAMES.get(role_id, str(role_id)), season_label))
-            except discord.HTTPException as e:
-                print(f"  ⚠ award-roles: failed {role_id} for {member.display_name}: {e}")
-                failed.append(f"{member.mention} — {RARITY_ROLE_NAMES.get(role_id, role_id)}: {e}")
+        added, errs = await _assign_recorded_roles(
+            interaction.guild, member, recorded, "assign-roles-from-registry"
+        )
+        assigned.extend((member.mention, rid, s) for rid, s in added)
+        failed.extend(f"{member.mention} — {RARITY_ROLE_NAMES.get(rid, rid)}: {e}" for rid, e in errs)
 
     mod_ch = get_channel_by_id(interaction.guild, MOD_CHANNEL_ID)
-    if mod_ch and (granted or failed):
-        lines = [f"{mention}: +**{role_name}** ({season_label})"
-                 for mention, role_name, season_label in granted[:40]]
-        if len(granted) > 40:
-            lines.append(f"*(and {len(granted) - 40} more)*")
+    if mod_ch and (assigned or failed):
+        lines = [f"{mention}: +{_fmt_roles([(rid, s)])}" for mention, rid, s in assigned[:40]]
+        if len(assigned) > 40:
+            lines.append(f"*(and {len(assigned) - 40} more)*")
         if failed:
             lines.append("\n**Failed:**")
             lines.extend(f"• {f}" for f in failed[:10])
         await mod_ch.send(embed=make_embed(
-            title=f"Roles Awarded — {len(granted)} granted",
+            title=f"Roles Assigned — {len(assigned)} applied",
             description="\n".join(lines),
             colour=discord.Colour.gold()
         ))
 
-    parts = [f"✅ **{len(granted)}** role(s) granted"]
-    if not granted:
-        parts = ["✅ Everyone already holds the roles recorded for them — nothing to do"]
+    parts = ([f"✅ **{len(assigned)}** role(s) assigned"] if assigned
+             else ["✅ Everyone already holds the roles recorded for them — nothing to do"])
     if failed:
         parts.append(f"{len(failed)} failed")
     if gone:
@@ -2531,7 +2546,7 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="/tidy-registry", value="Remove blank rows and sort the Player Registry by rarity", inline=False)
     embed.add_field(name="/record-rare-and-uncommon", value="Record Rare/Uncommon earned this season into the Player Registry", inline=False)
     embed.add_field(name="/record-legendary-and-super-rare", value="Record Legendary/Super Rare from an invitational into the Player Registry", inline=False)
-    embed.add_field(name="/award-roles-from-registry", value="Grant every Discord rarity role the registry records — safe to re-run", inline=False)
+    embed.add_field(name="/assign-roles-from-registry", value="Assign every Discord rarity role the registry records — safe to re-run", inline=False)
     embed.add_field(name="/where-to-play", value="Manually push the Where to Play post", inline=False)
     embed.add_field(name="/season-rollover", value="Create new season sheet tabs, update Bot State, and reload season config in memory", inline=False)
     embed.add_field(name="/archive-season", value="Copy a completed season's tabs from the League sheet to the Archive spreadsheet", inline=False)

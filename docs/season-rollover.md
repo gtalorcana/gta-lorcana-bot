@@ -3,7 +3,7 @@
 ## End-of-Season Checklist
 
 1. Run `/record-rare-and-uncommon` to record final Uncommon/Rare from the leaderboard,
-   then `/award-roles-from-registry` to grant the Discord roles
+   then `/assign-roles-from-registry` to assign the Discord roles
 2. Run `/archive-season S##` to copy the season's tabs to the Archive spreadsheet
 3. Verify the archive looks correct
 4. Run `/season-rollover S## YYYY-MM-DD YYYY-MM-DD YYYY-MM-DD YYYY-MM-DD` with the new season's dates

@@ -24,7 +24,7 @@ Members earn rarity roles based on league participation. Roles are additive — 
 
    `season` defaults to the current season. Pass it explicitly when backfilling an older invitational (e.g. `/record-legendary-and-super-rare <url> S11`) so the finish is recorded against the season it belongs to. Backfills are safe in any order: a recorded season is only replaced by an *earlier* one, never a later one.
 
-4. **Award** — `/award-roles-from-registry`. Walks every registry row holding a Discord ID and grants any rarity role recorded in G–J that the member is missing.
+4. **Assign** — `/assign-roles-from-registry`. Walks every registry row holding a Discord ID and grants any rarity role recorded in G–J that the member is missing.
 
    Additive only, never removes, so it is idempotent and safe to re-run at any time. That also makes it the repair path: if someone loses a role by leaving and rejoining, by manual removal, or because an `add_roles` call failed, this restores it. Nothing else in the bot does.
 
