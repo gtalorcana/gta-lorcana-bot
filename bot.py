@@ -2332,6 +2332,7 @@ async def invitational_roles(interaction: discord.Interaction, event_url: str, s
     end_date="Season end date (YYYY-MM-DD)",
     set_champs_start="Set Champs start date (YYYY-MM-DD)",
     set_champs_end="Set Champs end date (YYYY-MM-DD)",
+    force="Skip the check that the outgoing season's roles were recorded",
 )
 async def season_rollover(
     interaction: discord.Interaction,
@@ -2340,6 +2341,7 @@ async def season_rollover(
     end_date: str,
     set_champs_start: str,
     set_champs_end: str,
+    force: bool = False,
 ):
     if not _is_admin(interaction):
         await interaction.response.send_message("⚠️ Admins only.", ephemeral=True)
@@ -2387,6 +2389,45 @@ async def season_rollover(
 
     loop = asyncio.get_running_loop()
 
+    # ── Guard: has the outgoing season been recorded? ────────────────────────
+    #
+    # /record-rare-and-uncommon reads the leaderboard for CURRENT_SEASON and
+    # stamps CURRENT_SEASON. Run after rollover it reads the *new* season's
+    # empty leaderboard, finds nobody, and reports success — so the finished
+    # season is silently never recorded. Nothing else would notice.
+    #
+    # Checks columns I/J only: those are what the leaderboard produces and what
+    # becomes unrecoverable. G/H come from invitationals, which happen after the
+    # season ends and so are not expected to be present yet.
+    outgoing = season.CURRENT_SEASON
+    if not force and outgoing and outgoing != new_season:
+        try:
+            registry = await loop.run_in_executor(None, get_player_registry)
+            recorded = sum(1 for r in registry
+                           if r['rare'] == outgoing or r['uncommon'] == outgoing)
+        except Exception as e:
+            # Can't verify — say so rather than blocking or silently proceeding.
+            print(f"  ⚠ season-rollover: registry check failed: {e}")
+            await interaction.followup.send(
+                f"⚠️ Couldn't read the registry to check whether **{outgoing}** roles "
+                f"were recorded: `{e}`\n"
+                f"Verify manually, then re-run with `force: true`.",
+                ephemeral=True,
+            )
+            return
+
+        if recorded == 0:
+            await interaction.followup.send(
+                f"❌ **No {outgoing} roles are recorded in the Player Registry.**\n\n"
+                f"Run `/record-rare-and-uncommon` first — it reads the "
+                f"`{outgoing} Leaderboard`, and once the season rolls over it will "
+                f"read `{new_season}`'s empty one instead, losing {outgoing} for good.\n\n"
+                f"If {outgoing} genuinely had no earners, re-run with `force: true`.",
+                ephemeral=True,
+            )
+            return
+        print(f"  ✓ season-rollover: {recorded} {outgoing} role record(s) found — proceeding")
+
     # 1. Create new season tabs in the League spreadsheet
     try:
         created = await loop.run_in_executor(None, create_season_sheets, new_season)
@@ -2420,11 +2461,18 @@ async def season_rollover(
     tab_lines = "\n".join(f"  • {t}" for t in created) if created else "  (all tabs already existed)"
     skipped = 4 - len(created)
     skip_note = f"\n⚠️ {skipped} tab(s) already existed and were skipped." if skipped else ""
+    # Both remaining steps read the outgoing season, not CURRENT_SEASON, so
+    # they are still safe to run now — but nothing prompts for them otherwise.
+    todo = (f"\n\n**Still to do for {outgoing}:**\n"
+            f"  • `/assign-roles-from-registry` — grant the roles just recorded\n"
+            f"  • `/archive-season {outgoing}` — copy the tabs to the Archive sheet"
+            ) if outgoing and outgoing != new_season else ""
     await interaction.followup.send(
         f"✅ **Season rolled over to {new_season}**\n\n"
         f"**New tabs created in League sheet:**\n{tab_lines}{skip_note}\n\n"
         f"**Season window:** {start_date} → {end_date}\n"
-        f"**Set Champs:** {set_champs_start} → {set_champs_end}",
+        f"**Set Champs:** {set_champs_start} → {set_champs_end}"
+        f"{todo}",
         ephemeral=True,
     )
 

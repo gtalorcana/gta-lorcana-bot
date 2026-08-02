@@ -16,7 +16,7 @@
 | `/assign-roles-from-registry` | Admin | Assign every Discord rarity role the registry records. Additive only, idempotent, safe to re-run |
 | `/tidy-registry` | Admin | Remove blank rows from the Player Registry, refresh display names from this season's sheets, and sort by rarity tier, newest season first |
 | `/wheretoplay` | Admin | Manually trigger a `#where-to-play` refresh |
-| `/season-rollover` | Admin | Create new season tabs in League sheet, update Bot State, reload config in memory |
+| `/season-rollover` | Admin | Create new season tabs in League sheet, update Bot State, reload config in memory. Refuses if the outgoing season's Rare/Uncommon were never recorded — `force: true` overrides |
 | `/archive-season` | Admin | Copy a completed season's tabs from the League sheet to the Archive spreadsheet |
 
 > To restrict commands to specific roles, use Discord's server settings: **Server Settings → Integrations → GTA Lorcana Bot** — no code changes needed.

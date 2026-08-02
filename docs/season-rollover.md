@@ -9,6 +9,15 @@
 4. Run `/season-rollover S## YYYY-MM-DD YYYY-MM-DD YYYY-MM-DD YYYY-MM-DD` with the new season's dates
 5. Manually delete the old season's tabs from the League sheet when ready
 
+> **Step 1 must come before step 4.** `/record-rare-and-uncommon` reads the leaderboard
+> for `CURRENT_SEASON` and stamps `CURRENT_SEASON`. Run after rollover, it reads the *new*
+> season's empty leaderboard, finds nobody, and reports success — the finished season is
+> silently never recorded.
+>
+> `/season-rollover` enforces this: it refuses if no registry row carries the outgoing
+> season in columns I/J. Pass `force: true` to override, e.g. for a season that genuinely
+> had no earners.
+
 ## `/season-rollover` Command
 
 ```
