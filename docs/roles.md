@@ -84,3 +84,5 @@ Matching compares the RPH display name against Discord `display_name` and `globa
 If a player's Playhub display name changes, column A follows. Whenever a row is matched by **Playhub ID** and the incoming name differs, `link_player` and `batch_upsert_player_roles` rewrite column A to the newer name — so recording results, linking, and the ETB flow all keep it current.
 
 Only on an ID match. A name match tells you nothing new about the name by definition, and acting on one risks renaming a row that was matched loosely. Rows with no Playhub ID are therefore never renamed — name is the only key they have.
+
+That only reaches rows something touches by ID, so a player who stops competing would keep a stale name indefinitely. `/tidy-registry` closes the gap: it builds `{playhub_id: name}` from the current season's Standings and Leaderboard and renames any row whose ID matches and whose name differs. Current season only — a player who hasn't competed this season keeps their existing name until they next appear.

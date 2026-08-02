@@ -51,7 +51,7 @@ from datetime import datetime, timezone, date, timedelta
 
 from clients import gs as _gs, rph_api as _rph_api
 from results import process_event_data, remove_event_data
-from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, refresh_set_champs, set_bot_state_key, delete_bot_state_key, fetch_event_status, create_season_sheets, archive_season_data, get_etb_approval, append_etb_approval, lookup_player_standings
+from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, refresh_set_champs, set_bot_state_key, delete_bot_state_key, fetch_event_status, create_season_sheets, archive_season_data, get_etb_approval, append_etb_approval, lookup_player_standings, get_current_display_names
 
 from constants import (
     DISCORD_BOT_TOKEN,
@@ -2561,7 +2561,16 @@ async def tidy_registry(interaction: discord.Interaction):
     async with _sheet_lock:
         loop = asyncio.get_running_loop()
         try:
-            stats = await loop.run_in_executor(None, compact_and_sort_registry)
+            # Current display names so renames reach rows that nothing has
+            # touched by ID. Non-fatal — tidy still works without them.
+            try:
+                current_names = await loop.run_in_executor(None, get_current_display_names)
+            except Exception as e:
+                print(f"  ⚠ /tidy-registry: name refresh skipped: {e}")
+                current_names = None
+            stats = await loop.run_in_executor(
+                None, lambda: compact_and_sort_registry(current_names)
+            )
         except Exception as e:
             print(f"  ✗ /tidy-registry failed: {e}")
             await interaction.followup.send(
@@ -2569,11 +2578,19 @@ async def tidy_registry(interaction: discord.Interaction):
             )
             return
 
+    renamed = stats.get('renamed') or []
+    rename_block = ""
+    if renamed:
+        shown = "\n".join(f"  • {old} → {new}" for old, new in renamed[:15])
+        more  = f"\n  *(and {len(renamed) - 15} more)*" if len(renamed) > 15 else ""
+        rename_block = f"\n• {len(renamed)} name(s) refreshed from this season:\n{shown}{more}"
+
     await interaction.followup.send(
         f"✅ **Player Registry tidied**\n"
         f"• {stats['kept']} row(s) kept\n"
         f"• {stats['blanks_removed']} blank row(s) removed\n"
-        f"• {stats['moved']} row(s) reordered\n\n"
+        f"• {stats['moved']} row(s) reordered"
+        f"{rename_block}\n\n"
         f"Sorted Legendary → Super Rare → Rare → Uncommon, newest season first, "
         f"unroled players last.",
         ephemeral=True,

@@ -742,6 +742,39 @@ def append_etb_approval(
     )
 
 
+def get_current_display_names() -> dict:
+    """
+    Map {playhub_id: current RPH display name} from this season's sheets.
+
+    Standings first (appended in event order, so later rows are more recent),
+    then the Leaderboard, which wins on any disagreement. Used by
+    /tidy-registry to carry renames into registry column A for players whose
+    row has not otherwise been touched by ID.
+
+    Current season only — deliberately no archive lookup, so this never depends
+    on how older tabs happen to be named. A player who has not competed this
+    season keeps their existing name until they next appear.
+    """
+    names: dict[str, str] = {}
+    for rng, id_col, name_col in (
+        (season.STANDINGS_RANGE_NAME,   6, 3),
+        (season.LEADERBOARD_RANGE_NAME, 1, 2),
+    ):
+        try:
+            rows = _gs.get_values(LEAGUE_SPREADSHEET_ID, rng).get('values', [])
+        except Exception as e:
+            print(f"  ⚠ get_current_display_names: {rng} unreadable: {e}")
+            continue
+        for row in rows:
+            if len(row) <= max(id_col, name_col):
+                continue
+            pid  = str(row[id_col]).strip()
+            name = str(row[name_col]).strip()
+            if pid.isdigit() and name:
+                names[pid] = name
+    return names
+
+
 def lookup_player_standings(rph_username: str = None,
                             playhub_id: str = None) -> dict:
     """

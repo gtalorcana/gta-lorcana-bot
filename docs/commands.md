@@ -14,7 +14,7 @@
 | `/record-rare-and-uncommon` | Admin | Record Rare/Uncommon earned this season into the registry (columns I/J). Records only — does not grant Discord roles |
 | `/record-legendary-and-super-rare [season]` | Admin | Record Legendary/Super Rare from an invitational into the registry (columns G/H). Records only. Pass a season to backfill an older event |
 | `/assign-roles-from-registry` | Admin | Assign every Discord rarity role the registry records. Additive only, idempotent, safe to re-run |
-| `/tidy-registry` | Admin | Remove blank rows from the Player Registry and sort it by rarity tier, newest season first |
+| `/tidy-registry` | Admin | Remove blank rows from the Player Registry, refresh display names from this season's sheets, and sort by rarity tier, newest season first |
 | `/wheretoplay` | Admin | Manually trigger a `#where-to-play` refresh |
 | `/season-rollover` | Admin | Create new season tabs in League sheet, update Bot State, reload config in memory |
 | `/archive-season` | Admin | Copy a completed season's tabs from the League sheet to the Archive spreadsheet |

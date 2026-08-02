@@ -513,20 +513,27 @@ def batch_upsert_player_roles(earners: list[tuple[str, dict, str | None]],
         _gs.batch_update_values(BOT_DATABASE_SPREADSHEET_ID, value_ranges)
 
 
-def compact_and_sort_registry() -> dict:
+def compact_and_sort_registry(current_names: dict | None = None) -> dict:
     """
-    Drop blank rows and re-sort the whole registry in place.
+    Drop blank rows, refresh stale display names, and re-sort the registry.
 
     Order: highest rarity tier first (Legendary → Super Rare → Rare → Uncommon),
     and within a tier by season newest first (S12 → S5). Players holding no role
     sort last, alphabetically by Playhub name. Ties inside a season break on
     name so the order is stable across runs.
 
+    current_names: optional {playhub_id: name}. Rows whose Playhub ID appears in
+    it and whose column A differs are renamed to match. Renames elsewhere only
+    happen when something touches a row by ID (recording results, linking), so a
+    player who has stopped competing would otherwise keep a stale name forever.
+    Keyed on ID only — a row with no Playhub ID is never renamed, since its name
+    is the sole way to find it.
+
     Safe to run any time: nothing persists registry row indices — every other
     function re-reads the sheet and recomputes row numbers from that read. It is
     a full-sheet rewrite though, so the caller should hold the sheet lock.
 
-    Returns {'kept': int, 'blanks_removed': int, 'moved': int}.
+    Returns {'kept': int, 'blanks_removed': int, 'moved': int, 'renamed': list}.
     """
     data = _gs.get_values(BOT_DATABASE_SPREADSHEET_ID, PLAYER_REGISTRY_RANGE_NAME)
     raw = data.get('values', [])
@@ -534,6 +541,19 @@ def compact_and_sort_registry() -> dict:
 
     rows = [list(r) + [''] * (10 - len(r)) for r in raw]
     kept = [r for r in rows if any(str(v).strip() for v in r)]
+
+    # Refresh names before sorting — the sort breaks ties on name, so renaming
+    # afterwards would leave the order inconsistent with the contents.
+    renamed = []
+    if current_names:
+        for r in kept:
+            pid = r[1].strip()
+            if not pid:
+                continue
+            latest = current_names.get(pid)
+            if latest and latest != r[0].strip():
+                renamed.append((r[0].strip(), latest))
+                r[0] = latest
 
     # (tier index, role column) ordered highest rarity first. A row is filed
     # under the highest tier it holds, and sorted by that tier's season.
@@ -569,6 +589,7 @@ def compact_and_sort_registry() -> dict:
         'kept':           len(ordered),
         'blanks_removed': len(rows) - len(kept),
         'moved':          moved,
+        'renamed':        renamed,
     }
 
 
