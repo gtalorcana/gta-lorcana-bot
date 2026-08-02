@@ -169,11 +169,11 @@ def get_player_registry() -> list[dict]:
 
 def upsert_player_roles(playhub_name: str, role_seasons: dict[int, str], playhub_id: str = None):
     """
-    Create or update role columns B–E for a player in the registry.
+    Create or update role columns G–J for a player in the registry.
 
     Only writes blank cells (preserves earliest season already recorded).
     Lookup priority: playhub_id (if provided) → playhub_name (case-insensitive).
-    If no row exists, appends a new one.
+    If no row exists, one is written to the first free row below the data.
 
     role_seasons: {role_id: season_str}
     """
@@ -266,7 +266,7 @@ def link_player(
     """
     Fill Discord columns (C–F) for a registry row.
 
-    Lookup priority: playhub_id → playhub_name → append new row.
+    Lookup priority: playhub_id → playhub_name → write a new row below the data.
     Returns {role_id: season} for all non-blank role columns in the matched row.
     Calls _merge_duplicate_rows after writing.
     """

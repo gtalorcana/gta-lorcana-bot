@@ -18,7 +18,7 @@ Classification rules (symmetric):
 
 State persistence:
   Classifications are read from and written back to the
-  STORE_CLASSIFICATIONS_SHEET_NAME tab in STORE_SPREADSHEET_ID.
+  STORE_CLASSIFICATIONS_SHEET_NAME tab in BOT_DATABASE_SPREADSHEET_ID.
   This survives Fly.io restarts. The bootstrap script seeds this sheet
   using the last 2 weeks of RPH data.
 
@@ -431,7 +431,7 @@ def get_gta_store_ids() -> set:
 
 def _load_overrides() -> list:
     """
-    Read manual overrides from the Overrides tab in STORE_SPREADSHEET_ID.
+    Read manual overrides from the Overrides tab in BOT_DATABASE_SPREADSHEET_ID.
 
     Each row matches a classified entry by (store_id, day, time, format) and
     can force a new status, day, and/or time.
@@ -659,7 +659,7 @@ def save_debug_sheet(event_map: dict, analysis: dict, reference_date: date) -> N
 
 def load_bot_state() -> dict:
     """
-    Read persistent bot state from the Bot State tab in STORE_SPREADSHEET_ID.
+    Read persistent bot state from the Bot State tab in BOT_DATABASE_SPREADSHEET_ID.
     Returns a dict of key -> value strings, or {} if the sheet is empty.
 
     # TODO: Replace Google Sheets bot state with a proper database (Postgres/SQLite)
@@ -677,7 +677,7 @@ def load_bot_state() -> dict:
 
 def save_bot_state(state: dict) -> None:
     """
-    Write persistent bot state to the Bot State tab in STORE_SPREADSHEET_ID.
+    Write persistent bot state to the Bot State tab in BOT_DATABASE_SPREADSHEET_ID.
     Clears the range first so deleted keys don't linger as stale rows.
     """
     try:

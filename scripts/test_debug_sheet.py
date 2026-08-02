@@ -10,7 +10,7 @@ Setup:
   3. Set TEST_STORE_SPREADSHEET_ID below to your test sheet ID
   4. Run: python scripts/test_debug_sheet.py
 
-The script temporarily overrides STORE_SPREADSHEET_ID so all writes
+The script temporarily overrides BOT_DATABASE_SPREADSHEET_ID so all writes
 go to the test sheet. Production data is never touched.
 
 To get your test sheet ID:
@@ -43,7 +43,7 @@ load_dotenv()
 import stores
 import constants
 
-# Patch STORE_SPREADSHEET_ID at runtime to redirect all sheet writes
+# Patch BOT_DATABASE_SPREADSHEET_ID at runtime to redirect all sheet writes
 constants.BOT_DATABASE_SPREADSHEET_ID = TEST_STORE_SPREADSHEET_ID
 stores.BOT_DATABASE_SPREADSHEET_ID    = TEST_STORE_SPREADSHEET_ID  # stores.py reads it at call time via _gs
 

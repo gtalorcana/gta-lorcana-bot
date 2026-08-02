@@ -79,9 +79,11 @@ BOT_STATE_RANGE_NAME  = BOT_STATE_SHEET_NAME + "!A1:B"
 STORE_DEBUG_SHEET_NAME = "Store Debug"
 STORE_DEBUG_RANGE_NAME = STORE_DEBUG_SHEET_NAME + "!A1:Z"  # wide enough for 4 week columns + fixed cols
 
-# Player Registry — combined mapping + role audit (STORE_SPREADSHEET_ID)
-# Columns (A–J): Playhub Name | Legendary | Super Rare | Rare | Uncommon |
-#                Discord ID | Discord Display Name | Playhub ID | Linked At | Link Method
+# Player Registry — combined mapping + role audit (BOT_DATABASE_SPREADSHEET_ID)
+# Columns (A–J): Playhub Name | Playhub ID | Discord ID | Discord Display Name |
+#                Linked At | Link Method | Legendary | Super Rare | Rare | Uncommon
+# Playhub ID (B) is the identity key; Playhub Name (A) is only a fallback for
+# historical rows that predate it. Role columns G–J hold the season first earned.
 PLAYER_REGISTRY_SHEET_NAME = "Player Registry"
 PLAYER_REGISTRY_RANGE_NAME = PLAYER_REGISTRY_SHEET_NAME + "!A2:J"
 
