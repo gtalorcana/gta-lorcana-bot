@@ -275,13 +275,15 @@ def link_player(
     data = _gs.get_values(BOT_DATABASE_SPREADSHEET_ID, PLAYER_REGISTRY_RANGE_NAME)
     rows = data.get('values', [])
 
-    row_idx = None
+    row_idx     = None
+    found_by_id = False
 
     if playhub_id:
         for i, row in enumerate(rows):
             padded = list(row) + [''] * (10 - len(row))
             if padded[1].strip() == str(playhub_id):
-                row_idx = i
+                row_idx     = i
+                found_by_id = True
                 break
 
     if row_idx is None and playhub_name:
@@ -327,6 +329,14 @@ def link_player(
     updated_row[5] = link_method
     if playhub_id and not updated_row[1].strip():
         updated_row[1] = str(playhub_id)
+
+    # Sync the display name, but only when the row was found by Playhub ID. The
+    # ID is authoritative, so a differing name means the player renamed on RPH
+    # and column A should follow. A name match tells us nothing new by
+    # definition, and acting on one risks renaming a row we matched loosely.
+    if found_by_id and playhub_name and updated_row[0].strip() != playhub_name:
+        print(f"  ↻ Playhub name updated: {updated_row[0].strip()!r} → {playhub_name!r}")
+        updated_row[0] = playhub_name
 
     _gs.update_values(
         BOT_DATABASE_SPREADSHEET_ID,
@@ -444,9 +454,11 @@ def batch_upsert_player_roles(earners: list[tuple[str, dict, str | None]],
         if not role_seasons:
             continue
 
-        row_idx = None
+        row_idx     = None
+        found_by_id = False
         if playhub_id:
-            row_idx = id_to_idx.get(str(playhub_id))
+            row_idx     = id_to_idx.get(str(playhub_id))
+            found_by_id = row_idx is not None
         if row_idx is None:
             row_idx = exact_to_idx.get(playhub_name)
         if row_idx is None:
@@ -472,6 +484,12 @@ def batch_upsert_player_roles(earners: list[tuple[str, dict, str | None]],
                 changed = True
             if playhub_id and not existing[1].strip():
                 existing[1] = str(playhub_id)
+                changed = True
+            # Rename follow-through — see the note in link_player. Only on an ID
+            # match, so a loose name match can never rewrite column A.
+            if found_by_id and playhub_name and existing[0].strip() != playhub_name:
+                print(f"  ↻ Playhub name updated: {existing[0].strip()!r} → {playhub_name!r}")
+                existing[0] = playhub_name
                 changed = True
             if changed:
                 sheet_row = row_idx + 2

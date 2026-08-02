@@ -1984,10 +1984,19 @@ async def link_command(interaction: discord.Interaction, member: discord.Member,
     if identifier.isdigit():
         playhub_id = identifier
         # A bare ID is trusted even if unseen — mods read these straight off RPH
-        # for a player who has not appeared in standings yet.
-        known = next((e for e in registry if e['playhub_id'] == playhub_id), None)
-        if known:
-            playhub_name = known['playhub_name'] or None
+        # for a player who has not appeared in standings yet. Prefer the current
+        # standings name so linking by ID also carries a rename through to the
+        # registry; fall back to whatever the row already holds.
+        try:
+            found = await loop.run_in_executor(
+                None, lookup_player_standings, None, playhub_id
+            )
+            playhub_name = found['display_name']
+        except Exception as e:
+            print(f"  ⚠ /link: standings lookup failed for id {playhub_id}: {e}")
+        if not playhub_name:
+            known = next((e for e in registry if e['playhub_id'] == playhub_id), None)
+            playhub_name = (known['playhub_name'] or None) if known else None
     else:
         candidates: dict[str, str] = {}   # playhub_id -> best-known name
         for e in registry:
