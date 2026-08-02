@@ -23,7 +23,11 @@
       "Bash(fly auth *)",
       "PowerShell($fly = \"C:\\\\Users\\\\Ryan\\\\.fly\\\\bin\\\\flyctl.exe\"; & $fly auth whoami)",
       "Bash(PYTHONIOENCODING=utf-8 python *)",
-      "PowerShell($fly = \"C:\\\\Users\\\\Ryan\\\\.fly\\\\bin\\\\flyctl.exe\"; & $fly deploy --app gta-lorcana-bot)"
+      "PowerShell($fly = \"C:\\\\Users\\\\Ryan\\\\.fly\\\\bin\\\\flyctl.exe\"; & $fly deploy --app gta-lorcana-bot)",
+      "PowerShell($fly = \"C:\\\\Users\\\\Ryan\\\\.fly\\\\bin\\\\flyctl.exe\"; & $fly deploy --app gta-lorcana-bot 2>&1 | Select-Object -Last 25)",
+      "PowerShell($fly = \"C:\\\\Users\\\\Ryan\\\\.fly\\\\bin\\\\flyctl.exe\"; & $fly status --app gta-lorcana-bot)",
+      "PowerShell($fly = \"C:\\\\Users\\\\Ryan\\\\.fly\\\\bin\\\\flyctl.exe\"; & $fly deploy --app gta-lorcana-bot --wait-timeout 300 2>&1 | Select-Object -Last 22)",
+      "PowerShell($fly = \"C:\\\\Users\\\\Ryan\\\\.fly\\\\bin\\\\flyctl.exe\"; & $fly logs --app gta-lorcana-bot --no-tail | Select-Object -Last 8)"
     ]
   }
 }

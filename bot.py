@@ -50,7 +50,7 @@ from datetime import datetime, timezone, date, timedelta
 
 from clients import gs as _gs, rph_api as _rph_api
 from results import process_event_data, remove_event_data
-from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, refresh_set_champs, set_bot_state_key, delete_bot_state_key, fetch_event_status, create_season_sheets, archive_season_data, get_etb_approval, append_etb_approval, get_player_event_count
+from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, refresh_set_champs, set_bot_state_key, delete_bot_state_key, fetch_event_status, create_season_sheets, archive_season_data, get_etb_approval, append_etb_approval, lookup_player_standings
 
 from constants import (
     DISCORD_BOT_TOKEN,
@@ -1461,13 +1461,85 @@ async def etb_discount(interaction: discord.Interaction, rph_username: str, emai
     loop     = asyncio.get_running_loop()
     discord_id = str(interaction.user.id)
 
-    # ── Step 1: Current season event attendance (from Standings sheet) ───────────
+    # ── Step 1: Resolve identity to a Playhub ID ─────────────────────────────────
+    #
+    # The typed name is only a hint. If this Discord account is already linked,
+    # its Playhub ID wins and the name is ignored outright — a linked caller then
+    # cannot claim someone else's attendance record no matter what they type.
+    registry = []
+    known_id = None
     try:
-        count, playhub_id = await loop.run_in_executor(None, get_player_event_count, rph_username)
+        registry = await loop.run_in_executor(None, get_player_registry)
+        known_id = next(
+            (e['playhub_id'] for e in registry
+             if e['discord_id'] == interaction.user.id and e['playhub_id']),
+            None,
+        )
+    except Exception as e:
+        # Non-fatal — fall back to resolving by name below.
+        print(f"  ⚠ /etb-discount registry lookup failed, falling back to name: {e}")
+
+    try:
+        lookup = await loop.run_in_executor(
+            None, lookup_player_standings, rph_username, known_id
+        )
     except Exception as e:
         print(f"  ✗ /etb-discount standings lookup failed: {e}")
         await interaction.followup.send(
             "⚠️ Couldn't reach the standings sheet right now — please try again in a moment.",
+            ephemeral=True,
+        )
+        return
+
+    # Two players have competed under this name — refuse rather than pick one.
+    if len(lookup['candidate_ids']) > 1:
+        print(f"  ⚠ /etb-discount ambiguous name {rph_username!r} → {sorted(lookup['candidate_ids'])}")
+        await interaction.followup.send(
+            f"⚠️ More than one player has competed under the name **{rph_username}** "
+            f"this season, so we can't tell which record is yours.\n"
+            f"Please ask a mod to link your account with `/link` and try again.",
+            ephemeral=True,
+        )
+        return
+
+    playhub_id   = lookup['playhub_id']
+    count        = lookup['count']
+    # Canonical name from standings beats whatever was typed.
+    rph_username = lookup['display_name'] or rph_username
+
+    # This Playhub ID already belongs to someone else's Discord account.
+    owner = next(
+        (e for e in registry
+         if e['playhub_id'] and e['playhub_id'] == playhub_id and e['discord_id']),
+        None,
+    )
+    if owner and owner['discord_id'] != interaction.user.id:
+        print(f"  ⚠ /etb-discount: {interaction.user} claimed playhub_id={playhub_id} "
+              f"owned by discord {owner['discord_id']}")
+        try:
+            ryan = await bot.fetch_user(ADMIN_USER_IDS[0])
+            await ryan.send(
+                f"⚠️ /etb-discount ownership conflict — {interaction.user} "
+                f"(`{interaction.user.id}`) claimed Playhub `{playhub_id}` "
+                f"(**{rph_username}**), already linked to <@{owner['discord_id']}>."
+            )
+        except Exception:
+            pass
+        await interaction.followup.send(
+            f"⚠️ **{rph_username}** is already linked to a different Discord account.\n"
+            f"If that's you, ask a mod to sort it out — we've flagged it for review.",
+            ephemeral=True,
+        )
+        return
+
+    # Nothing matched the name at all — almost always a typo, so say so rather
+    # than reporting "0 events" and leaving them to guess.
+    if not playhub_id:
+        await interaction.followup.send(
+            f"❌ We couldn't find a player named **{rph_username}** in "
+            f"{season.CURRENT_SEASON} results.\n"
+            f"Check the spelling against your name on tcg.ravensburgerplay.com — "
+            f"it has to match exactly.",
             ephemeral=True,
         )
         return

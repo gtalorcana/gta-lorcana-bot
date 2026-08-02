@@ -742,24 +742,57 @@ def append_etb_approval(
     )
 
 
-def get_player_event_count(rph_username: str) -> tuple[int, str | None]:
+def lookup_player_standings(rph_username: str = None,
+                            playhub_id: str = None) -> dict:
     """
-    Count how many events the player appears in for the current season
-    by scanning the Standings sheet (column D = Playhub Name).
-    Returns (count, playhub_id) where playhub_id is from column G of the
-    first matching row, or None if the player has no standings entries.
+    Resolve a player against the current season's Standings sheet.
+    (Column D = Playhub Name, column G = Playhub ID.)
+
+    Identity is the Playhub ID. Display names change mid-season and are not
+    guaranteed unique, so a name is only ever used to *find* an ID — never to
+    count events. Counting by name splits a renamed player's record across two
+    names (under-count) and merges two players who share one (over-count).
+
+    Pass playhub_id when it is already known, e.g. from the Player Registry;
+    the name is then ignored entirely. Otherwise the name resolves to the set
+    of distinct IDs that have competed under it.
+
+    Returns:
+      count         events for the resolved ID, 0 if unresolved
+      playhub_id    the resolved ID, or None when the name matched 0 or 2+ IDs
+      display_name  that ID's most recent name in standings, or None
+      candidate_ids every ID the name matched — more than one means ambiguous,
+                    and the caller must refuse rather than guess
     """
     result = _gs.get_values(LEAGUE_SPREADSHEET_ID, season.STANDINGS_RANGE_NAME)
     rows   = result.get('values', [])
-    name   = rph_username.lower()
-    count      = 0
-    playhub_id = None
-    for row in rows:
-        if len(row) > 3 and row[3].lower() == name:
-            count += 1
-            if playhub_id is None and len(row) > 6:
-                playhub_id = row[6]
-    return count, playhub_id
+
+    candidate_ids = set()
+    if playhub_id:
+        candidate_ids.add(str(playhub_id))
+    elif rph_username:
+        name = rph_username.strip().lower()
+        for row in rows:
+            if len(row) > 6 and row[3].strip().lower() == name and str(row[6]).strip():
+                candidate_ids.add(str(row[6]).strip())
+
+    resolved = next(iter(candidate_ids)) if len(candidate_ids) == 1 else None
+
+    count        = 0
+    display_name = None
+    if resolved:
+        for row in rows:
+            if len(row) > 6 and str(row[6]).strip() == resolved:
+                count += 1
+                if len(row) > 3 and row[3].strip():
+                    display_name = row[3].strip()   # last wins — most recent name
+
+    return {
+        'count':         count,
+        'playhub_id':    resolved,
+        'display_name':  display_name,
+        'candidate_ids': candidate_ids,
+    }
 
 
 def create_season_sheets(new_season: str) -> list[str]:
