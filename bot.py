@@ -1957,8 +1957,9 @@ async def recheck(interaction: discord.Interaction, after: str = ""):
 
 
 # ── /link ─────────────────────────────────────────────────────
-@tree.command(name="link", description="Link a Discord member to their Playhub ID or display name (mods only)")
-@app_commands.describe(member="Discord member", identifier="Playhub ID (numeric) or Playhub display name")
+@tree.command(name="link", description="Link a Discord member to a Playhub player (mods only)")
+@app_commands.describe(member="Discord member",
+                       identifier="Playhub ID (preferred) — or a display name, which must match exactly one player")
 async def link_command(interaction: discord.Interaction, member: discord.Member, identifier: str):
     if not _is_admin(interaction):
         await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
@@ -1967,35 +1968,72 @@ async def link_command(interaction: discord.Interaction, member: discord.Member,
     await interaction.response.defer(ephemeral=True)
     loop = asyncio.get_running_loop()
 
-    # Determine if identifier is a numeric playhub_id or a display name
-    # Strip surrounding quotes in case the user wrapped the name in quotes
+    # Strip surrounding quotes in case the name was wrapped in them.
     identifier = identifier.strip().strip('"').strip("'")
-    if identifier.isdigit():
-        playhub_id   = identifier
-        playhub_name = None
-    else:
-        playhub_id   = None
-        playhub_name = identifier
 
     registry = await loop.run_in_executor(None, get_player_registry)
 
-    # Check for existing links — block only if the identifier is claimed by a different member.
-    # Linking a second Playhub name to the same member is allowed (rows will be merged).
-    for entry in registry:
-        if not entry['discord_id']:
-            continue
-        if playhub_id and entry['playhub_id'] == playhub_id and entry['discord_id'] != member.id:
+    # ── Resolve the identifier to a Playhub ID ───────────────────────────────
+    #
+    # The ID is what the link is keyed on; a name is only a lookup convenience
+    # and must resolve to exactly one player. Previously an unmatched name fell
+    # through to creating a fresh row with no Playhub ID — 14 of the registry's
+    # ID-less linked rows came in that way, and none of them can ever be matched
+    # by ID afterwards. A name that resolves to nothing is now refused.
+    playhub_name = None
+    if identifier.isdigit():
+        playhub_id = identifier
+        # A bare ID is trusted even if unseen — mods read these straight off RPH
+        # for a player who has not appeared in standings yet.
+        known = next((e for e in registry if e['playhub_id'] == playhub_id), None)
+        if known:
+            playhub_name = known['playhub_name'] or None
+    else:
+        candidates: dict[str, str] = {}   # playhub_id -> best-known name
+        for e in registry:
+            if e['playhub_id'] and e['playhub_name'].lower() == identifier.lower():
+                candidates[e['playhub_id']] = e['playhub_name']
+        try:
+            found = await loop.run_in_executor(
+                None, lookup_player_standings, identifier, None
+            )
+            for pid in found['candidate_ids']:
+                candidates.setdefault(pid, found['display_name'] or identifier)
+        except Exception as e:
+            print(f"  ⚠ /link: standings lookup failed for {identifier!r}: {e}")
+
+        if not candidates:
             await interaction.followup.send(
-                f"⚠️ Playhub ID `{playhub_id}` is already linked to <@{entry['discord_id']}>.",
-                ephemeral=True
+                f"❌ No player found matching **{identifier}**.\n"
+                f"Check the spelling against tcg.ravensburgerplay.com, or pass the "
+                f"numeric Playhub ID instead — the mod-channel suggestions include it.",
+                ephemeral=True,
             )
             return
-        if playhub_name and entry['playhub_name'].lower() == playhub_name.lower() and entry['discord_id'] != member.id:
+        if len(candidates) > 1:
+            listed = "\n".join(f"• `{pid}` — {nm}" for pid, nm in sorted(candidates.items()))
             await interaction.followup.send(
-                f"⚠️ Playhub name `{playhub_name}` is already linked to <@{entry['discord_id']}>.",
-                ephemeral=True
+                f"⚠️ **{identifier}** matches more than one Playhub player:\n{listed}\n\n"
+                f"Re-run `/link` with the correct ID.",
+                ephemeral=True,
             )
             return
+
+        playhub_id, playhub_name = next(iter(candidates.items()))
+
+    # ── Refuse if that Playhub ID belongs to a different Discord account ─────
+    # Linking a second Playhub ID to the same member is still allowed.
+    owner = next(
+        (e for e in registry
+         if e['playhub_id'] == playhub_id and e['discord_id'] and e['discord_id'] != member.id),
+        None,
+    )
+    if owner:
+        await interaction.followup.send(
+            f"⚠️ Playhub ID `{playhub_id}` is already linked to <@{owner['discord_id']}>.",
+            ephemeral=True
+        )
+        return
 
     role_seasons = await loop.run_in_executor(
         None, link_player,
@@ -2009,7 +2047,8 @@ async def link_command(interaction: discord.Interaction, member: discord.Member,
         interaction.guild, member, role_seasons, "link-command"
     )
 
-    id_str = f"ID `{playhub_id}`" if playhub_id else f"name `{playhub_name}`"
+    # Always a resolved ID now; the name is shown alongside when we know it.
+    id_str = f"ID `{playhub_id}`" + (f" (**{playhub_name}**)" if playhub_name else "")
     roles_str = f"\nRoles assigned: {_fmt_roles(added)}" if added else ""
     await interaction.followup.send(
         f"✅ Linked **{member.display_name}** → Playhub {id_str}{roles_str}", ephemeral=True
