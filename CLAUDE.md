@@ -53,4 +53,13 @@ player registry, rarity roles, RPH watcher) is already generic league logic.
 - `ADMIN_USER_IDS` is a list (not set) — supports indexing for pings and `in` checks
 - `_sheet_lock` serializes all sheet writes — never bypass it
 - Bot State sheet is key-value; all runtime state (message IDs, watches, recheck guards) lives there
-- Roles never auto-downgrade; role columns in Player Registry only written if blank (preserve earliest season earned)
+- Roles never auto-downgrade — every path that grants them is additive only
+- Registry role columns (G–J) hold the **earliest** season earned: a blank cell takes the new
+  value, a populated one is replaced only by an earlier season (numeric compare, so S9 < S10)
+- Recording and assigning are separate. `/record-rare-and-uncommon` and
+  `/record-legendary-and-super-rare` write the registry; `/assign-roles-from-registry` reads it
+  back and makes Discord match. The registry is the single source of truth
+- Playhub ID is the identity key everywhere; display names are a fallback for pre-S12 rows only.
+  A row matched by ID has its name refreshed if RPH has renamed the player
+- Never use the Sheets `values.append` API on the Player Registry — it picks its own anchor
+  column by table detection and has misfiled rows. Write to an explicit `A{n}:J{n}` range

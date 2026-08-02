@@ -5,7 +5,9 @@
 - `ADMIN_USER_IDS` is a list (not set) — supports indexing for pings and `in` checks
 - `_sheet_lock` serializes all sheet writes — never bypass it
 - Bot State sheet is key-value; all runtime state (message IDs, watches, recheck guards) lives there
-- Roles never auto-downgrade; role columns in Player Registry only written if blank (preserve earliest season earned)
+- Roles never auto-downgrade — every path that grants them is additive only
+- Registry role columns (G–J) hold the earliest season earned: blank takes the new value, populated is replaced only by an earlier season
+- Recording and assigning are separate; the Player Registry is the single source of truth and Discord is downstream of it. See [roles.md](roles.md)
 - Each spreadsheet ID may init a separate Google Sheets client — audit `clients.py` for OOM risk if adding new spreadsheets
 
 ---

@@ -108,3 +108,82 @@ link is permanent — name matching silently missed renamed players.
 New column layout only applies to tabs created by `/season-rollover` going forward (S13+).
 Deploy this before running `/season-rollover S13`; do not run `/sync-roles` against an
 old-layout leaderboard after deploying.
+
+---
+
+## 2026-08-02 — Registry integrity; record/assign split
+
+### Overview
+Traced a misfiled registry row back through several long-standing bugs, then separated
+recording a role from assigning it. The Player Registry is now the single source of truth
+and Discord is strictly downstream of it.
+
+### Root cause: Sheets `values.append`
+A confirmed link landed in `I240:R240` instead of `A240:J240`. `values.append` does not write
+to the range's first column — it does table detection and writes to the first column of
+whatever "table" it finds. `/sync-roles` had been creating rows holding data only in A and I
+(name + Rare season), and that B–H gap let append anchor on the right-hand block.
+
+This also explained the duplicate rows, which had looked like a separate bug in
+`_merge_duplicate_rows`. Proof: Harding33 held rows 52 and 240 with the same Discord ID. The
+shifted append put row 240's Discord ID in column K, outside the A:J window the merge scans,
+so it saw one match and early-returned. **The merge logic was correct all along.**
+Fixed by writing to an explicitly computed `A{n}:J{n}` row (`2de7184`).
+
+### Commands renamed and split
+`/sync-roles` read the leaderboard, wrote the registry *and* granted Discord roles, and only
+ever touched that season's earners — so a role lost later was never repaired. Now:
+
+| | |
+|---|---|
+| `/record-rare-and-uncommon` | leaderboard → registry I/J. Records only |
+| `/record-legendary-and-super-rare [season]` | invitational → registry G/H. Records only |
+| `/assign-roles-from-registry` | registry → Discord. Additive, idempotent |
+
+`/link` and the ✅ fuzzy-confirm still assign immediately, but all three paths now share
+`_assign_recorded_roles` — the only `add_roles` site for rarity roles. First run of the assign
+command found 4 members missing roles that nothing would otherwise have fixed.
+
+### Other changes
+- **`/record-legendary-and-super-rare`** now writes G/H at all — the old command granted
+  Discord roles and recorded nothing, so those columns had been hand-maintained and stopped
+  after S10. Backfilled S11 and S12; Legendary is complete S5→S12.
+- **Earliest-wins** (`_should_write_season`): a populated role cell is replaced by a
+  genuinely earlier season, compared numerically so `S9` beats `S10`. Both record commands
+  use it, so backfilling an old season out of order is safe.
+- **`/etb-discount`** resolved attendance by display name against Standings — a renamed
+  player was under-counted, two players sharing a name had counts merged. Now resolves to a
+  Playhub ID first (registry link wins over the typed name), counts by ID, refuses on
+  ambiguity, and refuses if the ID belongs to another Discord account.
+- **`/link`** accepted a name and, on no match, created a row with no Playhub ID — 14 of the
+  registry's 23 ID-less linked rows arrived that way. Now resolves to an ID before writing
+  and refuses names that match nothing or match several.
+- **Renames propagate**: `link_player` and `batch_upsert_player_roles` rewrite column A when
+  a row is matched by Playhub ID and the name differs. `docs/roles.md` had claimed this for
+  a long time, but the only implementation lived in `upsert_player_roles`, which nothing calls.
+- **`/tidy-registry`** (new): drops blank rows, refreshes stale names from the current
+  season's sheets, sorts by rarity tier then newest season, unroled players last.
+- **`/season-rollover`** refuses if no registry row carries the outgoing season in I/J.
+  Running it before recording made `/record-rare-and-uncommon` read the new season's empty
+  leaderboard and report success, silently losing the finished season. `force: true` overrides.
+- **`/archive-season`** hardcoded column spans that had drifted: Leaderboard copied `A1:D`
+  after it gained "Events Attended" at E, Results `A1:O` after it gained a column at P. Both
+  were silently dropped, permanently, since the League tabs are deleted by hand afterwards.
+  Spans now derive from the live season ranges.
+- **Stale comments** in `constants.py`, `roles.py`, `stores.py` and `scripts/test_debug_sheet.py`
+  described a column order and a `STORE_SPREADSHEET_ID` constant that no longer exist.
+
+### Data cleanup
+Registry 231 → 222 rows. 5 duplicate rows merged to 3; 18 ID-less rows resolved against the
+S12/S13 sheets (9 filled, 9 were rename-duplicates and were cleared). A read-only audit of
+Discord roles vs the registry found zero drift in either direction.
+
+45 rows still hold roles with no Playhub ID. These are pre-S12 players — the `Player ID`
+column only reached the Leaderboard at S12, so no sheet records their ID.
+
+### Deliberately not done
+- Bundling the season-end steps into one command. Rollover is the only non-idempotent step;
+  bundling would make the whole sequence unretryable.
+- `rph_api.lookup_user_by_username` to resolve the remaining 45. It is dead code, never run
+  live, its docstring says "display name" while the query param is `username`, and it returns
+  `results[0]` without checking how many matched. Writing a wrong ID is worse than a blank one.
