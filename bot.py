@@ -1599,7 +1599,7 @@ async def _apply_etb_approval(discord_id: int, discord_display_name: str,
     try:
         await loop.run_in_executor(
             None, append_etb_approval,
-            str(discord_id), rph_username, email,
+            str(discord_id), playhub_id, rph_username, email,
             datetime.now(timezone.utc).isoformat(), count,
         )
     except Exception as e:
@@ -1835,7 +1835,7 @@ async def etb_discount(interaction: discord.Interaction, rph_username: str, emai
                 try:
                     await loop.run_in_executor(
                         None, append_etb_approval,
-                        discord_id, rph_username, email,
+                        discord_id, playhub_id, rph_username, email,
                         datetime.now(timezone.utc).isoformat(), count,
                     )
                 except Exception as e:

@@ -710,8 +710,10 @@ def delete_bot_state_key(key: str) -> None:
 def get_etb_approval(discord_id: str) -> dict | None:
     """
     Look up an ETB discount approval by Discord ID.
-    Returns a dict with keys (discord_id, rph_username, email, approved_at,
-    events_count) if found, or None if the player has not been approved.
+    Returns a dict with keys (discord_id, playhub_id, rph_username, email,
+    approved_at, events_count) if found, or None if not approved.
+
+    playhub_id is blank on rows written before it was recorded.
     """
     result = _gs.get_values(BOT_DATABASE_SPREADSHEET_ID, ETB_APPROVALS_RANGE_NAME)
     rows   = result.get('values', [])
@@ -719,16 +721,18 @@ def get_etb_approval(discord_id: str) -> dict | None:
         if row and row[0] == discord_id:
             return {
                 'discord_id':   row[0] if len(row) > 0 else '',
-                'rph_username': row[1] if len(row) > 1 else '',
-                'email':        row[2] if len(row) > 2 else '',
-                'approved_at':  row[3] if len(row) > 3 else '',
-                'events_count': row[4] if len(row) > 4 else '',
+                'playhub_id':   row[1] if len(row) > 1 else '',
+                'rph_username': row[2] if len(row) > 2 else '',
+                'email':        row[3] if len(row) > 3 else '',
+                'approved_at':  row[4] if len(row) > 4 else '',
+                'events_count': row[5] if len(row) > 5 else '',
             }
     return None
 
 
 def append_etb_approval(
     discord_id:   str,
+    playhub_id:   str,
     rph_username: str,
     email:        str,
     approved_at:  str,
@@ -739,7 +743,8 @@ def append_etb_approval(
         BOT_DATABASE_SPREADSHEET_ID,
         ETB_APPROVALS_RANGE_NAME,
         'USER_ENTERED',
-        [[discord_id, rph_username, email, approved_at, str(events_count)]],
+        [[discord_id, str(playhub_id), rph_username, email,
+          approved_at, str(events_count)]],
     )
 
 

@@ -94,9 +94,11 @@ PLAYER_REGISTRY_SHEET_NAME = "Player Registry"
 PLAYER_REGISTRY_RANGE_NAME = PLAYER_REGISTRY_SHEET_NAME + "!A2:J"
 
 # ETB Approvals — one row per approved player (BOT_DATABASE_SPREADSHEET_ID)
-# Columns (A–E): Discord ID | RPH Username | Email | Approved At | Events Count
+# Columns (A–F): Discord ID | Playhub ID | RPH Username | Email | Approved At | Events Count
+# Playhub ID (B) is the identity key, as everywhere else; RPH Username (C) is a
+# display name recorded at approval time and may be stale.
 ETB_APPROVALS_SHEET_NAME = "ETB Approvals"
-ETB_APPROVALS_RANGE_NAME = ETB_APPROVALS_SHEET_NAME + "!A2:E"
+ETB_APPROVALS_RANGE_NAME = ETB_APPROVALS_SHEET_NAME + "!A2:F"
 
 # Scripts Constants
 

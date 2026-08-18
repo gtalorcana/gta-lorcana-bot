@@ -354,3 +354,40 @@ Dry-run result after both fixes: the seeded formulas reproduce S13 **exactly** �
 126 players, 0 error cells, 0 row-by-row differences across all 16 Results
 columns, and an identical Leaderboard. Headers, the column-O date format, and the
 seed depth to `RESULTS_SEED_ROWS` all verified, and the test tabs cleaned up.
+
+---
+
+## 2026-08-18 — ETB Approvals records the Playhub ID
+
+### Overview
+`ETB Approvals` recorded only a Discord ID and an RPH display name, so the row
+could not be tied back to a player once they renamed. It now carries the Playhub
+ID as column B, matching the identity rule used everywhere else.
+
+Layout is now `Discord ID | Playhub ID | RPH Username | Email | Approved At |
+Events Count` (`A2:F`). Playhub ID sits at B rather than appended at F so the two
+identity keys are adjacent, matching the field order `_pending_etb_approvals`
+already used.
+
+### Changes
+- **`constants.py`** — `ETB_APPROVALS_RANGE_NAME` `A2:E` → `A2:F`, column comment
+- **`stores.py`** — `get_etb_approval` returns `playhub_id` and its indices shift;
+  `append_etb_approval` takes it as the second argument
+- **`bot.py`** — both `append_etb_approval` call sites pass it. The value was
+  already in scope at each: `_apply_etb_approval` takes `playhub_id` as a
+  parameter, and the already-whitelisted recovery path is guarded by `known_id`
+
+### Sheet
+Column B inserted and backfilled from the Player Registry by Discord ID — 8 of 9
+rows resolved. The unresolved one is the `gtalorcana` admin account (a March test
+row claiming `ryanfan`); the name resolves to Playhub 37381, but that ID is
+already bound to a different Discord account in the registry, so filling it in
+would assert a two-to-one binding the registry does not allow. Left blank —
+`get_etb_approval` documents that pre-existing rows may have a blank ID.
+
+### Verified
+`append_values` is used on this tab, and the note in CLAUDE.md records that the
+same API misfiled rows on the Player Registry by choosing its own anchor column
+via table detection. Tested with a sentinel row at the new 6-column width: it
+landed in the correct columns and round-tripped through `get_etb_approval`
+intact. Sentinel removed.
