@@ -368,6 +368,8 @@ async def _post_where_to_play(channel, messages: list[str], loop) -> None:
 _pending_link_suggestions: dict[int, dict] = {}
 # invitational assignments: legendary/super_rare candidate lists, event_name
 _pending_invitational_assignments: dict[int, dict] = {}
+# etb approvals: discord_id, playhub_id, rph_username, email, count, customer_id
+_pending_etb_approvals: dict[int, dict] = {}
 
 @tasks.loop(minutes=1)
 async def where_to_play_weekly():
@@ -1412,6 +1414,79 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     colour=discord.Colour.red()
                 ))
 
+    # ── ETB discount approval ──────────────────────────────────
+    elif payload.message_id in _pending_etb_approvals:
+        req = _pending_etb_approvals.pop(payload.message_id)
+        try:
+            user = bot.get_user(req['discord_id']) or await bot.fetch_user(req['discord_id'])
+        except Exception:
+            user = None
+
+        if emoji == "✅":
+            err = await _apply_etb_approval(
+                req['discord_id'], req['discord_name'],
+                req['playhub_id'], req['rph_username'], req['email'],
+                req['count'], req['customer_id'],
+            )
+            if err:
+                if mod_ch:
+                    await mod_ch.send(embed=make_embed(
+                        title="⚠️ ETB Approval Failed",
+                        description=(
+                            f"Shopify whitelist failed for <@{req['discord_id']}> "
+                            f"(**{req['rph_username']}**).\n`{err}`\n\n"
+                            f"Nothing was linked or granted — they'll need to run "
+                            f"`/etb-discount` again."
+                        ),
+                        colour=discord.Colour.red()
+                    ))
+                return
+
+            dm_ok = False
+            if user:
+                try:
+                    await user.send(_etb_code_message(req['email']))
+                    dm_ok = True
+                except discord.Forbidden:
+                    pass
+
+            if mod_ch:
+                await mod_ch.send(embed=make_embed(
+                    title="✅ ETB Discount Approved",
+                    description=(
+                        f"**{req['rph_username']}** (Playhub `{req['playhub_id']}`) "
+                        f"→ <@{req['discord_id']}>\n"
+                        f"Linked, whitelisted, and "
+                        + ("DM'd the code."
+                           if dm_ok else
+                           "**DM failed** — their DMs are closed, so the code needs "
+                           "passing on by hand.")
+                    ),
+                    colour=discord.Colour.green()
+                ))
+        else:
+            if user:
+                try:
+                    await user.send(
+                        f"❌ Your ETB discount request for **{req['rph_username']}** "
+                        f"wasn't approved.\n\n"
+                        f"If that's genuinely your Playhub profile, ask a mod to link "
+                        f"your Discord account with `/link`, then run `/etb-discount` "
+                        f"again."
+                    )
+                except discord.Forbidden:
+                    pass
+            if mod_ch:
+                await mod_ch.send(embed=make_embed(
+                    title="❌ ETB Discount Denied",
+                    description=(
+                        f"Denied <@{req['discord_id']}>'s claim on "
+                        f"**{req['rph_username']}** (Playhub `{req['playhub_id']}`). "
+                        f"Nothing was linked or granted."
+                    ),
+                    colour=discord.Colour.red()
+                ))
+
     # ── Invitational assignment confirmation ───────────────────
     elif payload.message_id in _pending_invitational_assignments:
         assignment = _pending_invitational_assignments.pop(payload.message_id)
@@ -1481,6 +1556,120 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
 _ETB_DISCOUNT_CODE    = "ETBGTALORCANA"
 _ETB_DISCOUNT_MIN_EVENTS = 3
+
+
+def _etb_code_message(email: str) -> str:
+    """The approval DM. Shared by the instant and mod-confirmed paths."""
+    return (
+        f"✅ **You're approved for the ETB GTA Lorcana discount!**\n\n"
+        f"Discount code: `{_ETB_DISCOUNT_CODE}`\n"
+        f"Shop: enterthebattlefield.ca\n\n"
+        f"Your account ({email}) has been activated.\n"
+        f"The code will work at checkout on your next visit."
+    )
+
+
+async def _apply_etb_approval(discord_id: int, discord_display_name: str,
+                              playhub_id: str, rph_username: str, email: str,
+                              count: int, customer_id) -> str | None:
+    """
+    The granting half of /etb-discount: Shopify whitelist, approval row,
+    registry link.
+
+    Split out so the instant path (caller already linked, so their Playhub ID is
+    authoritative) and the mod-confirmed path (caller was unlinked, so a human
+    vouched for the identity) share one implementation.
+
+    Returns an error string if the Shopify whitelist failed, else None. The
+    approval-row and registry writes are best-effort and only logged — the
+    discount is already live in Shopify by then, so failing the caller would be
+    a lie.
+    """
+    loop = asyncio.get_running_loop()
+
+    if _shopify and _etb_price_rule_id and customer_id is not None:
+        try:
+            await loop.run_in_executor(
+                None, _shopify.add_to_whitelist, _etb_price_rule_id, customer_id
+            )
+        except Exception as e:
+            print(f"  ✗ /etb-discount add_to_whitelist failed for {rph_username}: {e}")
+            return str(e)
+
+    try:
+        await loop.run_in_executor(
+            None, append_etb_approval,
+            str(discord_id), rph_username, email,
+            datetime.now(timezone.utc).isoformat(), count,
+        )
+    except Exception as e:
+        print(f"  ✗ /etb-discount ETB approval write failed for discord_id={discord_id}: {e}")
+
+    try:
+        await loop.run_in_executor(
+            None, link_player,
+            int(discord_id), discord_display_name, "etb-discount",
+            playhub_id, rph_username,
+        )
+        print(f"  ✓ /etb-discount: linked {rph_username} (playhub_id={playhub_id}) → discord {discord_id}")
+    except Exception as e:
+        print(f"  ⚠ /etb-discount: Player Registry link failed for {rph_username}: {e}")
+
+    return None
+
+
+async def _post_etb_approval_request(interaction: discord.Interaction,
+                                     playhub_id: str, rph_username: str,
+                                     email: str, count: int, customer_id) -> bool:
+    """
+    Ask the mods to vouch for an unlinked caller before anything is granted.
+
+    An unlinked caller offers nothing but a typed name, and RPH display names are
+    public — so the name alone must not buy a discount or, worse, a registry link
+    that would hand them another player's earned roles. Attendance is already
+    verified by the time we get here; only the granting waits.
+
+    Returns True if the prompt was posted.
+    """
+    guild  = interaction.guild or bot.get_guild(int(DISCORD_GUILD_ID))
+    mod_ch = get_channel_by_id(guild, MOD_CHANNEL_ID) if guild and MOD_CHANNEL_ID else None
+    if not mod_ch:
+        print("  ⚠ /etb-discount: mod channel unavailable — cannot request approval")
+        return False
+
+    # How closely the caller's own Discord name resembles the name they claim.
+    # Not a decision, just the first thing a mod would check by eye anyway.
+    _member, score = fuzzy_match_member(rph_username, [interaction.user])
+
+    msg = await mod_ch.send(embed=make_embed(
+        title="🔐 ETB Discount — Identity Check",
+        description=(
+            f"**Discord:** {interaction.user.mention} (`{interaction.user.display_name}`)\n"
+            f"**Claims to be:** {rph_username} (Playhub `{playhub_id}`)\n"
+            f"**Events this season:** {count}\n"
+            f"**Email:** {email}\n"
+            f"**Name similarity:** {score:.0%}\n\n"
+            f"This Discord account isn't linked to a Playhub ID yet. Approving "
+            f"links it **and** grants the discount — so the linked player's "
+            f"earned roles become theirs.\n\n"
+            f"React ✅ to approve or ❌ to deny."
+        ),
+        colour=discord.Colour.yellow(),
+    ))
+    await msg.add_reaction("✅")
+    await msg.add_reaction("❌")
+
+    _pending_etb_approvals[msg.id] = {
+        'discord_id':   interaction.user.id,
+        'discord_name': interaction.user.display_name,
+        'playhub_id':   playhub_id,
+        'rph_username': rph_username,
+        'email':        email,
+        'count':        count,
+        'customer_id':  customer_id,
+    }
+    return True
+
 
 @tree.command(name="etb-discount", description="Unlock the Enter the Battlefield community discount by verifying your GTA Lorcana event attendance")
 @app_commands.describe(
@@ -1638,14 +1827,19 @@ async def etb_discount(interaction: discord.Interaction, rph_username: str, emai
             already = False  # safe to proceed — worst case we add them again (no-op)
 
         if already:
-            try:
-                await loop.run_in_executor(
-                    None, append_etb_approval,
-                    discord_id, rph_username, email,
-                    datetime.now(timezone.utc).isoformat(), count,
-                )
-            except Exception as e:
-                print(f"  ✗ /etb-discount ETB approval write failed (recovery): {e}")
+            # Recover the missing Bot State row — but only for a linked caller,
+            # whose Playhub ID is authoritative. From an unlinked one the name is
+            # still just a claim, and this row is the audit trail. The whitelist
+            # is theirs either way: it was found by their own email, not the name.
+            if known_id:
+                try:
+                    await loop.run_in_executor(
+                        None, append_etb_approval,
+                        discord_id, rph_username, email,
+                        datetime.now(timezone.utc).isoformat(), count,
+                    )
+                except Exception as e:
+                    print(f"  ✗ /etb-discount ETB approval write failed (recovery): {e}")
             await interaction.followup.send(
                 f"You're already approved! 🎉\n"
                 f"Use code `{_ETB_DISCOUNT_CODE}` at enterthebattlefield.ca",
@@ -1655,71 +1849,73 @@ async def etb_discount(interaction: discord.Interaction, rph_username: str, emai
     else:
         print(f"  ⚠ /etb-discount: Shopify not configured — skipping Steps 4–6 for {rph_username}")
 
-    # ── Step 6: Apply Shopify whitelist ───────────────────────
-    if _shopify and _etb_price_rule_id and customer is not None:
-        try:
-            await loop.run_in_executor(
-                None, _shopify.add_to_whitelist, _etb_price_rule_id, customer['id']
-            )
-        except Exception as e:
-            print(f"  ✗ /etb-discount add_to_whitelist failed for {rph_username}: {e}")
-            try:
-                ryan = await bot.fetch_user(ADMIN_USER_IDS[0])
-                await ryan.send(
-                    f"⚠️ /etb-discount Shopify whitelist failed for {interaction.user} "
-                    f"(rph: {rph_username})\nError: {e}"
-                )
-            except Exception:
-                pass
+    # ── Identity gate: unlinked callers need a mod to vouch ────
+    #
+    # Everything above only reads — attendance, Shopify account, prior approval
+    # — so nothing has been granted yet. A caller already bound to a Playhub ID
+    # proved that identity when they were linked, so they carry straight on.
+    # Anyone else has offered nothing but a public display name, and that must
+    # buy neither the discount nor a registry link.
+    if not known_id:
+        if any(r['discord_id'] == interaction.user.id for r in _pending_etb_approvals.values()):
             await interaction.followup.send(
-                "⚠️ Something went wrong on our end — Ryan has been notified and will\n"
-                "approve you manually shortly. Sorry for the inconvenience!",
+                "🕓 You already have a request waiting on a mod — hang tight, "
+                "you'll get a DM as soon as it's reviewed.",
                 ephemeral=True,
             )
             return
 
-    # ── Step 7: Record approval and link to Player Registry ───
-    try:
-        await loop.run_in_executor(
-            None, append_etb_approval,
-            discord_id, rph_username, email,
-            datetime.now(timezone.utc).isoformat(), count,
+        posted = await _post_etb_approval_request(
+            interaction, playhub_id, rph_username, email, count,
+            customer['id'] if customer else None,
         )
-    except Exception as e:
-        print(f"  ✗ /etb-discount ETB approval write failed for discord_id={discord_id}: {e}")
+        if posted:
+            await interaction.followup.send(
+                f"🔎 We found **{count}** {season.CURRENT_SEASON} events for "
+                f"**{rph_username}** — nice work.\n\n"
+                f"Your Discord account isn't linked to a Playhub profile yet, so a "
+                f"mod needs to confirm it's you. You'll get a DM with the code as "
+                f"soon as they do.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.followup.send(
+                "⚠️ Couldn't reach the mods right now — please try again in a moment.",
+                ephemeral=True,
+            )
+        return
+
+    # ── Steps 6 & 7: Whitelist, record approval, refresh the link ─
+    err = await _apply_etb_approval(
+        interaction.user.id, interaction.user.display_name,
+        playhub_id, rph_username, email, count,
+        customer['id'] if customer else None,
+    )
+    if err:
+        try:
+            ryan = await bot.fetch_user(ADMIN_USER_IDS[0])
+            await ryan.send(
+                f"⚠️ /etb-discount Shopify whitelist failed for {interaction.user} "
+                f"(rph: {rph_username})\nError: {err}"
+            )
+        except Exception:
+            pass
+        await interaction.followup.send(
+            "⚠️ Something went wrong on our end — Ryan has been notified and will\n"
+            "approve you manually shortly. Sorry for the inconvenience!",
+            ephemeral=True,
+        )
+        return
 
     try:
-        await loop.run_in_executor(
-            None, link_player,
-            int(discord_id), interaction.user.display_name, "etb-discount",
-            playhub_id, rph_username,
-        )
-        print(f"  ✓ /etb-discount: linked {rph_username} (playhub_id={playhub_id}) → discord {discord_id}")
-    except Exception as e:
-        print(f"  ⚠ /etb-discount: Player Registry link failed for {rph_username}: {e}")
-
-    try:
-        await interaction.user.send(
-            f"✅ **You're approved for the ETB GTA Lorcana discount!**\n\n"
-            f"Discount code: `{_ETB_DISCOUNT_CODE}`\n"
-            f"Shop: enterthebattlefield.ca\n\n"
-            f"Your account ({email}) has been activated.\n"
-            f"The code will work at checkout on your next visit."
-        )
+        await interaction.user.send(_etb_code_message(email))
         await interaction.followup.send(
             "✅ You're approved! Check your DMs for the discount code.",
             ephemeral=True,
         )
     except discord.Forbidden:
         # DMs disabled — send the code ephemerally instead
-        await interaction.followup.send(
-            f"✅ **You're approved for the ETB GTA Lorcana discount!**\n\n"
-            f"Discount code: `{_ETB_DISCOUNT_CODE}`\n"
-            f"Shop: enterthebattlefield.ca\n\n"
-            f"Your account ({email}) has been activated.\n"
-            f"The code will work at checkout on your next visit.",
-            ephemeral=True,
-        )
+        await interaction.followup.send(_etb_code_message(email), ephemeral=True)
 
 
 # ── /schedule ─────────────────────────────────────────────────

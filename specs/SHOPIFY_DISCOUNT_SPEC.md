@@ -131,6 +131,35 @@ segment). If already whitelisted:
 > Use code `ETBGTALORCANA` at enterthebattlefield.ca
 > Also update Bot State if key was missing (graceful recovery).
 
+**Step 5b — Identity gate (mod approval for unlinked callers):**
+Steps 1–5 only *read*. Nothing has been granted at this point, and that is
+deliberate: the only identity evidence an unlinked caller offers is a typed
+display name, and RPH display names are public. Granting on a name alone would
+let anyone claim another player's attendance record — and because the grant used
+to write a Player Registry link, it would also hand them that player's earned
+rarity roles via `/assign-roles-from-registry`.
+
+So the flow forks:
+
+- **Caller already linked** (a registry row binds their Discord ID to a Playhub
+  ID): their ID is authoritative and the typed name was ignored back in Step 1.
+  Proceed straight to Step 6.
+- **Caller not linked:** post a ✅/❌ identity check to the mod channel showing
+  the claim, the event count, the email, and how closely their Discord name
+  resembles the claimed RPH name. Tell the caller a mod is reviewing it. Steps
+  6–7 run only when a mod reacts ✅, and the code is DM'd at that point.
+
+A second `/etb-discount` while a request is pending is refused rather than
+posting a duplicate prompt.
+
+> 🔎 We found **N** S13 events for **name** — nice work.
+>
+> Your Discord account isn't linked to a Playhub profile yet, so a mod needs to
+> confirm it's you. You'll get a DM with the code as soon as they do.
+
+On ❌ the caller is DM'd a decline pointing them at `/link`. Nothing is written
+either way.
+
 **Step 6 — Apply Shopify whitelist:**
 Call Shopify API to whitelist the email.
 (Exact call TBD — stub until Kris confirms mechanism.)
@@ -151,6 +180,10 @@ Value: {
   events_count
 }
 ```
+
+Also write the Player Registry link (`link_player`, method `etb-discount`). For
+an already-linked caller this is a no-op that refreshes their display name; for
+a mod-approved caller it is the binding the mod just vouched for.
 
 DM player:
 > ✅ **You're approved for the ETB GTA Lorcana discount!**

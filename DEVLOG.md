@@ -187,3 +187,52 @@ column only reached the Leaderboard at S12, so no sheet records their ID.
 - `rph_api.lookup_user_by_username` to resolve the remaining 45. It is dead code, never run
   live, its docstring says "display name" while the query param is `username`, and it returns
   `results[0]` without checking how many matched. Writing a wrong ID is worse than a blank one.
+
+---
+
+## 2026-08-05 — /etb-discount no longer self-serves a registry link
+
+### Overview
+`/etb-discount` was a third writer of Playhub ID → Discord ID bindings, and the only one
+with no human in the loop. It now proposes rather than binds: an unlinked caller's claim
+goes to the mod channel as a ✅/❌ prompt, and nothing is granted until a mod ticks it.
+
+### The hole
+An unlinked caller typed a display name; if it resolved to a single Playhub ID in the
+current standings and nobody had claimed that ID yet, the command called `link_player`
+directly (old `bot.py:1694`). RPH display names are public, so the name was the entire
+credential.
+
+The discount was the smaller prize. Because roles flow registry → Discord via
+`/assign-roles-from-registry`, a successful claim also handed over every rarity role
+recorded against that row. The existing ownership check only refused IDs already bound to
+another Discord account, so every earner row with a blank `discord_id` — including the 45
+pre-S12 ID-less rows — was exposed.
+
+### Changes
+- **`bot.py`**
+  - `_apply_etb_approval` — the granting half (Shopify whitelist, approvals row, registry
+    link), extracted so the instant path and the mod-confirmed path share one
+    implementation. `_etb_code_message` shares the DM text the same way.
+  - `_post_etb_approval_request` — posts the identity check, including how closely the
+    caller's own Discord name resembles the name they claim (via `fuzzy_match_member`
+    against the single caller). A signal for the mod, not a decision.
+  - `etb_discount` — steps 1–5 still run for everyone and still only read, so a bad email
+    or a typo'd name is caught before anyone waits on a mod. The fork is after step 5:
+    linked callers proceed, unlinked ones get the prompt. A repeat call while a request is
+    pending is refused rather than posting a duplicate.
+  - `on_raw_reaction_add` — new branch grants on ✅ (DMs the code; tells the mod channel if
+    their DMs are closed) and DMs a decline pointing at `/link` on ❌.
+  - The step-5 already-whitelisted recovery only writes the approvals row for a linked
+    caller now. The whitelist was found by the caller's own email so confirming it is
+    truthful either way, but the row records an RPH name that is still just a claim.
+  - New in-memory state: `_pending_etb_approvals`.
+- **`specs/SHOPIFY_DISCOUNT_SPEC.md`** — new Step 5b documenting the gate; Step 7 now
+  mentions the registry link it always performed.
+
+### Known limitation
+`_pending_etb_approvals` is in-memory, like `_pending_link_suggestions` and
+`_pending_invitational_assignments`. A restart drops pending prompts and a later ✅ does
+nothing at all — no write, no reply — while the embed still looks live. Every Fly deploy
+does this. Persisting all three to Bot State is the next piece of work; the caller can
+re-run `/etb-discount` in the meantime.
