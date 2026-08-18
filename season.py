@@ -96,7 +96,7 @@ def init(bot_state: dict) -> None:
     RESULTS_SHEET_NAME           = CURRENT_SEASON + " Results"
     SET_CHAMPS_EVENTS_SHEET_NAME = CURRENT_SEASON + " Set Champs"
 
-    STANDINGS_RANGE_NAME         = STANDINGS_SHEET_NAME         + "!A3:G"
+    STANDINGS_RANGE_NAME         = STANDINGS_SHEET_NAME         + "!A3:I"
     EVENTS_RANGE_NAME            = EVENTS_SHEET_NAME            + "!A2:G"
     EVENTS_TIMESTAMP_RANGE_NAME  = EVENTS_SHEET_NAME            + "!J1:K1"
     LEADERBOARD_RANGE_NAME       = LEADERBOARD_SHEET_NAME       + "!A2:E"

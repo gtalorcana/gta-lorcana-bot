@@ -61,6 +61,12 @@ TIMEZONE_ET = "America/Toronto"
 # Google Sheets Constants
 LEAGUE_SPREADSHEET_ID = "1dSv5lzVwhot1DR0e2FghyS7R1Vm1ODZtH3d8e3C55Zo"
 
+# How far down a new season's Results tab the per-row formulas (C, M, N, O, P)
+# are seeded. Only rows with a player in column A produce output, so extra rows
+# are inert — this is headroom, and must exceed the largest expected player
+# count for a season (S13 ran 127).
+RESULTS_SEED_ROWS = 300
+
 # Separate spreadsheet for bot backend data
 BOT_DATABASE_SPREADSHEET_ID  = "1cKiZqVu88_umUbrGPXk-dmZhHEzx1uL-pGR6dQOJyaU"
 

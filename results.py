@@ -41,6 +41,71 @@ def _is_all_draw_round(last_standings: list, prev_standings: list) -> bool:
     return len(byes) <= 1 and len(non_bye) > 0 and all(d == 1 for d in non_bye)
 
 
+def _rewind_records(last_standings: list, prev_standings: list) -> list:
+    """
+    Return prev_standings with every player's record rewound by one round.
+
+    RPH's per-round /standings endpoint returns `match_points` as of that round
+    but `record` as of the event's *final* round — a round-3 payload carries the
+    full 4-round record. So dropping a round without rewinding writes round N-1's
+    points beside round N's record, and W*3 + D stops matching Points for every
+    player at that event.
+
+    The dropped round's result is recovered from the same match_points delta
+    `_is_all_draw_round` uses: +3 removes a win (or bye), +1 a draw, 0 a loss.
+    A player absent from the later round, or whose record would go negative, is
+    left untouched rather than corrupted.
+    """
+    prev_points = {s['player']['id']: s['match_points'] for s in prev_standings}
+    deltas = {
+        s['player']['id']: s['match_points'] - prev_points.get(s['player']['id'], 0)
+        for s in last_standings
+    }
+
+    rewound = []
+    for standing in prev_standings:
+        w, l, d = _parse_record(standing['record'])
+        delta = deltas.get(standing['player']['id'])
+
+        if delta == 3 and w > 0:
+            w -= 1
+        elif delta == 1 and d > 0:
+            d -= 1
+        elif delta == 0 and l > 0:
+            l -= 1
+        else:
+            rewound.append(standing)
+            continue
+
+        rewound.append({**standing, 'record': f"{w}-{l}-{d}"})
+
+    return rewound
+
+
+def _parse_record(record) -> list:
+    """
+    Split an RPH "W-L-D" record string into [wins, losses, draws] integers.
+
+    Stored as three numeric columns rather than one string because Sheets parses
+    values written with USER_ENTERED exactly as if typed: "2-1-0" is a valid date
+    and silently becomes the serial 36527, destroying the record. Only records
+    with a 0 in the W or L slot ("3-0-0") survive, because month/day 0 is invalid.
+    Integers cannot be coerced that way, so the whole class of bug disappears.
+
+    Anything unparseable yields [0, 0, 0] and a warning rather than raising —
+    one malformed record should not abort an entire event import.
+    """
+    parts = str(record or "").split("-")
+    if len(parts) != 3:
+        print(f"    ⚠ Unparseable match record {record!r} — writing 0-0-0")
+        return [0, 0, 0]
+    try:
+        return [int(p) for p in parts]
+    except ValueError:
+        print(f"    ⚠ Non-numeric match record {record!r} — writing 0-0-0")
+        return [0, 0, 0]
+
+
 def _fetch_single_event(rph_url, thread_id, note=None, validate_date=False):
     """
     Fetch RPH data for a single event URL.
@@ -128,7 +193,9 @@ def _fetch_single_event(rph_url, thread_id, note=None, validate_date=False):
         if _is_all_draw_round(standings, prev_standings):
             print(f"    ⚠ Last round detected as all-draw — auto-using second-to-last round")
             last_round_id = prev_round_id
-            standings = prev_standings
+            # Rewind the records too — RPH reports them as of the final round, so
+            # keeping them as-is leaves W-L-D describing a round that was dropped.
+            standings = _rewind_records(standings, prev_standings)
             event_row[2] = "Auto: all-draw last round removed"
             warnings.append("⚠️ Last round was all-draws — standings taken from the previous round automatically.")
 
@@ -138,9 +205,9 @@ def _fetch_single_event(rph_url, thread_id, note=None, validate_date=False):
             event['store']['name'],
             standing['rank'],
             standing['user_event_status']['best_identifier'],
-            standing['record'],
+            *_parse_record(standing['record']),  # wins / losses / draws — cols E–G
             standing['match_points'],
-            str(standing['player']['id']),  # playhub_id — col G
+            str(standing['player']['id']),  # playhub_id — col I
         ])
 
     return event_row, standing_rows, warnings
@@ -236,7 +303,7 @@ def process_event_data(rph_url, thread_id):
         standings_data     = _gs.get_values(LEAGUE_SPREADSHEET_ID, season.STANDINGS_RANGE_NAME)
         existing_standings = standings_data.get('values', [])
         to_clear = [
-            {"range": season.STANDINGS_SHEET_NAME + f"!A{idx + 3}:G{idx + 3}", "values": [[""] * 7]}
+            {"range": season.STANDINGS_SHEET_NAME + f"!A{idx + 3}:I{idx + 3}", "values": [[""] * 9]}
             for idx, row in enumerate(existing_standings)
             if len(row) >= 2 and row[0] == event_date and row[1] == store_name
         ]

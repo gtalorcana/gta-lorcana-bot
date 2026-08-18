@@ -199,6 +199,53 @@ class GoogleSheetsApi:
         except HttpError as error:
             raise
 
+    def set_column_date_format(self, spreadsheet_id: str, sheet_title: str,
+                               column_index: int, num_rows: int,
+                               pattern: str = "yyyy-mm-dd") -> None:
+        """
+        Apply a date number format to one column of a tab, from row 2 down.
+
+        column_index is 0-based (A=0). Needed for columns holding a date produced
+        by a formula — MAX() over a date column returns a bare serial, which
+        renders as e.g. 46251 unless the cell is formatted as a date.
+
+        Silently does nothing if the tab is not found.
+        """
+        meta = self.service.spreadsheets().get(
+            spreadsheetId=spreadsheet_id, fields="sheets.properties"
+        ).execute()
+        sheet_id = next(
+            (s["properties"]["sheetId"] for s in meta["sheets"]
+             if s["properties"]["title"] == sheet_title),
+            None,
+        )
+        if sheet_id is None:
+            print(f"  ⚠ set_column_date_format: no tab named '{sheet_title}'")
+            return
+
+        try:
+            self.service.spreadsheets().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body={"requests": [{
+                    "repeatCell": {
+                        "range": {
+                            "sheetId":          sheet_id,
+                            "startRowIndex":    1,
+                            "endRowIndex":      num_rows,
+                            "startColumnIndex": column_index,
+                            "endColumnIndex":   column_index + 1,
+                        },
+                        "cell": {"userEnteredFormat": {
+                            "numberFormat": {"type": "DATE", "pattern": pattern}
+                        }},
+                        "fields": "userEnteredFormat.numberFormat",
+                    }
+                }]},
+            ).execute()
+            print(f"  Date format applied to '{sheet_title}' column {column_index}")
+        except HttpError as error:
+            raise
+
     def append_values(self, spreadsheet_id, range_name, value_input_option, _values):
         try:
             body = {"values": _values}

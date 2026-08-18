@@ -236,3 +236,96 @@ pre-S12 ID-less rows — was exposed.
 nothing at all — no write, no reply — while the embed still looks live. Every Fly deploy
 does this. Persisting all three to Bot State is the next piece of work; the caller can
 re-run `/etb-discount` in the meantime.
+
+---
+
+## 2026-08-18 — Standings W/L/D columns, ID-keyed Results, best-10 scoring
+
+### Overview
+`S13 Standings` column E held a single `W-L-D` string. It is now three integer
+columns, and the Results tab that reads it was rebuilt to key on Playhub ID
+instead of display name. Three separate scoring bugs fell out of the rewrite.
+
+### The record column was being destroyed on write
+Standings rows are written with `valueInputOption="USER_ENTERED"`, which parses
+values exactly as if typed. `"2-1-0"` is a valid date, so Sheets stored the serial
+`36527` and the record was gone. Only records with a `0` in the W or L slot
+(`"3-0-0"`) survived, because month 0 and day 0 are invalid. 246 of 346 S13 rows
+were affected, and S12's archive is 81% lost.
+
+Column E fed no formula and no code path, so nothing scored wrong — but the data
+was unrecoverable from the cell alone. Three integer columns cannot be coerced,
+which removes the failure mode rather than working around it.
+
+Recovered by replaying all 1,331 `W-L-D` combinations through `USER_ENTERED` to
+build a serial → record table, then narrowing with `Points == W*3 + D`. 100
+serials are ambiguous (`2-1-0` and `0-1-2` both give `36527`); the points column
+resolved every one.
+
+### Three bugs in the Results formulas
+- **"Top 10" took the first 10, not the best 10.** `SORTN(FILTER(A:G,…),10,0,15,FALSE)`
+  passed sort column 15 for a 7-column array. An out-of-range sort column silently
+  disables the sort, so the cap kept whichever 10 rows came first. Dustymac scored
+  58 instead of 64. `sort_column` indexes the *filtered* array, not the sheet.
+- **Grouping by display name merged and split players.** Sheets' `FILTER` and
+  `COUNTIF` are case-insensitive, so `HABIBI` and `Habibi` — two different people —
+  each collected both players' events and both showed 10 points instead of 3 and 7.
+  A mid-season rename split one player across two rows.
+- **Column P was `#REF!` for anyone with two events on one date.** The inner
+  `FILTER` returned two rows into one cell. Now `MIN`, which also picks the better
+  rank of the two.
+
+### RPH reports records as of the final round
+When `_is_all_draw_round` fires, the bot takes standings from the previous round.
+But RPH's per-round endpoint returns `match_points` for that round and `record` as
+of the event's *final* round — verified: the round-3 payload's records are
+byte-identical to round 4's for all 9 players. So the dropped round stayed in the
+record while its points did not, and `W*3 + D` disagreed with Points for the whole
+event.
+
+`_rewind_records()` rewinds each record by one round using the same `match_points`
+delta `_is_all_draw_round` already computes: +3 removes a win or bye, +1 a draw,
+0 a loss. Reconstructs all 9 Derpy Cards rows exactly, including guan87, whose +3
+was a bye — rewinding a *win* gives `0-2-1` = 1 point, matching a rank-9 finish
+that made no sense before.
+
+### Changes
+- **`season.py`** — `STANDINGS_RANGE_NAME` `A3:G` → `A3:I`
+- **`results.py`**
+  - `_parse_record()` splits `"W-L-D"` into ints; unparseable input yields `[0,0,0]`
+    and a warning rather than aborting an event import
+  - `_rewind_records()` as above, called where the all-draw path previously did
+    `standings = prev_standings`
+  - `standing_rows` emits 9 columns; standings clear range `:G`/`*7` → `:I`/`*9`
+    (the Events clear at 7 columns is unrelated and unchanged)
+- **`stores.py`**
+  - Playhub ID index `6` → `8` in `get_current_display_names` and
+    `lookup_player_standings`
+  - `create_season_sheets` seeds `Win | Loss | Draw` headers and the *current*
+    Results formulas — it was still emitting every bug listed above, so the next
+    rollover would have reintroduced all of them. Per-row formulas now seed to
+    `RESULTS_SEED_ROWS` instead of being dragged by hand; the manual fill had
+    stopped one row short, leaving the last player with no Points
+- **`constants.py`** — `RESULTS_SEED_ROWS`
+- **`util/google_sheets_api_utils.py`** — `set_column_date_format()`, since Results
+  column O is a `MAX()` over dates and renders as a bare serial otherwise
+
+### Sheet changes (S13, applied directly)
+- Standings reshaped to `Date | Store | Rank | Players | Win | Loss | Draw | Points |
+  Playhub User ID`; 344 of 346 records decoded, 2 filled in by hand
+- Results A–P rebuilt: ID-keyed, best-10, sorted by display name
+- Removed the unplayed 2026-08-15 "Lorcana League" (RPH 859663) — 13 players, one
+  round generated, no results ever entered. It scored 0 so the leaderboard was
+  unaffected, but it inflated Events Attended, and `/etb-discount` gates on that
+  count (`_ETB_DISCOUNT_MIN_EVENTS = 3`), so four players qualified on an event
+  nobody played
+- `W*3 + D == Points` now holds on every row and is worth keeping as an invariant
+
+### Known
+- S12's archive is still 81% corrupted and S9 has 11 bad rows. Archives are
+  write-only and read by nothing, so this is cosmetic; the decode method above
+  would recover them if wanted.
+- Two Playhub IDs share the name "Taxfreud" (15930, 61566) — genuinely two
+  accounts. Deliberately left unmerged; there is no alias mechanism and none is
+  planned. `lookup_player_standings("Taxfreud")` therefore refuses as ambiguous
+  by design, so that caller cannot self-serve `/etb-discount` by name.

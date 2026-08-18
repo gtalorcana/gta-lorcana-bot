@@ -63,3 +63,21 @@ player registry, rarity roles, RPH watcher) is already generic league logic.
   A row matched by ID has its name refreshed if RPH has renamed the player
 - Never use the Sheets `values.append` API on the Player Registry — it picks its own anchor
   column by table detection and has misfiled rows. Write to an explicit `A{n}:J{n}` range
+- Standings columns are `A Date | B Store | C Rank | D Players | E Win | F Loss | G Draw |
+  H Points | I Playhub User ID` (`A3:I`, data starts at row 3 — row 2 is reserved for manual
+  adjustments the results pipeline must not overwrite)
+- **`Points == W*3 + D` on every Standings row** — a real invariant, worth checking after any
+  import. Win/Loss/Draw are separate integer columns *because* a combined `"W-L-D"` string is
+  destroyed on write: `USER_ENTERED` parses `"2-1-0"` as a date. Never write a record as one
+  string, and never assume a value with dashes survives a sheet write intact
+- RPH's per-round `/standings` returns `match_points` for that round but `record` as of the
+  event's **final** round. Any path that scores a non-final round must rewind the record too —
+  see `_rewind_records()`. The dropped round's result comes from the `match_points` delta
+- Results/Leaderboard formulas group by Playhub ID, never display name. Sheets' `FILTER` and
+  `COUNTIF` are case-insensitive, so name grouping merged `HABIBI` with `Habibi` (two people,
+  both credited both records) and split anyone who renamed mid-season
+- `SORTN`'s `sort_column` indexes the *filtered array*, not the source sheet. An out-of-range
+  index silently disables the sort instead of erroring — that is how "best 10 results" ran as
+  "first 10" for a whole season
+- `create_season_sheets` seeds the Results/Leaderboard formulas for a new season. Any formula
+  fix applied to the live sheet must be mirrored there, or rollover reintroduces the bug

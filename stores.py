@@ -45,6 +45,7 @@ from constants import (
     STORE_DEBUG_RANGE_NAME,
     ETB_APPROVALS_SHEET_NAME,
     ETB_APPROVALS_RANGE_NAME,
+    RESULTS_SEED_ROWS,
 )
 
 _TZ_TORONTO = ZoneInfo("America/Toronto")
@@ -757,7 +758,7 @@ def get_current_display_names() -> dict:
     """
     names: dict[str, str] = {}
     for rng, id_col, name_col in (
-        (season.STANDINGS_RANGE_NAME,   6, 3),
+        (season.STANDINGS_RANGE_NAME,   8, 3),
         (season.LEADERBOARD_RANGE_NAME, 1, 2),
     ):
         try:
@@ -779,7 +780,7 @@ def lookup_player_standings(rph_username: str = None,
                             playhub_id: str = None) -> dict:
     """
     Resolve a player against the current season's Standings sheet.
-    (Column D = Playhub Name, column G = Playhub ID.)
+    (Column D = Playhub Name, column I = Playhub ID.)
 
     Identity is the Playhub ID. Display names change mid-season and are not
     guaranteed unique, so a name is only ever used to *find* an ID — never to
@@ -806,8 +807,8 @@ def lookup_player_standings(rph_username: str = None,
     elif rph_username:
         name = rph_username.strip().lower()
         for row in rows:
-            if len(row) > 6 and row[3].strip().lower() == name and str(row[6]).strip():
-                candidate_ids.add(str(row[6]).strip())
+            if len(row) > 8 and row[3].strip().lower() == name and str(row[8]).strip():
+                candidate_ids.add(str(row[8]).strip())
 
     resolved = next(iter(candidate_ids)) if len(candidate_ids) == 1 else None
 
@@ -815,7 +816,7 @@ def lookup_player_standings(rph_username: str = None,
     display_name = None
     if resolved:
         for row in rows:
-            if len(row) > 6 and str(row[6]).strip() == resolved:
+            if len(row) > 8 and str(row[8]).strip() == resolved:
                 count += 1
                 if len(row) > 3 and row[3].strip():
                     display_name = row[3].strip()   # last wins — most recent name
@@ -863,12 +864,26 @@ def create_season_sheets(new_season: str) -> list[str]:
                 raise
 
     # Seed headers + formulas into freshly-created Results and Leaderboard tabs.
-    # Columns A (Player ID) and B (Players) auto-spill; the per-row formulas
-    # (Results C2, M2, N2, O2, P2) are written only on row 2 and the operator
-    # drags them down as the player list grows.
+    #
+    # Everything keys on the Playhub ID (Standings col I), never the display name.
+    # Name-keyed grouping merged two players who shared a name — Sheets' FILTER and
+    # COUNTIF are case-insensitive, so "HABIBI" and "Habibi" each collected both
+    # players' events — and split one player across a mid-season rename.
+    #
+    # A (Player ID) and B (Players) are single formulas that auto-spill. The per-row
+    # formulas (C, M, N, O, P) are filled to RESULTS_SEED_ROWS so the operator never
+    # has to drag them; a short fill silently leaves the last player with no Points.
     leaderboard_title = f"{new_season} Leaderboard"
     results_title     = f"{new_season} Results"
     seed_ranges: list[dict] = []
+
+    std = f"'{new_season} Standings'"
+    # Standings rows sorted newest-first, as {id, name} — VLOOKUP's first hit is
+    # then the player's most recent name. The sort key is date*100000 + row so a
+    # same-day rename resolves to the later-appended row; Standings is not written
+    # in strict date order, so the date alone is not enough.
+    newest_first = (f"SORT({{{std}!I2:I,{std}!D2:D}},"
+                    f"ARRAYFORMULA({std}!A2:A*100000+ROW({std}!A2:A)),FALSE)")
 
     if results_title in created:
         seed_ranges.extend([
@@ -882,49 +897,62 @@ def create_season_sheets(new_season: str) -> list[str]:
                 ]],
             },
             {
-                "range":  f"{results_title}!B2",
-                "values": [[f"=SORT(UNIQUE('{new_season} Standings'!D2:D))"]],
-            },
-            {
-                # Player ID (col A) looked up from Standings by display name (D→G),
-                # mirroring the name spill in B. Stable key for /sync-roles registry
-                # matching — RPH display names can change, IDs don't.
+                # Distinct Playhub IDs, ordered by their latest display name so the
+                # sheet reads alphabetically. B is a lookup, so it follows A's order.
                 "range":  f"{results_title}!A2",
                 "values": [[
-                    f"=ARRAYFORMULA(IF(LEN(B2:B),IFERROR(VLOOKUP(B2:B,"
-                    f"{{'{new_season} Standings'!D:D,'{new_season} Standings'!G:G}},2,FALSE),),))"
+                    f"=LET(ids,SORT(UNIQUE(FILTER({std}!I2:I,LEN({std}!I2:I)))),"
+                    f"tbl,{newest_first},"
+                    f'SORT(ids,ARRAYFORMULA(IFERROR(VLOOKUP(ids,tbl,2,FALSE),"")),TRUE))'
                 ]],
             },
             {
-                "range":  f"{results_title}!C2",
+                "range":  f"{results_title}!B2",
                 "values": [[
-                    f"=TRANSPOSE(FILTER(SORTN(FILTER('{new_season} Standings'!A:G,"
-                    f"('{new_season} Standings'!D:D=B2)),10,0,15,FALSE),{{0,0,0,0,0,1,0}}))"
-                ]],
-            },
-            {"range": f"{results_title}!M2", "values": [["=SUM(C2:L2)"]]},
-            {
-                "range":  f"{results_title}!N2",
-                "values": [[f"=COUNTIF('{new_season} Standings'!D:D,B2)"]],
-            },
-            {
-                "range":  f"{results_title}!O2",
-                "values": [[
-                    f"=MAX(FILTER(SORTN(FILTER('{new_season} Standings'!A:N,"
-                    f"('{new_season} Standings'!D:D=B2)),10,0,14,FALSE),"
-                    f"{{1,0,0,0,0,0,0,0,0,0,0,0,0,0}}))"
-                ]],
-            },
-            {
-                "range":  f"{results_title}!P2",
-                "values": [[
-                    f"=FILTER(FILTER('{new_season} Standings'!A:P,"
-                    f"('{new_season} Standings'!D:D=B2),"
-                    f"('{new_season} Standings'!A:A=O2)),"
-                    f"{{0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0}})"
+                    f"=ARRAYFORMULA(IF(LEN(A2:A),"
+                    f"IFERROR(VLOOKUP(A2:A,{newest_first},2,FALSE),),))"
                 ]],
             },
         ])
+        # Per-row formulas. C spills across C:L (TRANSPOSE of up to 10 scores).
+        # SORTN's sort_column must be 1 here — it indexes the *filtered* array,
+        # not the source sheet. Pointing it past the array's width silently
+        # disables the sort, which turned "best 10 results" into "first 10".
+        for r in range(2, RESULTS_SEED_ROWS + 1):
+            seed_ranges.extend([
+                {
+                    "range":  f"{results_title}!C{r}",
+                    "values": [[
+                        f"=IFERROR(TRANSPOSE(SORTN(FILTER({std}!F$2:F,"
+                        f'{std}!I$2:I=$A{r}),10,0,1,FALSE)),"")'
+                    ]],
+                },
+                {"range": f"{results_title}!M{r}",
+                 "values": [[f'=IF($A{r}="","",SUM(C{r}:L{r}))']]},
+                {"range": f"{results_title}!N{r}",
+                 "values": [[f'=IF($A{r}="","",COUNTIF({std}!I$2:I,$A{r}))']]},
+                {
+                    # Tiebreakers, consumed by the Leaderboard sort. O is the date of
+                    # the last of the 10 counted events; ties on score keep the earlier
+                    # event, so a player who reached their total sooner wins the tie.
+                    "range":  f"{results_title}!O{r}",
+                    "values": [[
+                        f'=IF($A{r}="","",IFERROR(MAX(INDEX(SORTN(FILTER('
+                        f"{{{std}!F$2:F,{std}!A$2:A}},{std}!I$2:I=$A{r}),"
+                        f'10,0,1,FALSE,2,TRUE),0,2)),""))'
+                    ]],
+                },
+                {
+                    # Rank at that event. MIN collapses the case of two rows sharing a
+                    # date — returning the range bare put #REF! in every such cell.
+                    "range":  f"{results_title}!P{r}",
+                    "values": [[
+                        f'=IF($O{r}="","",LET(r,FILTER({std}!C$2:C,'
+                        f"{std}!I$2:I=$A{r},{std}!A$2:A=$O{r}),"
+                        f'IF(COUNT(r)=0,"",MIN(r))))'
+                    ]],
+                },
+            ])
 
     if leaderboard_title in created:
         # Row 1 is a header row and the spill is anchored at B2, so /sync-roles
@@ -956,14 +984,19 @@ def create_season_sheets(new_season: str) -> list[str]:
         })
 
     # Standings and Events are written by the results pipeline; seed only their
-    # column headers (row 1). Standings data starts at row 3 (A3:G), Events at
+    # column headers (row 1). Standings data starts at row 3 (A3:I), Events at
     # row 2 (A2:G) — see season.py range names.
+    #
+    # Win/Loss/Draw are three integer columns rather than one "W-L-D" string:
+    # USER_ENTERED parses values as if typed, so "2-1-0" became the date serial
+    # 36527 and the record was lost. Integers cannot be coerced that way.
     standings_title = f"{new_season} Standings"
     events_title    = f"{new_season} Events"
     if standings_title in created:
         seed_ranges.append({
             "range":  f"{standings_title}!A1",
-            "values": [["Date", "Store", "Rank", "Players", "Match Record", "Points", "Playhub User ID"]],
+            "values": [["Date", "Store", "Rank", "Players",
+                        "Win", "Loss", "Draw", "Points", "Playhub User ID"]],
         })
     if events_title in created:
         seed_ranges.append({
@@ -989,6 +1022,12 @@ def create_season_sheets(new_season: str) -> list[str]:
 
     if seed_ranges:
         _gs.batch_update_values(LEAGUE_SPREADSHEET_ID, seed_ranges)
+
+    # Results column O holds a date produced by MAX() over Standings dates, which
+    # comes back as a bare serial — format it so the tab stays readable.
+    if results_title in created:
+        _gs.set_column_date_format(LEAGUE_SPREADSHEET_ID, results_title,
+                                   column_index=14, num_rows=RESULTS_SEED_ROWS)
 
     set_champs_title = f"{new_season} Set Champs"
     try:
