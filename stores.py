@@ -829,6 +829,20 @@ def lookup_player_standings(rph_username: str = None,
     }
 
 
+def _is_already_exists(e) -> bool:
+    """
+    True if an HttpError from addSheet means the tab is already there.
+
+    Matched on the message text. addSheet returns a plain 400 for several
+    unrelated problems, and the response carries no machine-readable reason —
+    it reads `A sheet with the name "X" already exists.` An earlier version of
+    this check looked for an `ALREADY_EXISTS` token that the API never sends, so
+    every guard re-raised instead of skipping. Because the Ban List always
+    exists after the first season, that made season rollover fail every time.
+    """
+    return getattr(e, 'status_code', None) == 400 and 'already exists' in str(e).lower()
+
+
 def create_season_sheets(new_season: str) -> list[str]:
     """
     Create the standard season tabs in the League sheet (left-to-right:
@@ -840,7 +854,7 @@ def create_season_sheets(new_season: str) -> list[str]:
     cols A/B auto-spill, C–P are dragged down; Leaderboard spills from B2).
     Standings and Events get header rows only — the results pipeline fills them.
 
-    Skips any tab that already exists (catches HttpError 400 with ALREADY_EXISTS)
+    Skips any tab that already exists (see _is_already_exists)
     and does not re-seed those tabs. Returns list of tab titles that were created.
     """
     from googleapiclient.errors import HttpError as _HttpError
@@ -858,7 +872,7 @@ def create_season_sheets(new_season: str) -> list[str]:
             _gs.add_sheet(LEAGUE_SPREADSHEET_ID, title, index=idx)
             created.append(title)
         except _HttpError as e:
-            if e.status_code == 400 and 'ALREADY_EXISTS' in str(e):
+            if _is_already_exists(e):
                 print(f"  Sheet '{title}' already exists — skipping")
             else:
                 raise
@@ -878,6 +892,11 @@ def create_season_sheets(new_season: str) -> list[str]:
     seed_ranges: list[dict] = []
 
     std = f"'{new_season} Standings'"
+    # Standings columns these formulas read — keep in step with the header row
+    # seeded below, and with STANDINGS_RANGE_NAME in season.py:
+    #   A Date | C Rank | D Players | H Points | I Playhub User ID
+    # (E/F/G are Win/Loss/Draw and are not read by any formula.)
+    #
     # Standings rows sorted newest-first, as {id, name} — VLOOKUP's first hit is
     # then the player's most recent name. The sort key is date*100000 + row so a
     # same-day rename resolves to the later-appended row; Standings is not written
@@ -923,7 +942,7 @@ def create_season_sheets(new_season: str) -> list[str]:
                 {
                     "range":  f"{results_title}!C{r}",
                     "values": [[
-                        f"=IFERROR(TRANSPOSE(SORTN(FILTER({std}!F$2:F,"
+                        f"=IFERROR(TRANSPOSE(SORTN(FILTER({std}!H$2:H,"
                         f'{std}!I$2:I=$A{r}),10,0,1,FALSE)),"")'
                     ]],
                 },
@@ -938,7 +957,7 @@ def create_season_sheets(new_season: str) -> list[str]:
                     "range":  f"{results_title}!O{r}",
                     "values": [[
                         f'=IF($A{r}="","",IFERROR(MAX(INDEX(SORTN(FILTER('
-                        f"{{{std}!F$2:F,{std}!A$2:A}},{std}!I$2:I=$A{r}),"
+                        f"{{{std}!H$2:H,{std}!A$2:A}},{std}!I$2:I=$A{r}),"
                         f'10,0,1,FALSE,2,TRUE),0,2)),""))'
                     ]],
                 },
@@ -1015,7 +1034,7 @@ def create_season_sheets(new_season: str) -> list[str]:
             "values": [["Playhub ID", "Player Name (reference)"]],
         })
     except _HttpError as e:
-        if e.status_code == 400 and 'ALREADY_EXISTS' in str(e):
+        if _is_already_exists(e):
             print("  Sheet 'Ban List' already exists — skipping")
         else:
             raise
@@ -1034,7 +1053,7 @@ def create_season_sheets(new_season: str) -> list[str]:
         _gs.add_sheet(BOT_DATABASE_SPREADSHEET_ID, set_champs_title)
         created.append(set_champs_title)
     except _HttpError as e:
-        if e.status_code == 400 and 'ALREADY_EXISTS' in str(e):
+        if _is_already_exists(e):
             print(f"  Sheet '{set_champs_title}' already exists — skipping")
         else:
             raise
@@ -1099,7 +1118,7 @@ def archive_season_data(season_name: str) -> list[str]:
         try:
             _gs.add_sheet(ARCHIVE_SPREADSHEET_ID, title)
         except _HttpError as e:
-            if e.status_code == 400 and 'ALREADY_EXISTS' in str(e):
+            if _is_already_exists(e):
                 print(f"  Archive tab '{title}' already exists — overwriting data")
             else:
                 raise
@@ -1122,7 +1141,7 @@ def archive_season_data(season_name: str) -> list[str]:
         try:
             _gs.add_sheet(ARCHIVE_SPREADSHEET_ID, title)
         except _HttpError as e:
-            if e.status_code == 400 and 'ALREADY_EXISTS' in str(e):
+            if _is_already_exists(e):
                 print(f"  Archive tab '{title}' already exists — overwriting data")
             else:
                 raise

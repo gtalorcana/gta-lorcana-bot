@@ -329,3 +329,28 @@ that made no sense before.
   accounts. Deliberately left unmerged; there is no alias mechanism and none is
   planned. `lookup_player_standings("Taxfreud")` therefore refuses as ambiguous
   by design, so that caller cannot self-serve `/etb-discount` by name.
+
+### Follow-up — rollover dry-run (same day)
+
+Ran `create_season_sheets` against a throwaway season and replayed S13's real
+Standings into it. Two bugs only a live run would have caught:
+
+- **The seeder read Points from the wrong column.** `C2` and `O2` were still
+  pointing at `F` — Points *before* the split, but **Loss** after it. The live S13
+  sheet was unaffected because inserting columns made Sheets rewrite its own
+  references; a freshly seeded S14 would have scored every player off their loss
+  count. Fixed to `H`, and the column mapping the formulas depend on is now
+  spelled out in a comment beside them.
+- **`create_season_sheets` crashed on every rollover after the first.** The
+  "tab already exists" guards tested `'ALREADY_EXISTS' in str(e)`, but addSheet
+  returns a plain 400 whose message reads `A sheet with the name "X" already
+  exists.` — there is no such token, so all six guards re-raised instead of
+  skipping. The Ban List always exists after season one, so rollover was
+  guaranteed to fail there, part-way through creating tabs. Now `_is_already_exists()`,
+  matching on message text; it also covers `archive_season_data`, which had the
+  same dead guard.
+
+Dry-run result after both fixes: the seeded formulas reproduce S13 **exactly** —
+126 players, 0 error cells, 0 row-by-row differences across all 16 Results
+columns, and an identical Leaderboard. Headers, the column-O date format, and the
+seed depth to `RESULTS_SEED_ROWS` all verified, and the test tabs cleaned up.

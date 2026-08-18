@@ -80,4 +80,10 @@ player registry, rarity roles, RPH watcher) is already generic league logic.
   index silently disables the sort instead of erroring — that is how "best 10 results" ran as
   "first 10" for a whole season
 - `create_season_sheets` seeds the Results/Leaderboard formulas for a new season. Any formula
-  fix applied to the live sheet must be mirrored there, or rollover reintroduces the bug
+  fix applied to the live sheet must be mirrored there, or rollover reintroduces the bug.
+  Editing a live formula by *inserting columns* is especially deceptive: Sheets silently
+  rewrites its own references, so the sheet looks right while the seeder still holds the old
+  column letters. Dry-run rollover into a throwaway season and diff it against the live one
+- Sheets' `addSheet` returns a bare 400 with no machine-readable reason — the only signal is
+  the message text `A sheet with the name "X" already exists.` Match on that (see
+  `_is_already_exists`), never on an `ALREADY_EXISTS` token; the API does not send one
