@@ -5,8 +5,8 @@ Pulls all Ontario Lorcana events in the SET_CHAMPS date window, including
 upcoming and in-progress events (unlike the league results pipeline which only
 fetches past events).
 
-Sheet columns (A2:G):
-  Date | Time (Toronto) | Store Name | Full Address | Player Cap | Format | RPH Link
+Sheet columns (A2:I):
+  Date | Time (Toronto) | Store ID | Store Name | City | Player Cap | Format | Event Name | RPH Link
 
 Usage:
     python scripts/rph_get_set_championship_events.py
@@ -50,20 +50,22 @@ def _format_event_row(event: dict) -> list:
     """
     Transform a raw RPH event object into a sheet row.
 
-    Columns: Date | Time (Toronto) | Store Name | Full Address | Player Cap | Format | RPH Link
+    Columns: Date | Time (Toronto) | Store ID | Store Name | City | Player Cap | Format | Event Name | RPH Link
     """
     dt_utc     = datetime.fromisoformat(event['start_datetime'].replace('Z', '+00:00'))
     dt_toronto = dt_utc.astimezone(_TZ_TORONTO)
 
-    date_str     = dt_toronto.strftime('%Y-%m-%d')
-    time_str     = dt_toronto.strftime('%I:%M %p').lstrip('0')
-    store_name   = event['store']['name']
-    full_address = _parse_city(event['store'].get('full_address'))
-    player_cap   = event.get('capacity', '')
-    format_str   = event['gameplay_format']['name']
-    rph_link     = RPH_EVENT_BASE_URL + str(event['id'])
+    date_str   = dt_toronto.strftime('%Y-%m-%d')
+    time_str   = dt_toronto.strftime('%I:%M %p').lstrip('0')
+    store_id   = event['store']['id']
+    store_name = event['store']['name']
+    city       = _parse_city(event['store'].get('full_address'))
+    player_cap = event.get('capacity', '')
+    format_str = event['gameplay_format']['name']
+    event_name = event.get('name', '')
+    rph_link   = RPH_EVENT_BASE_URL + str(event['id'])
 
-    return [date_str, time_str, store_name, full_address, player_cap, format_str, rph_link]
+    return [date_str, time_str, store_id, store_name, city, player_cap, format_str, event_name, rph_link]
 
 
 if __name__ == '__main__':
@@ -118,10 +120,10 @@ if __name__ == '__main__':
     rows = [_format_event_row(e) for e in filtered]
     rows.sort(key=lambda r: (r[0], r[1]))  # sort by date then time
 
-    print(f"  {'#':<4} {'Date':<12} {'Time':<10} {'Cap':<5} {'Format':<22} {'Store':<35} {'RPH Link':<50} City")
-    print(f"  {'-'*4} {'-'*12} {'-'*10} {'-'*5} {'-'*22} {'-'*35} {'-'*50} {'-'*40}")
+    print(f"  {'#':<4} {'Date':<12} {'Time':<10} {'Store ID':<10} {'Cap':<5} {'Format':<22} {'Store':<35} {'RPH Link':<50} City")
+    print(f"  {'-'*4} {'-'*12} {'-'*10} {'-'*10} {'-'*5} {'-'*22} {'-'*35} {'-'*50} {'-'*40}")
     for i, row in enumerate(rows, 1):
-        print(f"  {i:<4} {row[0]:<12} {row[1]:<10} {str(row[4]):<5} {row[5]:<22} {row[2]:<35} {row[6]:<50} {row[3]}")
+        print(f"  {i:<4} {row[0]:<12} {row[1]:<10} {str(row[2]):<10} {str(row[5]):<5} {row[6]:<22} {row[3]:<35} {row[8]:<50} {row[4]}")
 
     print(f"\n  {len(rows)} row(s) ready to write.")
 

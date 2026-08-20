@@ -436,11 +436,11 @@ def _build_set_champs_messages(rows: list, as_of: date) -> list[str]:
         day_label  = event_date.strftime('%A, %b %-d')
         lines      = ["─────────────────────", "", f"**{day_label}**", ""]
         for row in by_date[date_str]:
-            store   = row[2]
-            city    = row[3]
+            store   = row[3]
+            city    = row[4]
             time    = row[1]
-            cap     = row[4]
-            url     = row[7]
+            cap     = row[5]
+            url     = row[8]
             cap_str = f" · Cap {cap}" if cap else ""
             lines.append(f"**{store}** ({city})")
             lines.append(f"{time}{cap_str} · <{url}>")

@@ -1324,6 +1324,7 @@ def refresh_set_champs() -> tuple[int, list]:
         rows.append([
             dt_toronto.strftime('%Y-%m-%d'),
             dt_toronto.strftime('%I:%M %p').lstrip('0'),
+            e['store']['id'],
             e['store']['name'],
             _parse_city(e['store'].get('full_address', '')),
             e.get('capacity', ''),

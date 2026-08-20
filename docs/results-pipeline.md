@@ -17,10 +17,13 @@
 
 The `set_champs_daily` task calls `refresh_set_champs()` in `stores.py` every morning during the set champs window. It fetches all Ontario Lorcana events in the `SET_CHAMPS` date range (including upcoming and in-progress), filters to events whose name contains `"Set Champ"` (case-insensitive — matches "Set Championship", "Set Champs", etc.), and overwrites the Set Champs sheet.
 
-**Set Champs sheet columns (A2:H):**
+**Set Champs sheet columns (A2:I):**
 ```
-Date | Time (Toronto) | Store Name | Full Address | Player Cap | Format | Event Name | RPH Link
+Date | Time (Toronto) | Store ID | Store Name | City | Player Cap | Format | Event Name | RPH Link
 ```
+Store ID is the RPH store identity key — the same value the Store Classification tab is keyed on,
+so the two can be joined. Row 1 (the header) is hand-maintained; `create_season_sheets` adds the
+tab bare and seeds no header.
 
 The task starts on `SEASON_START_DATE` so the sheet is populated as soon as stores register their events on RPH (some post on day 1 of the season).
 
