@@ -39,6 +39,25 @@ player registry, rarity roles, RPH watcher) is already generic league logic.
 
 ---
 
+## Subagent Profiles
+
+Three scoped subagents live in `.claude/agents/`. Delegate to them rather than working the whole
+codebase from one context:
+
+| Agent | Docs | Owns |
+|---|---|---|
+| `league-logic` | `docs/league-logic/` | Results pipeline, sheet formulas, rarity roles & Player Registry, season rollover, store classification |
+| `discord-surface` | `docs/discord-surface/` | Slash commands, embeds and copy, reaction flows, DMs, scheduled posts |
+| `bot-infra` | `docs/bot-infra/` | Fly.io, Dockerfile, secrets, `constants.py`, API wrappers, memory footprint |
+
+`docs/` mirrors this split one folder per agent. Each folder has a `design-notes.md` for
+cross-cutting notes that don't belong to a single topic file.
+
+Each restates the invariants for its own area and names what to hand back. Keep them in sync when
+a design note below changes.
+
+---
+
 ## TODO
 
 - **Update league-rules Discord post on season rollover**: `discord/league-rules.md` is manually

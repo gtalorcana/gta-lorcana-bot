@@ -32,11 +32,24 @@ scripts/
 
 ## Documentation
 
-- [Commands & Scheduled Tasks](docs/commands.md)
-- [League Rarity Roles & Player Registry](docs/roles.md)
-- [Results Reporting Pipeline & RPH Watcher](docs/results-pipeline.md)
-- [Store Classification & Overrides](docs/store-classification.md)
-- [Google Sheets Layout](docs/google-sheets.md)
-- [Deployment & Local Development](docs/deployment.md)
-- [Season Rollover](docs/season-rollover.md)
-- [Architecture & Design Notes](docs/architecture.md)
+Docs are grouped into three folders, one per subagent profile in `.claude/agents/` — see
+[CLAUDE.md](CLAUDE.md#subagent-profiles).
+
+**[`docs/league-logic/`](docs/league-logic/)** — what the numbers should be
+
+- [Results Reporting Pipeline & RPH Watcher](docs/league-logic/results-pipeline.md)
+- [League Rarity Roles & Player Registry](docs/league-logic/roles.md)
+- [Season Rollover](docs/league-logic/season-rollover.md)
+- [Store Classification & Overrides](docs/league-logic/store-classification.md)
+- [Google Sheets Layout](docs/league-logic/google-sheets.md)
+- [Design Notes](docs/league-logic/design-notes.md)
+
+**[`docs/discord-surface/`](docs/discord-surface/)** — what members and mods interact with
+
+- [Commands & Scheduled Tasks](docs/discord-surface/commands.md)
+- [Design Notes & Crash-Loop Prevention](docs/discord-surface/design-notes.md)
+
+**[`docs/bot-infra/`](docs/bot-infra/)** — how it runs and deploys
+
+- [Deployment & Local Development](docs/bot-infra/deployment.md)
+- [Design Notes, Memory & constants.py](docs/bot-infra/design-notes.md)
