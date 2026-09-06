@@ -15,8 +15,15 @@ Set WRITE_TO_SHEET = True once you've verified the printed output looks correct.
 
 Filtering:
     RPH has no server-side filter for "set championship" events specifically.
-    Use NAME_FILTER to drop events whose name doesn't contain a keyword.
-    Leave NAME_FILTER as None to see everything and figure out the right keyword first.
+    Events are matched on their *category* — the name of the RPH event configuration
+    template they were built from (e.g. "Attack of the Vine! Set Championship"), which
+    is what the RPH event page labels "Category". Store-authored event names are
+    unreliable, so the category is preferred wherever it resolves.
+    Category and name are matched as a union: RPH lists only the current set's templates,
+    so events from any other set have no category at all and are carried by the name, and
+    some stores build a genuine Set Championship from a generic template.
+    The match itself is stores._is_set_champs_event() — the same predicate the bot uses,
+    not a copy. Set SHOW_ALL = True to skip filtering and inspect every event first.
 """
 
 import os
@@ -31,6 +38,7 @@ from util.rph_api_utils import RphApi
 from util.google_sheets_api_utils import GoogleSheetsApi
 import season
 from constants import BOT_DATABASE_SPREADSHEET_ID
+import stores
 from stores import _parse_city
 
 _TZ_TORONTO = ZoneInfo("America/Toronto")
@@ -38,9 +46,9 @@ _TZ_TORONTO = ZoneInfo("America/Toronto")
 # Set to True once you've verified the printed output looks correct
 WRITE_TO_SHEET = False
 
-# Only include events whose name contains this string (case-insensitive).
-# Set to None to include all events and inspect names first.
-NAME_FILTER = "Set Champ"
+# Set to True to skip filtering entirely and dump every event in the window, so the
+# keyword in stores._SET_CHAMPS_KEYWORD can be checked against real categories/names.
+SHOW_ALL = False
 
 # RPH event page base URL — event ID is appended
 RPH_EVENT_BASE_URL = "https://tcg.ravensburgerplay.com/events/"
@@ -79,7 +87,7 @@ if __name__ == '__main__':
 
     print(f"\nFetching Set Championship events...")
     print(f"  Date range: {season.SET_CHAMPS_START_DT} → {season.SET_CHAMPS_END_DT}")
-    print(f"  Name filter: {NAME_FILTER!r}\n")
+    print(f"  Keyword: {stores._SET_CHAMPS_KEYWORD!r}  (SHOW_ALL={SHOW_ALL})\n")
 
     events = rph_api.get_events(
         start_date_after=season.SET_CHAMPS_START_DT,
@@ -100,22 +108,25 @@ if __name__ == '__main__':
         print(f"    {k}: {v}")
     print()
 
-    # Show all event names before filtering so you can pick the right NAME_FILTER keyword
+    # Show all event names and categories before filtering so you can pick the right keyword
     print("  — All event names —")
     for e in sorted(events, key=lambda e: e['start_datetime']):
         dt_utc     = datetime.fromisoformat(e['start_datetime'].replace('Z', '+00:00'))
         dt_toronto = dt_utc.astimezone(_TZ_TORONTO)
-        print(f"    {dt_toronto.strftime('%Y-%m-%d')}  {e['store']['name']:<40}  {e.get('name', '(no name)')}")
+        print(f"    {dt_toronto.strftime('%Y-%m-%d')}  {e['store']['name']:<40}  "
+              f"{rph_api.get_event_category(e):<40}  {e.get('name', '(no name)')}")
     print()
 
-    # Apply name filter
-    if NAME_FILTER:
-        filtered = [e for e in events if NAME_FILTER.lower() in (e.get('name') or '').lower()]
-        print(f"  → {len(filtered)} of {len(events)} event(s) match name filter {NAME_FILTER!r}\n")
-    else:
+    # Apply the keyword filter — category where resolvable, event name otherwise
+    if SHOW_ALL:
         filtered = events
-        print(f"  ⚠ NAME_FILTER is None — all {len(events)} event(s) will be included.\n"
-              f"    Set NAME_FILTER to a keyword (e.g. 'championship') to narrow results.\n")
+        print(f"  ⚠ SHOW_ALL is True — all {len(events)} event(s) will be included.\n")
+    else:
+        filtered = [e for e in events if stores._is_set_champs_event(e)]
+        kw       = stores._SET_CHAMPS_KEYWORD.lower()
+        by_name  = sum(1 for e in filtered if kw not in rph_api.get_event_category(e).lower())
+        print(f"  → {len(filtered)} of {len(events)} event(s) matched"
+              f" ({by_name} of them on event name only, no Set Champs category)\n")
 
     rows = [_format_event_row(e) for e in filtered]
     rows.sort(key=lambda r: (r[0], r[1]))  # sort by date then time

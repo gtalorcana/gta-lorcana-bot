@@ -15,7 +15,32 @@
 
 ## Set Championships
 
-The `set_champs_daily` task calls `refresh_set_champs()` in `stores.py` every morning during the set champs window. It fetches all Ontario Lorcana events in the `SET_CHAMPS` date range (including upcoming and in-progress), filters to events whose name contains `"Set Champ"` (case-insensitive — matches "Set Championship", "Set Champs", etc.), and overwrites the Set Champs sheet.
+The `set_champs_daily` task calls `refresh_set_champs()` in `stores.py` every morning during the set champs window. It fetches all Ontario Lorcana events in the `SET_CHAMPS` date range (including upcoming and in-progress), filters to Set Championships via `_is_set_champs_event()`, and overwrites the Set Champs sheet.
+
+`_is_set_champs_event()` matches the keyword `"Set Champ"` (case-insensitive) against the event's
+**category** *or* its **name** — a union, not a preference. The category is the name of the RPH
+event configuration template the event was built from, which is what the RPH event page labels
+"Category" (e.g. `"Attack of the Vine! Set Championship"`). Events carry only the template UUID in
+`event_configuration_template`; `RphApi.get_event_category()` resolves it through the
+`event-configuration-templates` endpoint, fetched once and cached per instance.
+
+Both halves of the union are load-bearing, and each alone loses real events:
+
+- **Name alone** misses stores that mistitle a properly-templated event — one S13 store called
+  theirs "Attack Of the Vine **Store** Championship".
+- **Category alone** misses stores that build a genuine Set Championship from a generic template —
+  three S10 Whispers in the Well Set Championships ran on `Weekly Play (Constructed)`.
+
+The category is also only available for the *current* set. RPH's template endpoint lists just the
+current set's templates (12 active, 6 inactive at time of writing); retired sets' Set Championship
+templates are not exposed at all, so **every event outside the current set resolves to no category
+and is carried entirely by the name match**. `refresh_set_champs` logs how many rows matched on name
+only — during the current set's window that count should be at or near zero, and a sudden jump means
+RPH has rotated the template list.
+
+The keyword is deliberately the loose `"Set Champ"` rather than `"Set Championship"`: the template
+name is prefixed with the set name, which changes every set, and the trailing wording drifts between
+"Set Championship" and "Set Champs". Never match the set name itself.
 
 **Set Champs sheet columns (A2:I):**
 ```
@@ -32,7 +57,7 @@ The task starts on `SEASON_START_DATE` so the sheet is populated as soon as stor
 python scripts/rph_get_set_championship_events.py
 ```
 
-Set `WRITE_TO_SHEET = True` in the script once the output looks correct. Set `NAME_FILTER = None` to see all events in the window and verify the filter keyword.
+Set `WRITE_TO_SHEET = True` in the script once the output looks correct. Set `SHOW_ALL = True` to dump every event in the window with its category and name, to sanity-check the keyword.
 
 ---
 

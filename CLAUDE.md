@@ -25,7 +25,7 @@ the GTA-specific code is concentrated in these places:
 - `game_id: '1'` / `game_slug: 'disney-lorcana'` — Lorcana-specific
 - `gameplay_format_ids: [...]` — Constructed + Booster Draft format UUIDs
 
-**`stores.py`** — `_SET_CHAMPS_NAME_FILTER = "Set Champ"` keyword for RPH event name matching
+**`stores.py`** — `_SET_CHAMPS_KEYWORD = "Set Champ"` keyword for RPH event category/name matching
 
 **`constants.py`** — `WHERE_TO_PLAY_MIN_CONSECUTIVE_WEEKS`, `WHERE_TO_PLAY_POST_DAY/HOUR_ET`
 
