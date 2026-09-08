@@ -1287,12 +1287,19 @@ _RPH_EVENT_BASE_URL     = "https://tcg.ravensburgerplay.com/events/"
 #     event configuration template it was built from ("Participate in the preliminary
 #     rounds for the Disney Lorcana Set Championships..."). Set-agnostic — it names no
 #     set — and it is stored on the event, so it keeps resolving for past sets.
-#     Misses stores that build a genuine Set Championship from a generic template:
-#     three S10 events ran on "Weekly Play (Constructed)".
+#     Misses stores that build a genuine Set Championship on a generic template, which
+#     is common enough to matter: three S10 events and J&B's event 778116 all ran on
+#     "Weekly Play (Constructed)". Only the name catches those.
 #
 #   - Event name: store-authored, so it drifts. Misses stores that mistitle a properly
 #     templated event — one S13 store called theirs "Attack Of the Vine Store
 #     Championship". Caught by the phase text instead.
+#
+# Never narrow the name match to the Set Champs window. A previous set's championships
+# can run early in a new league season, well outside it: event 778116 is a real Set
+# Championship on 2026-07-18, seven weeks before the S13 window opened on 09-04. It is
+# on a generic template with no phase text, so the name is the only thing that rejects
+# it — date-scoping that arm would let previous-set championships into league results.
 #
 # Do NOT resolve the event's *category* (the template's display name) through RPH's
 # event-configuration-templates endpoint. That was tried and it does not hold: RPH

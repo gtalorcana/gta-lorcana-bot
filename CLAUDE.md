@@ -103,6 +103,12 @@ a design note below changes.
   Editing a live formula by *inserting columns* is especially deceptive: Sheets silently
   rewrites its own references, so the sheet looks right while the seeder still holds the old
   column letters. Dry-run rollover into a throwaway season and diff it against the live one
+- Set Champs detection (`stores.is_set_champs_event`) matches `"Set Champ"` against the
+  event's phase text **or** its store-authored name. RPH exposes no category field — only
+  an `event_configuration_template` UUID, whose name lookup RPH broke mid-window and which
+  is a different UUID every set. Both arms are load-bearing and neither is safe alone;
+  never date-scope the name arm, as a previous set's championships run early in a new
+  season, outside the Set Champs window
 - Sheets' `addSheet` returns a bare 400 with no machine-readable reason — the only signal is
   the message text `A sheet with the name "X" already exists.` Match on that (see
   `_is_already_exists`), never on an `ALREADY_EXISTS` token; the API does not send one

@@ -43,12 +43,25 @@ independent signals, as a **union**. Neither alone is complete:
   configuration template it was built from ("Participate in the preliminary rounds for the Disney
   Lorcana Set Championships..."). It names no set, so it is set-agnostic, and it is stored on the
   event itself, so it keeps resolving for past sets. It misses stores that build a genuine Set
-  Championship from a generic template - three S10 events ran on `Weekly Play (Constructed)`.
+  Championship on a generic template - three S10 events and J&B's event 778116 all ran on
+  `Weekly Play (Constructed)`, with an empty phase description. Only the name catches those.
 - **Event name** - store-authored, so it drifts. It misses stores that mistitle a properly
   templated event: one S13 store called theirs "Attack Of the Vine **Store** Championship". The
   phase text catches those.
 
 Measured on the S13 window: name alone 76, union 77. On S10 (a past set): name alone 74, union 77.
+
+**Never narrow the name match to the Set Champs window.** A previous set's championships can run
+early in a new league season, well outside it - event 778116 is a real Set Championship on
+2026-07-18, seven weeks before the S13 window opened on 09-04. It sits on a generic template with
+no phase text, so the name is the only signal that rejects it. Date-scoping that arm would let
+previous-set championships straight into league results.
+
+The two signals are independent, and a store has to get *both* wrong for an event to slip through.
+Across S10, S13 and Winterspell that has not happened: every mis-templated event was still named
+"Set Championship", and the one mis-named event was still correctly templated. That is an observed
+base rate, not a guarantee - a store that picks a generic template *and* an ordinary name is
+undetectable, and would have to be caught by review.
 
 **Do not resolve the event's category through RPH's `event-configuration-templates` endpoint.**
 That was tried and shipped, and it does not hold. RPH dropped the "Attack of the Vine! Set
