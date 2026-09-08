@@ -6,6 +6,7 @@ from constants import (
     LEAGUE_SPREADSHEET_ID,
     RESULTS_REPORTING_CHANNEL_URL,
 )
+from stores import is_set_champs_event
 
 # ── Singletons ────────────────────────────────────────────────────────────────
 #
@@ -106,18 +107,23 @@ def _parse_record(record) -> list:
         return [0, 0, 0]
 
 
-def _fetch_single_event(rph_url, thread_id, note=None, validate_date=False):
+def _fetch_single_event(rph_url, thread_id, note=None, validate_eligibility=False):
     """
     Fetch RPH data for a single event URL.
     Returns (event_row, standing_rows, warnings).
 
-    note:          optional value for event_row[2] (e.g. 'Format: Core Constructed').
-                   Auto-corrections will overwrite this if they fire.
-    validate_date: if True, raises ValueError when the event date is outside
-                   the current season window.
+    note: optional value for event_row[2] (e.g. 'Format: Core Constructed').
+          Auto-corrections will overwrite this if they fire.
+
+    validate_eligibility: if True, enforce the rules deciding whether an event may
+          enter the league at all -- in season, and not a Set Championship. Set only
+          for live submissions. The bulk re-fetch path leaves it False on purpose: it
+          re-reads rows already accepted into the sheet, and must not start rejecting
+          history when the eligibility rules change.
 
     Raises RuntimeError if the API call fails all retries or returns no event.
-    Raises ValueError  if validate_date=True and the event is out of season.
+    Raises ValueError  if the format is wrong, or validate_eligibility=True and the
+                       event is out of season or a Set Championship.
     """
     warnings      = []
     standing_rows = []
@@ -146,7 +152,17 @@ def _fetch_single_event(rph_url, thread_id, note=None, validate_date=False):
 
     event_date = event['start_datetime'][:10]
 
-    if validate_date:
+    if validate_eligibility:
+        # Set Champs run on their own track and must not score league points. The
+        # season and Set Champs windows overlap (S13: season to Sep 18, set champs
+        # Sep 4-27), so the date check below does not catch them -- an in-window
+        # Set Championship is otherwise a perfectly valid Core Constructed event.
+        if is_set_champs_event(event):
+            raise ValueError(
+                f"This is a Set Championship, which does not count toward league standings.\n"
+                f"Event: {event.get('name') or event_id}"
+            )
+
         if season.SEASON_START_DATE and event_date < season.SEASON_START_DATE:
             raise ValueError(
                 f"Event date {event_date} is before the current season start ({season.SEASON_START_DATE})."
@@ -283,7 +299,7 @@ def process_event_data(rph_url, thread_id):
     # because playhub_id (not display name) is stored, so player identity is stable.
     print(f"  → Fetching RPH data for new event...")
     event_row, standing_rows, warnings = _fetch_single_event(
-        rph_url, thread_id, validate_date=True
+        rph_url, thread_id, validate_eligibility=True
     )
     event_date = event_row[3]
     store_name = event_row[4]

@@ -1280,27 +1280,44 @@ def fetch_event_status(event_id: int) -> dict | None:
 # ── Set Championships ─────────────────────────────────────────────────────────
 
 _RPH_EVENT_BASE_URL     = "https://tcg.ravensburgerplay.com/events/"
-# Set Champs events are identified by their RPH *category* — the name of the event
-# configuration template they were built from, e.g. "Attack of the Vine! Set Championship".
-# The set name is a prefix and changes every set, so only the trailing keyword is matched,
-# and the keyword stays loose enough to survive "Set Championship" / "Set Champs" drift.
+# Set Champs are identified by two independent signals, matched as a union. Neither
+# alone is complete:
 #
-# Category and name are matched as a *union*, not a preference — each one alone misses
-# real events:
-#   - Name only misses stores that mistitle a properly-templated event. One S13 store
-#     called theirs "Attack Of the Vine Store Championship".
-#   - Category only misses stores that build a genuine Set Championship from a generic
-#     template. Three S10 events ran on "Weekly Play (Constructed)".
-# The category is also unavailable outside the current set: RPH's template endpoint lists
-# only the current set's templates, active or inactive, so every event from any other set
-# resolves to no category at all and is carried entirely by the name match.
+#   - Phase text: the phase_name/phase_description RPH copies onto the event from the
+#     event configuration template it was built from ("Participate in the preliminary
+#     rounds for the Disney Lorcana Set Championships..."). Set-agnostic — it names no
+#     set — and it is stored on the event, so it keeps resolving for past sets.
+#     Misses stores that build a genuine Set Championship from a generic template:
+#     three S10 events ran on "Weekly Play (Constructed)".
+#
+#   - Event name: store-authored, so it drifts. Misses stores that mistitle a properly
+#     templated event — one S13 store called theirs "Attack Of the Vine Store
+#     Championship". Caught by the phase text instead.
+#
+# Do NOT resolve the event's *category* (the template's display name) through RPH's
+# event-configuration-templates endpoint. That was tried and it does not hold: RPH
+# dropped the "Attack of the Vine! Set Championship" template from the list two days
+# into the S13 set champs window, while the window was still running, so the lookup
+# silently returned nothing for every event. The phase text carries the same
+# information without the lookup, and does not disappear.
+#
+# The keyword stays the loose "Set Champ": template wording drifts between
+# "Set Championship" and "Set Champs", and the set name must never be part of the match.
 _SET_CHAMPS_KEYWORD = "Set Champ"
 
 
-def _is_set_champs_event(event: dict) -> bool:
-    """True if the event's RPH category *or* its store-authored name names a Set Championship."""
+def _set_champs_phase_text(event: dict) -> str:
+    """Phase names and descriptions, which RPH copies onto the event from its template."""
+    return ' '.join(
+        f"{p.get('phase_name') or ''} {p.get('phase_description') or ''}"
+        for p in (event.get('tournament_phases') or [])
+    )
+
+
+def is_set_champs_event(event: dict) -> bool:
+    """True if the event's phase text *or* its store-authored name names a Set Championship."""
     keyword = _SET_CHAMPS_KEYWORD.lower()
-    return (keyword in _rph_api.get_event_category(event).lower()
+    return (keyword in _set_champs_phase_text(event).lower()
             or keyword in (event.get('name') or '').lower())
 
 
@@ -1309,7 +1326,7 @@ def refresh_set_champs() -> tuple[int, list]:
     Fetch Set Championship events from RPH and write them to the Set Champs sheet.
 
     Pulls all events in the SET_CHAMPS date window (including upcoming and
-    in-progress), filters to Set Championships via _is_set_champs_event(), and
+    in-progress), filters to Set Championships via is_set_champs_event(), and
     overwrites the sheet with the latest data.
 
     Called daily by the set_champs_daily task in bot.py during the window
@@ -1322,10 +1339,6 @@ def refresh_set_champs() -> tuple[int, list]:
         'display_statuses': ['past', 'inProgress', 'upcoming'],
     }
 
-    # Refetch the template map each run — RPH rotates it when a new set launches,
-    # and this task runs daily in a long-lived process.
-    _rph_api.invalidate_event_template_cache()
-
     if not season.SET_CHAMPS_START_DT or not season.SET_CHAMPS_END_DT:
         raise RuntimeError("Set Champs dates not configured — run /season-rollover to set them in Bot State.")
     print(f"  → Fetching Set Championship events ({season.SET_CHAMPS_START_DT} → {season.SET_CHAMPS_END_DT})...")
@@ -1336,13 +1349,13 @@ def refresh_set_champs() -> tuple[int, list]:
         require_started=False,
     )
 
-    filtered  = [e for e in events if _is_set_champs_event(e)]
+    filtered  = [e for e in events if is_set_champs_event(e)]
     keyword   = _SET_CHAMPS_KEYWORD.lower()
     name_only = sum(1 for e in filtered
-                    if keyword not in _rph_api.get_event_category(e).lower())
+                    if keyword not in _set_champs_phase_text(e).lower())
     print(f"  ✓ {len(filtered)} set champs event(s) found (of {len(events)} total in window)")
     if name_only:
-        print(f"    ⚠ {name_only} matched on event name only — no Set Champs category on RPH")
+        print(f"    ⚠ {name_only} matched on the store's event name only — no Set Champs phase text")
 
     rows = []
     for e in filtered:

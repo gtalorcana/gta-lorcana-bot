@@ -11,36 +11,55 @@
 
 **Duplicate vs retry detection:** same URL + same thread = retry (allowed, overwrites). Same URL + different thread = true duplicate (rejected).
 
+**Submission eligibility.** A submitted event must pass all of these, in order:
+
+1. Thread created on or before the season's final day (`bot.py`, `is_past_reporting_cutoff`)
+2. Message body is exactly an RPH event URL (`EVENTS_URL_RE`)
+3. URL not already reported by another thread (`results.py`)
+4. `gameplay_format` is Core Constructed or Infinity Constructed
+5. **Not a Set Championship** — `stores.is_set_champs_event()`
+6. Event date inside the season window
+
+Rules 5 and 6 are gated behind `_fetch_single_event(..., validate_eligibility=True)`, set only for
+live submissions. The bulk re-fetch path (`_fetch_event_rows_and_standings`) deliberately leaves it
+False: it re-reads rows already accepted into the sheet, and must not start rejecting history when
+the eligibility rules change.
+
+The Set Champs rule is separate from the date rule because **the season and Set Champs windows
+overlap** — S13 ran the season to Sep 18 while Set Champs ran Sep 4-27. An in-window Set
+Championship is otherwise a perfectly valid Core Constructed event, so nothing else rejects it. One
+(event 843203) was accepted into S13 before this rule existed.
+
 ---
 
 ## Set Championships
 
-The `set_champs_daily` task calls `refresh_set_champs()` in `stores.py` every morning during the set champs window. It fetches all Ontario Lorcana events in the `SET_CHAMPS` date range (including upcoming and in-progress), filters to Set Championships via `_is_set_champs_event()`, and overwrites the Set Champs sheet.
+The `set_champs_daily` task calls `refresh_set_champs()` in `stores.py` every morning during the set champs window. It fetches all Ontario Lorcana events in the `SET_CHAMPS` date range (including upcoming and in-progress), filters to Set Championships via `is_set_champs_event()`, and overwrites the Set Champs sheet.
 
-`_is_set_champs_event()` matches the keyword `"Set Champ"` (case-insensitive) against the event's
-**category** *or* its **name** — a union, not a preference. The category is the name of the RPH
-event configuration template the event was built from, which is what the RPH event page labels
-"Category" (e.g. `"Attack of the Vine! Set Championship"`). Events carry only the template UUID in
-`event_configuration_template`; `RphApi.get_event_category()` resolves it through the
-`event-configuration-templates` endpoint, fetched once and cached per instance.
+`is_set_champs_event()` matches the keyword `"Set Champ"` (case-insensitive) against two
+independent signals, as a **union**. Neither alone is complete:
 
-Both halves of the union are load-bearing, and each alone loses real events:
+- **Phase text** - the `phase_name` / `phase_description` RPH copies onto the event from the event
+  configuration template it was built from ("Participate in the preliminary rounds for the Disney
+  Lorcana Set Championships..."). It names no set, so it is set-agnostic, and it is stored on the
+  event itself, so it keeps resolving for past sets. It misses stores that build a genuine Set
+  Championship from a generic template - three S10 events ran on `Weekly Play (Constructed)`.
+- **Event name** - store-authored, so it drifts. It misses stores that mistitle a properly
+  templated event: one S13 store called theirs "Attack Of the Vine **Store** Championship". The
+  phase text catches those.
 
-- **Name alone** misses stores that mistitle a properly-templated event — one S13 store called
-  theirs "Attack Of the Vine **Store** Championship".
-- **Category alone** misses stores that build a genuine Set Championship from a generic template —
-  three S10 Whispers in the Well Set Championships ran on `Weekly Play (Constructed)`.
+Measured on the S13 window: name alone 76, union 77. On S10 (a past set): name alone 74, union 77.
 
-The category is also only available for the *current* set. RPH's template endpoint lists just the
-current set's templates (12 active, 6 inactive at time of writing); retired sets' Set Championship
-templates are not exposed at all, so **every event outside the current set resolves to no category
-and is carried entirely by the name match**. `refresh_set_champs` logs how many rows matched on name
-only — during the current set's window that count should be at or near zero, and a sudden jump means
-RPH has rotated the template list.
+**Do not resolve the event's category through RPH's `event-configuration-templates` endpoint.**
+That was tried and shipped, and it does not hold. RPH dropped the "Attack of the Vine! Set
+Championship" template from the list two days into the S13 set champs window - 12 templates on
+Sep 5, 11 on Sep 7 - *while the window was still running*, so the lookup silently returned nothing
+for every event and the mistitled S13 event stopped being detected. Retired sets' templates are
+never listed at all. The phase text carries the same information without the lookup, without an
+extra API call, and without disappearing.
 
-The keyword is deliberately the loose `"Set Champ"` rather than `"Set Championship"`: the template
-name is prefixed with the set name, which changes every set, and the trailing wording drifts between
-"Set Championship" and "Set Champs". Never match the set name itself.
+`refresh_set_champs` logs how many rows matched on the store's event name only (no Set Champs phase
+text). Those are the fragile ones, riding entirely on a store's chosen title.
 
 **Set Champs sheet columns (A2:I):**
 ```

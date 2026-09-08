@@ -2,8 +2,8 @@ import time
 
 import requests
 
-from constants import (RPH_EVENTS_URL, RPH_EVENT_URL, RPH_EVENT_TEMPLATES_URL,
-                       RPH_GAME_STORES_URL, RPH_STANDINGS_URL, RPH_USERS_URL)
+from constants import (RPH_EVENTS_URL, RPH_EVENT_URL, RPH_GAME_STORES_URL,
+                       RPH_STANDINGS_URL, RPH_USERS_URL)
 
 _MAX_RETRIES = 3
 _RETRY_DELAY = 2  # seconds between retries
@@ -31,7 +31,6 @@ def _get_with_retry(session, url, params=None):
 class RphApi:
     def __init__(self):
         self.session = requests.Session()
-        self._event_template_names = None  # lazily populated {template_id: name}
 
     def get_game_stores(self, extra_params=None):
         results = []
@@ -108,45 +107,6 @@ class RphApi:
             params['page'] = current_page['next']
             current_page = _get_with_retry(self.session, RPH_EVENTS_URL, params)
             yield current_page['results']
-
-    def get_event_template_names(self) -> dict:
-        """
-        Return {event_configuration_template_id: template_name} for all Lorcana
-        event templates.
-
-        This is the "Category" RPH shows on an event page — e.g. template
-        81cf85bd-... is "Attack of the Vine! Set Championship". Events carry only
-        the template UUID in `event_configuration_template`, so the name has to
-        be resolved through this endpoint.
-
-        The list is small (a dozen entries) and static within a set, so it is fetched
-        once and cached. RPH rotates it when a new set launches, so a long-lived
-        process must call invalidate_event_template_cache() periodically — see
-        stores.refresh_set_champs().
-
-        Returns {} rather than raising if the endpoint is unavailable. Callers treat
-        an unresolved category as "unknown", never as "not a match", so degrading to
-        an empty map costs precision but never fails the caller outright.
-        """
-        if self._event_template_names is None:
-            try:
-                data = _get_with_retry(self.session, RPH_EVENT_TEMPLATES_URL,
-                                       params={'game_slug': 'disney-lorcana'})
-                # This endpoint returns a bare list, not the paginated {results: [...]} envelope
-                templates = data if isinstance(data, list) else data.get('results', [])
-                self._event_template_names = {t['id']: t.get('name') or '' for t in templates}
-            except Exception as e:
-                print(f"  ⚠ Could not fetch RPH event templates: {e} — event categories unavailable")
-                self._event_template_names = {}  # cached so one failure isn't retried per event
-        return self._event_template_names
-
-    def invalidate_event_template_cache(self) -> None:
-        """Drop the cached template map so the next lookup refetches it."""
-        self._event_template_names = None
-
-    def get_event_category(self, event: dict) -> str:
-        """Resolve an event's template UUID to its category name ('' if unknown)."""
-        return self.get_event_template_names().get(event.get('event_configuration_template'), '')
 
     def get_event_by_id(self, event_id):
         event = self.fetch_event_by_id(event_id)
