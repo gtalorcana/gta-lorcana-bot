@@ -18,6 +18,9 @@
 | `/wheretoplay` | Admin | Manually trigger a `#where-to-play` refresh |
 | `/season-rollover` | Admin | Create new season tabs in League sheet, update Bot State, reload config in memory. Refuses if the outgoing season's Rare/Uncommon were never recorded — `force: true` overrides |
 | `/archive-season` | Admin | Copy a completed season's tabs from the League sheet to the Archive spreadsheet |
+| `/set-champs` | Admin | Manually refresh and post the Set Champs digest |
+| `/prerelease-dates start_date end_date [set_name]` | Admin | Set the prerelease window in Bot State, then refresh and post the prerelease digest. Separate from `/season-rollover` because stores list prereleases weeks before the set (and the season) starts |
+| `/prereleases` | Admin | Manually refresh and post the prerelease digest |
 
 > To restrict commands to specific roles, use Discord's server settings: **Server Settings → Integrations → GTA Lorcana Bot** — no code changes needed.
 
@@ -31,5 +34,6 @@ Admin commands are also accessible to any Discord user ID listed in `ADMIN_USER_
 |------|------|-------------|
 | `where_to_play_weekly` | Sundays at 11 PM ET | Edits (or posts) the `#where-to-play` messages |
 | `set_champs_daily` | Daily at 7 AM ET, from `SEASON_START_DATE` through `SET_CHAMPS_END_DATE` | Refreshes the Set Champs tab in the League sheet from RPH |
+| `prerelease_daily` | Daily at 7:05 AM ET, through `PRERELEASE_END_DATE` | Edits (or posts) the prerelease digest in `PRERELEASE_CHANNEL_ID`. Nothing is written to a sheet. Offset 5 minutes from `set_champs_daily` so the two RPH fetches never overlap in memory |
 | `rph_watcher` | Every 15 min | Checks watched events for open spots and DMs subscribers |
 | `keepalive` | Every 30 min | Heartbeat log |

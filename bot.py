@@ -15,6 +15,8 @@ Features:
   - /assign-roles-from-registry      — assign every rarity role the registry records (admins only)
   - /where-to-play     — manually push the where-to-play post (admins only)
   - /set-champs      — manually refresh and post the Set Champs update (admins only)
+  - /prerelease-dates — set the prerelease window and post it (admins only)
+  - /prereleases     — manually refresh and post the prerelease update (admins only)
   - on_member_join   — auto-assigns Common rarity role to new members
   - where_to_play_weekly — refreshes #where-to-play every Sunday evening
 
@@ -51,7 +53,7 @@ from datetime import datetime, timezone, date, timedelta
 
 from clients import gs as _gs, rph_api as _rph_api
 from results import process_event_data, remove_event_data
-from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, refresh_set_champs, set_bot_state_key, delete_bot_state_key, fetch_event_status, create_season_sheets, archive_season_data, get_etb_approval, append_etb_approval, lookup_player_standings, get_current_display_names
+from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, refresh_set_champs, fetch_prereleases, set_bot_state_key, delete_bot_state_key, fetch_event_status, create_season_sheets, archive_season_data, get_etb_approval, append_etb_approval, lookup_player_standings, get_current_display_names
 
 from constants import (
     DISCORD_BOT_TOKEN,
@@ -60,6 +62,7 @@ from constants import (
     CHANNELS,
     MOD_CHANNEL_ID,
     SET_CHAMPS_CHANNEL_ID,
+    PRERELEASE_CHANNEL_ID,
     EVENTS_URL_RE,
     RPH_RETRY_DELAY,
     RPH_RETRY_ATTEMPTS,
@@ -153,8 +156,6 @@ _sheet_lock = asyncio.Lock()
 _shopify:             _ShopifyApi | None = None
 _etb_price_rule_id:  int | None         = None
 
-# Set Champs Discord message IDs — one per day, restored from Bot State on ready.
-_set_champs_msg_ids: list[int | None] = []
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -246,7 +247,7 @@ def _grouped_by_day(entries: list) -> str:
     return "\n".join(lines)
 
 
-_WTP_CHAR_LIMIT = 1950  # leave headroom below Discord's 2000-char limit
+_WTP_CHAR_LIMIT = 1950  # leave headroom below Discord's 2000-char limit (also used by the event digests)
 
 
 def _build_where_to_play_messages(store_analysis: dict, as_of: date) -> list[str]:
@@ -409,22 +410,22 @@ async def where_to_play_weekly():
             print(f"  ✗ Failed to update {_ch('where_to_play')}: {e}")
 
 
-# ── Set Championships ────────────────────────────────────────────────────────
+# ── Event digests (Set Championships, Prereleases) ──────────────────────────
 
-def _build_set_champs_messages(rows: list, as_of: date) -> list[str]:
+def _build_event_digest_messages(title: str, empty_text: str, rows: list, as_of: date) -> list[str]:
     """
-    Format Set Champs rows into a list of Discord messages — one per unique date,
-    preceded by a header message.
+    Format digest rows (stores._event_digest_rows) into a list of Discord messages —
+    one per unique date, preceded by a header message.
     """
     from collections import defaultdict
 
     header = (
-        f"🏆 **GTA Lorcana — {season.CURRENT_SEASON} Set Championships**\n"
+        f"{title}\n"
         f"*Last updated: {as_of.strftime('%b %-d, %Y')}*"
     )
 
     if not rows:
-        return [header + "\n\n*No Set Championship events found yet.*"]
+        return [header + f"\n\n*{empty_text}*"]
 
     by_date = defaultdict(list)
     for row in rows:
@@ -434,7 +435,8 @@ def _build_set_champs_messages(rows: list, as_of: date) -> list[str]:
     for date_str in sorted(by_date.keys()):
         event_date = date.fromisoformat(date_str)
         day_label  = event_date.strftime('%A, %b %-d')
-        lines      = ["─────────────────────", "", f"**{day_label}**", ""]
+        day_header = f"─────────────────────\n\n**{day_label}**"
+        current    = day_header
         for row in by_date[date_str]:
             store   = row[3]
             city    = row[4]
@@ -442,30 +444,55 @@ def _build_set_champs_messages(rows: list, as_of: date) -> list[str]:
             cap     = row[5]
             url     = row[8]
             cap_str = f" · Cap {cap}" if cap else ""
-            lines.append(f"**{store}** ({city})")
-            lines.append(f"{time}{cap_str} · <{url}>")
-            lines.append("")
-        messages.append("\n".join(lines).strip())
+            entry   = f"**{store}** ({city})\n{time}{cap_str} · <{url}>"
+            # A busy day overflows one message (Hyperia City prerelease Saturday: 20
+            # events, ~2,200 chars) — carry it on in a "(cont.)" message instead.
+            if len(current) + 2 + len(entry) > _WTP_CHAR_LIMIT:
+                messages.append(current)
+                current = f"**{day_label} (cont.)**"
+            current += "\n\n" + entry
+        messages.append(current)
 
     return messages
 
 
-async def _post_set_champs(rows: list, loop) -> None:
-    """Post or edit Set Champs messages (one per day) in the Set Champs channel."""
-    global _set_champs_msg_ids
+def _build_set_champs_messages(rows: list, as_of: date) -> list[str]:
+    return _build_event_digest_messages(
+        f"🏆 **GTA Lorcana — {season.CURRENT_SEASON} Set Championships**",
+        "No Set Championship events found yet.",
+        rows, as_of,
+    )
+
+
+def _build_prerelease_messages(rows: list, as_of: date) -> list[str]:
+    set_name = f"{season.PRERELEASE_SET_NAME} " if season.PRERELEASE_SET_NAME else ""
+    return _build_event_digest_messages(
+        f"🎁 **GTA Lorcana — {set_name}Prereleases**",
+        "No prerelease events found yet.",
+        rows, as_of,
+    )
+
+
+# Digest message IDs, keyed by their Bot State key — restored on ready.
+_digest_msg_ids: dict[str, list[int]] = {}
+
+
+async def _post_event_digest(label: str, channel_id: int, state_key: str,
+                             messages: list[str], loop) -> None:
+    """Post or edit a digest's messages (header + one per day) in its channel."""
     guild = bot.guilds[0] if bot.guilds else None
     if not guild:
         return
-    channel = guild.get_channel(SET_CHAMPS_CHANNEL_ID)
+    channel = guild.get_channel(channel_id)
     if not channel:
-        print(f"  ⚠ Set Champs channel {SET_CHAMPS_CHANNEL_ID} not found")
+        print(f"  ⚠ {label} channel {channel_id} not found")
         return
 
-    messages = _build_set_champs_messages(rows, date.today())
-    new_ids  = []
+    old_ids = _digest_msg_ids.get(state_key, [])
+    new_ids = []
 
     for i, content in enumerate(messages):
-        msg_id = _set_champs_msg_ids[i] if i < len(_set_champs_msg_ids) else None
+        msg_id = old_ids[i] if i < len(old_ids) else None
         if msg_id:
             try:
                 existing = await channel.fetch_message(msg_id)
@@ -478,7 +505,7 @@ async def _post_set_champs(rows: list, loop) -> None:
         new_ids.append(msg.id)
 
     # Delete orphaned messages if day count decreased
-    for old_id in _set_champs_msg_ids[len(messages):]:
+    for old_id in old_ids[len(messages):]:
         if old_id:
             try:
                 old_msg = await channel.fetch_message(old_id)
@@ -486,10 +513,20 @@ async def _post_set_champs(rows: list, loop) -> None:
             except discord.NotFound:
                 pass
 
-    _set_champs_msg_ids = new_ids
+    _digest_msg_ids[state_key] = new_ids
     ids_str = '|'.join(str(i) for i in new_ids)
-    await loop.run_in_executor(None, set_bot_state_key, 'set_champs_msg_ids', ids_str)
-    print(f"  ✓ Set Champs Discord updated ({len(messages)} message(s))")
+    await loop.run_in_executor(None, set_bot_state_key, state_key, ids_str)
+    print(f"  ✓ {label} Discord updated ({len(messages)} message(s))")
+
+
+async def _post_set_champs(rows: list, loop) -> None:
+    messages = _build_set_champs_messages(rows, date.today())
+    await _post_event_digest("Set Champs", SET_CHAMPS_CHANNEL_ID, 'set_champs_msg_ids', messages, loop)
+
+
+async def _post_prereleases(rows: list, loop) -> None:
+    messages = _build_prerelease_messages(rows, date.today())
+    await _post_event_digest("Prerelease", PRERELEASE_CHANNEL_ID, 'prerelease_msg_ids', messages, loop)
 
 
 @tasks.loop(minutes=1)
@@ -518,6 +555,31 @@ async def set_champs_daily():
         await _post_set_champs(rows, loop)
     except Exception as e:
         print(f"  ✗ set_champs_daily failed: {e}")
+
+
+@tasks.loop(minutes=1)
+async def prerelease_daily():
+    """
+    Refreshes the prerelease post once daily at 7:05 AM ET, from whenever
+    /prerelease-dates is run through PRERELEASE_END_DATE. Offset from
+    set_champs_daily so the two RPH date-range fetches never overlap in memory.
+    """
+    now_et = _now_et()
+    if now_et.hour != 7 or now_et.minute != 5:
+        return
+    if not season.PRERELEASE_END_DATE:
+        return
+    if now_et.date() > date.fromisoformat(season.PRERELEASE_END_DATE):
+        return
+
+    print(f"  🎁 prerelease_daily: refreshing prerelease post for {now_et.date()}...")
+    loop = asyncio.get_running_loop()
+    try:
+        count, rows = await loop.run_in_executor(None, fetch_prereleases)
+        gc.collect()  # TODO: remove when upgraded to 1GB RAM — fetch_prereleases fetches a date range of RPH events
+        await _post_prereleases(rows, loop)
+    except Exception as e:
+        print(f"  ✗ prerelease_daily failed: {e}")
 
 
 
@@ -816,14 +878,14 @@ async def on_ready():
     except Exception as e:
         print(f"  ⚠ Could not restore where-to-play message IDs: {e}")
 
-    # Restore persisted Set Champs message IDs
-    global _set_champs_msg_ids
-    try:
-        raw = state.get('set_champs_msg_ids', '')
-        _set_champs_msg_ids = [int(x) for x in raw.split('|') if x] if raw else []
-        print(f"  ✓ Restored Set Champs message IDs: {_set_champs_msg_ids}")
-    except Exception as e:
-        print(f"  ⚠ Could not restore Set Champs message IDs: {e}")
+    # Restore persisted Set Champs / prerelease message IDs
+    for key in ('set_champs_msg_ids', 'prerelease_msg_ids'):
+        try:
+            raw = state.get(key, '')
+            _digest_msg_ids[key] = [int(x) for x in raw.split('|') if x] if raw else []
+            print(f"  ✓ Restored {key}: {_digest_msg_ids[key]}")
+        except Exception as e:
+            print(f"  ⚠ Could not restore {key}: {e}")
 
     if not keepalive.is_running():
         keepalive.start()
@@ -834,6 +896,9 @@ async def on_ready():
     if not set_champs_daily.is_running():
         set_champs_daily.start()
         print(f"  ♻ Set Champs daily task started (fires 7AM ET, {season.SEASON_START_DATE} → {season.SET_CHAMPS_END_DATE})")
+    if not prerelease_daily.is_running():
+        prerelease_daily.start()
+        print(f"  ♻ Prerelease daily task started (fires 7:05AM ET, until {season.PRERELEASE_END_DATE})")
     if not rph_watcher.is_running():
         rph_watcher.start()
         print(f"  ♻ RPH event watcher started (polls every 15 min)")
@@ -2918,6 +2983,79 @@ async def set_champs_command(interaction: discord.Interaction):
     except Exception as e:
         await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
+
+
+@tree.command(name="prerelease-dates", description="Set the prerelease window and post the prerelease update (admins only)")
+@app_commands.describe(
+    start_date="First prerelease day (YYYY-MM-DD)",
+    end_date="Last prerelease day (YYYY-MM-DD)",
+    set_name="Set name for the post header, e.g. Hyperia City",
+)
+async def prerelease_dates_command(interaction: discord.Interaction, start_date: str, end_date: str,
+                                   set_name: str = ""):
+    if not _is_admin(interaction):
+        await interaction.response.send_message("❌ Admins only.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+        end   = datetime.strptime(end_date, "%Y-%m-%d").date()
+    except ValueError:
+        await interaction.followup.send(
+            f"⚠️ Dates must be YYYY-MM-DD, got `{start_date}` and `{end_date}`.", ephemeral=True)
+        return
+    if start > end:
+        await interaction.followup.send(
+            f"⚠️ `start_date` must be on or before `end_date` (got {start_date} → {end_date}).", ephemeral=True)
+        return
+
+    loop = asyncio.get_running_loop()
+    try:
+        def _update_state():
+            state = load_bot_state()
+            state.update({
+                'prerelease_start_date': start_date,
+                'prerelease_end_date':   end_date,
+                'prerelease_set_name':   set_name.strip(),
+            })
+            save_bot_state(state)
+            return state
+        season.init(await loop.run_in_executor(None, _update_state))
+    except Exception as e:
+        await interaction.followup.send(f"❌ Failed to update Bot State: {e}", ephemeral=True)
+        return
+
+    try:
+        count, rows = await loop.run_in_executor(None, fetch_prereleases)
+        gc.collect()
+        await _post_prereleases(rows, loop)
+    except Exception as e:
+        await interaction.followup.send(
+            f"⚠️ Dates saved ({start_date} → {end_date}) but the post failed: {e}", ephemeral=True)
+        return
+    await interaction.followup.send(
+        f"✅ Prerelease window set to {start_date} → {end_date} and posted ({count} event(s)). "
+        f"It refreshes daily at 7:05 AM ET until {end_date}.",
+        ephemeral=True,
+    )
+
+
+@tree.command(name="prereleases", description="Manually refresh and post the prerelease update (admins only)")
+async def prereleases_command(interaction: discord.Interaction):
+    if not _is_admin(interaction):
+        await interaction.response.send_message("❌ Admins only.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    loop = asyncio.get_running_loop()
+    try:
+        count, rows = await loop.run_in_executor(None, fetch_prereleases)
+        gc.collect()
+        await _post_prereleases(rows, loop)
+        await interaction.followup.send(f"✅ Prereleases updated ({count} event(s)).", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 if __name__ == "__main__":
     missing = [v for v in ["DISCORD_BOT_TOKEN", "WORKER_URL", "WORKER_SECRET"] if not os.getenv(v)]

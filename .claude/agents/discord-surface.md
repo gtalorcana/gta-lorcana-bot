@@ -1,6 +1,6 @@
 ---
 name: discord-surface
-description: Everything the user touches in Discord — slash commands, embeds and message copy, reaction flows, DMs, scheduled posts, and the where-to-play / set-champs digests. Use for adding or changing a command, wording, permissions, or a scheduled post. Not for how the underlying numbers are computed.
+description: Everything the user touches in Discord — slash commands, embeds and message copy, reaction flows, DMs, scheduled posts, and the where-to-play / set-champs / prerelease digests. Use for adding or changing a command, wording, permissions, or a scheduled post. Not for how the underlying numbers are computed.
 tools: Read, Edit, Write, Grep, Glob, Bash
 ---
 
@@ -17,9 +17,9 @@ roles posts), `docs/discord-surface/commands.md`, `docs/discord-surface/design-n
 | Area | Symbols |
 |---|---|
 | Bot setup & errors | `GtaLorcanaBot`, `on_app_command_error`, `_is_admin`, `_ch`, `make_embed`, `get_channel_by_id` |
-| Scheduled tasks | `keepalive` (30m), `where_to_play_weekly` (1m tick, posts Sun 11PM ET), `set_champs_daily` (1m tick, 7AM ET in window), `rph_watcher` (15m) |
+| Scheduled tasks | `keepalive` (30m), `where_to_play_weekly` (1m tick, posts Sun 11PM ET), `set_champs_daily` (1m tick, 7AM ET in window), `prerelease_daily` (1m tick, 7:05AM ET until window ends), `rph_watcher` (15m) |
 | Where-to-play | `_build_where_to_play_messages`, `_post_where_to_play`, `_grouped_by_day`, `_fmt`, `_last_sunday` |
-| Set champs post | `_build_set_champs_messages`, `_post_set_champs` |
+| Set champs / prerelease posts | `_build_event_digest_messages`, `_post_event_digest` (shared); `_post_set_champs`, `_post_prereleases` |
 | Event watcher | `watch_rph_event`, `unwatch_rph_event`, `list_watches`, `_watch_key`, `_load_watches` |
 | Results threads | `on_thread_create`, `on_message`, `on_message_edit`, `on_message_delete`, `on_thread_delete`, `process_results_reporting_thread`, `run_results_reporting_pipeline`, `_schedule_auto_retry` |
 | Linking & roles | `_post_linking_suggestions`, `on_raw_reaction_add`, `_assign_recorded_roles`, `_fmt_roles`, `on_member_join` |

@@ -64,6 +64,11 @@ a design note below changes.
   updated each season but still needs to be pushed to Discord. Plan: store the message ID in Bot
   State, add a `/update-league-post` command that reads the file and edits the message in-place.
   Message is a plain Discord message (not an embed). Do this after confirming message ID.
+- **Track two seasons at once**: review how the bot should hold S13 and S14 together. The
+  prerelease digest looks ahead to the next set (S14's Hyperia City prerelease, Oct 16-22)
+  while `CURRENT_SEASON` is still S13, so prerelease config lives outside the season today
+  (`prerelease_*` Bot State keys, set by `/prerelease-dates`, no season sheet tab). Decide
+  whether an "incoming season" concept should own it instead.
 
 ---
 

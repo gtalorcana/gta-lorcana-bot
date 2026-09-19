@@ -39,6 +39,11 @@ SEASON_START_DATE:     str = None
 SEASON_END_DATE:       str = None
 SET_CHAMPS_START_DATE: str = None
 SET_CHAMPS_END_DATE:   str = None
+# Prereleases belong to the incoming set, not the season, so they are set on their
+# own with /prerelease-dates rather than by /season-rollover.
+PRERELEASE_START_DATE: str = None
+PRERELEASE_END_DATE:   str = None
+PRERELEASE_SET_NAME:   str = None
 
 # ── Derived datetime strings (RPH API format) ──────────────────────────────────
 
@@ -46,6 +51,8 @@ SEASON_START_DT:     str = None
 SEASON_END_DT:       str = None
 SET_CHAMPS_START_DT: str = None
 SET_CHAMPS_END_DT:   str = None
+PRERELEASE_START_DT: str = None
+PRERELEASE_END_DT:   str = None
 
 # ── Derived sheet names ────────────────────────────────────────────────────────
 
@@ -73,6 +80,8 @@ def init(bot_state: dict) -> None:
     global CURRENT_SEASON, SEASON_START_DATE, SEASON_END_DATE
     global SET_CHAMPS_START_DATE, SET_CHAMPS_END_DATE
     global SEASON_START_DT, SEASON_END_DT, SET_CHAMPS_START_DT, SET_CHAMPS_END_DT
+    global PRERELEASE_START_DATE, PRERELEASE_END_DATE, PRERELEASE_SET_NAME
+    global PRERELEASE_START_DT, PRERELEASE_END_DT
     global STANDINGS_SHEET_NAME, EVENTS_SHEET_NAME, LEADERBOARD_SHEET_NAME
     global RESULTS_SHEET_NAME, SET_CHAMPS_EVENTS_SHEET_NAME
     global STANDINGS_RANGE_NAME, EVENTS_RANGE_NAME, EVENTS_TIMESTAMP_RANGE_NAME
@@ -83,12 +92,17 @@ def init(bot_state: dict) -> None:
     SEASON_END_DATE       = bot_state.get('season_end_date')       or None
     SET_CHAMPS_START_DATE = bot_state.get('set_champs_start_date') or None
     SET_CHAMPS_END_DATE   = bot_state.get('set_champs_end_date')   or None
+    PRERELEASE_START_DATE = bot_state.get('prerelease_start_date') or None
+    PRERELEASE_END_DATE   = bot_state.get('prerelease_end_date')   or None
+    PRERELEASE_SET_NAME   = bot_state.get('prerelease_set_name')   or None
 
     # Derived datetime strings (DST-aware) — None if dates not configured
     SEASON_START_DT     = _start_of_day_utc(SEASON_START_DATE)     if SEASON_START_DATE     else None
     SEASON_END_DT       = _end_of_day_utc(SEASON_END_DATE)         if SEASON_END_DATE       else None
     SET_CHAMPS_START_DT = _start_of_day_utc(SET_CHAMPS_START_DATE) if SET_CHAMPS_START_DATE else None
     SET_CHAMPS_END_DT   = _end_of_day_utc(SET_CHAMPS_END_DATE)    if SET_CHAMPS_END_DATE   else None
+    PRERELEASE_START_DT = _start_of_day_utc(PRERELEASE_START_DATE) if PRERELEASE_START_DATE else None
+    PRERELEASE_END_DT   = _end_of_day_utc(PRERELEASE_END_DATE)     if PRERELEASE_END_DATE   else None
 
     STANDINGS_SHEET_NAME         = CURRENT_SEASON + " Standings"
     EVENTS_SHEET_NAME            = CURRENT_SEASON + " Events"

@@ -1364,8 +1364,20 @@ def refresh_set_champs() -> tuple[int, list]:
     if name_only:
         print(f"    ⚠ {name_only} matched on the store's event name only — no Set Champs phase text")
 
+    rows = _event_digest_rows(filtered)
+
+    _gs.update_values(BOT_DATABASE_SPREADSHEET_ID, season.SET_CHAMPS_EVENTS_RANGE_NAME, "USER_ENTERED", rows)
+    print(f"  ✓ Set Champs sheet updated ({len(rows)} row(s))")
+    return len(rows), rows
+
+
+def _event_digest_rows(events: list) -> list:
+    """
+    Rows for a per-day event digest, sorted by date then time:
+    Date | Time (Toronto) | Store ID | Store Name | City | Player Cap | Format | Event Name | RPH Link
+    """
     rows = []
-    for e in filtered:
+    for e in events:
         dt_utc     = datetime.fromisoformat(e['start_datetime'].replace('Z', '+00:00'))
         dt_toronto = dt_utc.astimezone(_TZ_TORONTO)
         rows.append([
@@ -1379,9 +1391,55 @@ def refresh_set_champs() -> tuple[int, list]:
             e.get('name', ''),
             _RPH_EVENT_BASE_URL + str(e['id']),
         ])
+    # Sort on a real time, not the "%I:%M %p" string, which puts 10 AM before 9 AM
+    rows.sort(key=lambda r: (r[0], datetime.strptime(r[1], '%I:%M %p').time()))
+    return rows
 
-    rows.sort(key=lambda r: (r[0], r[1]))  # sort by date then time
 
-    _gs.update_values(BOT_DATABASE_SPREADSHEET_ID, season.SET_CHAMPS_EVENTS_RANGE_NAME, "USER_ENTERED", rows)
-    print(f"  ✓ Set Champs sheet updated ({len(rows)} row(s))")
+# ── Prereleases ───────────────────────────────────────────────────────────────
+
+# Prereleases are matched on the store-authored event name alone. Unlike Set Champs,
+# the prerelease template copies no phase text onto the event (Hyperia City events
+# carry a bare "Phase 1"), so the name is the only set-agnostic signal. The template
+# UUID is different every set, and stores also build prereleases on the generic
+# "Weekly Play (Sealed)" template (Face to Face, Hyperia City), so it is no use either.
+#
+# Stores write both "Prerelease" and "Pre-Release", so hyphens and spaces are dropped
+# before matching.
+#
+# The fetch drops the league's format filter: prereleases are Sealed or Pack Rush,
+# neither of which the league's Constructed + Draft filter lets through. Prereleases
+# never score for the league — results.py rejects those formats on its own.
+_PRERELEASE_KEYWORD = "prerelease"
+
+
+def is_prerelease_event(event: dict) -> bool:
+    """True if the store-authored event name names a prerelease."""
+    name = (event.get('name') or '').lower().replace('-', '').replace(' ', '')
+    return _PRERELEASE_KEYWORD in name
+
+
+def fetch_prereleases() -> tuple[int, list]:
+    """
+    Fetch prerelease events in the PRERELEASE date window, including upcoming and
+    in-progress, as digest rows (see _event_digest_rows). Nothing is written to a sheet.
+
+    Called daily by the prerelease_daily task in bot.py.
+    """
+    if not season.PRERELEASE_START_DT or not season.PRERELEASE_END_DT:
+        raise RuntimeError("Prerelease dates not configured — run /prerelease-dates to set them.")
+    print(f"  → Fetching prerelease events ({season.PRERELEASE_START_DT} → {season.PRERELEASE_END_DT})...")
+    events = _rph_api.get_events(
+        start_date_after=season.PRERELEASE_START_DT,
+        start_date_before=season.PRERELEASE_END_DT,
+        extra_params={
+            'display_status':      None,
+            'display_statuses':    ['past', 'inProgress', 'upcoming'],
+            'gameplay_format_ids': None,
+        },
+        require_started=False,
+    )
+    filtered = [e for e in events if is_prerelease_event(e)]
+    print(f"  ✓ {len(filtered)} prerelease event(s) found (of {len(events)} total in window)")
+    rows = _event_digest_rows(filtered)
     return len(rows), rows
