@@ -4,12 +4,24 @@ See README.md for project structure and links to all docs in docs/.
 
 ---
 
-## Current Season
+## Seasons
 
-- Season: S13
-- Start: 2026-07-17
-- End: 2026-09-04
-- Set Champs: 2026-09-04 → 2026-09-27
+The league calendar lives in the **Seasons tab** of the Bot Database sheet, one row per set's
+cycle (prerelease → season → Set Champs). It is hand-maintained; the bot only reads it. Bot State
+holds just the `season` pointer. Run `/seasons` for the live view, or
+`python scripts/print_season_calendar.py`.
+
+Do not restate the current season's dates here — they go stale. As of S13 the pointer was S13
+(Jul 17 → Sep 18 2026, Set Champs Sep 4 → 27) with S14 (Hyperia City) seeded ahead of it.
+
+**Two seasons are live at once, by design.** A set's prerelease is listed by stores weeks before
+that season starts, and the previous season's Set Champs can still be running when it does. So:
+
+| Consumer | Follows |
+|---|---|
+| Results eligibility, Standings/Results/Leaderboard, roles, every sheet name | `CURRENT_SEASON` — always |
+| Set Champs digest | The **current** season's window (`season.set_champs_window()`), because the sheet it writes is named for `CURRENT_SEASON` |
+| Prerelease digest | Whichever row's prerelease window has not ended (`season.active_prerelease()`) — normally the **incoming** season |
 
 ---
 

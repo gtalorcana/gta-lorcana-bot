@@ -83,6 +83,17 @@ STORE_OVERRIDES_RANGE_NAME  = STORE_OVERRIDES_SHEET_NAME + "!A1:I"
 BOT_STATE_SHEET_NAME  = "Bot State"
 BOT_STATE_RANGE_NAME  = BOT_STATE_SHEET_NAME + "!A1:B"
 
+# Season calendar — hand-maintained by operators, NEVER written by the bot.
+# One row per set's league cycle: prerelease → season → Set Champs. It is a table
+# rather than the flat season_*/set_champs_* Bot State keys it replaces because
+# neighbouring cycles overlap: S13's Set Champs ran Sep 4-27 2026 while S14's
+# Hyperia City prerelease was already scheduled for Oct 16-22, and prereleases are
+# listed by stores weeks before that set's season exists at all.
+# Columns (A–H): Season | Set Name | Prerelease Start | Prerelease End |
+#                Season Start | Season End | Set Champs Start | Set Champs End
+SEASONS_SHEET_NAME = "Seasons"
+SEASONS_RANGE_NAME = SEASONS_SHEET_NAME + "!A2:H"
+
 STORE_DEBUG_SHEET_NAME = "Store Debug"
 STORE_DEBUG_RANGE_NAME = STORE_DEBUG_SHEET_NAME + "!A1:Z"  # wide enough for 4 week columns + fixed cols
 

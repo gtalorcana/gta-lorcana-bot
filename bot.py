@@ -15,6 +15,7 @@ Features:
   - /assign-roles-from-registry      — assign every rarity role the registry records (admins only)
   - /where-to-play     — manually push the where-to-play post (admins only)
   - /set-champs      — manually refresh and post the Set Champs update (admins only)
+  - /seasons         — show the season calendar and each digest's window (admins only)
   - /prerelease-dates — set the prerelease window and post it (admins only)
   - /prereleases     — manually refresh and post the prerelease update (admins only)
   - on_member_join   — auto-assigns Common rarity role to new members
@@ -53,7 +54,7 @@ from datetime import datetime, timezone, date, timedelta
 
 from clients import gs as _gs, rph_api as _rph_api
 from results import process_event_data, remove_event_data
-from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, refresh_set_champs, fetch_prereleases, set_bot_state_key, delete_bot_state_key, fetch_event_status, create_season_sheets, archive_season_data, get_etb_approval, append_etb_approval, lookup_player_standings, get_current_display_names
+from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, load_season_config, refresh_set_champs, fetch_prereleases, set_bot_state_key, delete_bot_state_key, fetch_event_status, create_season_sheets, archive_season_data, get_etb_approval, append_etb_approval, lookup_player_standings, get_current_display_names
 
 from constants import (
     DISCORD_BOT_TOKEN,
@@ -597,6 +598,25 @@ def _watch_key(event_id: int) -> str:
     return f"{_RPH_WATCH_KEY_PREFIX}{event_id}"
 
 
+async def _reload_season(loop) -> tuple[dict, list[str]]:
+    """
+    Reload Bot State and the Seasons calendar, and rebuild season.py from both.
+    Returns (bot_state, problems).
+
+    On a read failure the in-memory calendar is left alone rather than cleared:
+    every season window, and with it the results pipeline's date checks, hangs off
+    one tab read now, so an outage must not look like "no seasons configured".
+    """
+    try:
+        state, calendar, problems = await loop.run_in_executor(None, load_season_config)
+    except Exception as e:
+        print(f"  ⚠ Could not load season config: {e} — keeping the calendar already in memory")
+        return {}, [f"Could not read the Seasons tab or Bot State: {e}"]
+
+    season.init(state, calendar)
+    return state, problems
+
+
 async def _try_delete_state_key(loop, key: str, what: str) -> bool:
     """
     Delete a Bot State key, logging instead of raising on failure.
@@ -855,22 +875,25 @@ async def on_ready():
 
     # Load Bot State: initialise season config and restore persisted message IDs
     loop = asyncio.get_running_loop()
-    try:
-        state = await loop.run_in_executor(None, load_bot_state)
-        season.init(state)
-    except Exception as e:
-        print(f"  ⚠ Could not load bot state for season init: {e}")
-        season.init({})
-        state = {}
+    state, problems = await _reload_season(loop)
 
     if season.SEASON_START_DATE is None:
-        print(f"  ✗ CRITICAL: Season dates not configured in Bot State — season-dependent tasks will not run.")
+        print(f"  ✗ CRITICAL: Season dates not configured — season-dependent tasks will not run.")
         mod_ch = bot.get_channel(MOD_CHANNEL_ID)
         if mod_ch:
             await mod_ch.send(
-                "⚠️ **Season dates not configured.** Bot State is missing `season_start_date` / `season_end_date`. "
-                "Run `/season-rollover` to configure the current season."
+                f"⚠️ **Season dates not configured.** The Seasons tab has no usable row for "
+                f"`{season.CURRENT_SEASON}`. Add one, then run `/seasons` to re-check."
             )
+
+    # A hand-edited tab with a bad row has to be loud now, not discovered as a
+    # digest that silently posts nothing at 7 AM.
+    if problems:
+        print(f"  ⚠ Seasons tab problems: {len(problems)}")
+        mod_ch = bot.get_channel(MOD_CHANNEL_ID)
+        if mod_ch:
+            await mod_ch.send("⚠️ **Seasons tab problems**\n"
+                              + "\n".join(f"• {p}" for p in problems[:10]))
 
     # Initialise Shopify client and pre-cache token + price rule ID
     global _shopify, _etb_price_rule_id
@@ -2998,6 +3021,54 @@ async def where_to_play_command(interaction: discord.Interaction):
 
     except Exception as e:
         await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
+
+@tree.command(name="seasons", description="Show the season calendar and what each digest resolves to (admins only)")
+@app_commands.describe(reload="Re-read the Seasons tab first (default true)")
+async def seasons_command(interaction: discord.Interaction, reload: bool = True):
+    """
+    Read-only view of the Seasons tab as the bot understands it.
+
+    The tab is hand-edited, so this is how a season's dates get checked without
+    waiting for a 7 AM digest to silently post nothing.
+    """
+    if not _is_admin(interaction):
+        await interaction.response.send_message("❌ Admins only.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    problems: list[str] = []
+    if reload:
+        _, problems = await _reload_season(asyncio.get_running_loop())
+
+    lines = [f"🗓️ **Season calendar** — current: **{season.CURRENT_SEASON}** "
+             f"(source: `{season.CALENDAR_SOURCE}`)", ""]
+    if season.SEASONS:
+        for row in season.SEASONS:
+            marker   = " ◀ current" if row['season'] == season.CURRENT_SEASON else ""
+            set_name = f" — {row['set_name']}" if row.get('set_name') else ""
+            lines.append(f"**{row['season']}**{set_name}{marker}")
+            lines.append(f"  Prerelease: {row.get('prerelease_start') or '—'} → {row.get('prerelease_end') or '—'}")
+            lines.append(f"  Season:     {row.get('season_start') or '—'} → {row.get('season_end') or '—'}")
+            lines.append(f"  Set Champs: {row.get('set_champs_start') or '—'} → {row.get('set_champs_end') or '—'}")
+    else:
+        lines.append("*No rows loaded from the Seasons tab.*")
+
+    pre = season.active_prerelease()
+    lines += ["", "**Digest windows now**",
+              f"  Set Champs: {season.CURRENT_SEASON} "
+              f"{season.SET_CHAMPS_START_DATE or '—'} → {season.SET_CHAMPS_END_DATE or '—'}",
+              f"  Prerelease: " + (f"{pre['season']} {pre.get('set_name') or ''} "
+                                   f"{pre['prerelease_start']} → {pre['prerelease_end']}"
+                                   if pre else "none open")]
+
+    if season.CALENDAR_SOURCE == 'bot_state':
+        lines += ["", f"⚠️ `{season.CURRENT_SEASON}` has no row in the Seasons tab — running on the "
+                      f"legacy Bot State date keys. Add the row."]
+    if problems:
+        lines += ["", "**Problems**"] + [f"  • {p}" for p in problems[:10]]
+
+    await interaction.followup.send("\n".join(lines)[:1990], ephemeral=True)
 
 
 @tree.command(name="set-champs", description="Manually refresh and post the Set Champs update (admins only)")

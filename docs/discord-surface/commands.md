@@ -18,6 +18,7 @@
 | `/wheretoplay` | Admin | Manually trigger a `#where-to-play` refresh |
 | `/season-rollover` | Admin | Create new season tabs in League sheet, update Bot State, reload config in memory. Refuses if the outgoing season's Rare/Uncommon were never recorded — `force: true` overrides |
 | `/archive-season` | Admin | Copy a completed season's tabs from the League sheet to the Archive spreadsheet |
+| `/seasons [reload]` | Admin | Show the season calendar as the bot reads it, what each digest resolves to, and any problems with the Seasons tab. Read-only |
 | `/set-champs` | Admin | Manually refresh and post the Set Champs digest |
 | `/prerelease-dates start_date end_date [set_name]` | Admin | Set the prerelease window in Bot State, then refresh and post the prerelease digest. Separate from `/season-rollover` because stores list prereleases weeks before the set (and the season) starts |
 | `/prereleases` | Admin | Manually refresh and post the prerelease digest |

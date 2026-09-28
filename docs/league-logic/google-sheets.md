@@ -5,7 +5,7 @@
 | Spreadsheet | Purpose |
 |------------|---------|
 | League Sheet | Standings, events, leaderboard, and Set Champs — one set of tabs per season |
-| Bot Database Sheet | Store classifications, debug data, overrides, bot state, player registry |
+| Bot Database Sheet | Store classifications, debug data, overrides, bot state, player registry, **season calendar** |
 | Archive Sheet | Historical seasons (read-only after archiving via `/archive-season`) |
 
 ---
@@ -44,6 +44,42 @@ tab (empty) if it's ever missing, since a broken reference would `#REF!` the who
 
 ---
 
+## Seasons Tab (Bot Database Sheet)
+
+The league calendar: one row per set's cycle. **Hand-maintained — the bot only ever reads it.**
+Data starts at `A2` (`Seasons!A2:H`).
+
+| Col | Header | Example | Notes |
+|-----|--------|---------|-------|
+| A | Season | `S14` | Must match `^S\d+$`; the identity key |
+| B | Set Name | `Hyperia City` | Header text for that set's prerelease digest |
+| C | Prerelease Start | `2026-10-16` | Both or neither, with D |
+| D | Prerelease End | `2026-10-22` | |
+| E | Season Start | `2026-10-16` | A start with no end is fine for a future season |
+| F | Season End | `2026-12-20` | Required once that season is current |
+| G | Set Champs Start | `2026-12-04` | Both or neither, with H |
+| H | Set Champs End | `2026-12-27` | May fall after the season end (S11 did) |
+
+It is a table rather than flat Bot State keys because cycles overlap: S13's Set Champs ran
+Sep 4-27 2026 while S14's prerelease was already scheduled for Oct 16-22. Stores list a
+prerelease weeks before that season exists, so the prerelease digest follows **whichever row's
+prerelease window has not ended** — normally the incoming season — while league scoring stays
+pinned to `CURRENT_SEASON`.
+
+Half-filled future rows are expected and load cleanly. A window with only one of its two dates,
+or one that ends before it starts, is ignored *for that window only* and reported; the rest of
+the row still works. A row whose season id or dates cannot be read is skipped entirely. Every
+problem is posted to the mod channel at startup and listed by `/seasons`.
+
+**Format C2:H as `yyyy-mm-dd`** (Format → Number → Custom date) so what the bot reads back is
+ISO. `M/D/YYYY` and `Mon D, YYYY` are also accepted; `D/M/YYYY` is refused on purpose, since
+`03/04/2026` is unrecoverably ambiguous and a silently wrong season boundary is worse than a
+refused row.
+
+A missing tab is not fatal: the bot falls back to the legacy flat date keys below and warns.
+
+---
+
 ## Bot State Keys
 
 | Key | Value | Purpose |
@@ -51,10 +87,7 @@ tab (empty) if it's ever missing, since a broken reference would `#REF!` the who
 | `season` | `S11` | Current season identifier |
 | `season_start_date` | `2026-02-13` | Season start date (used to filter RPH events) |
 | `season_end_date` | `2026-04-24` | Season end date |
-| `set_champs_start_date` | `2026-04-04` | Set Champs window start |
-| `set_champs_end_date` | `2026-04-26` | Set Champs window end |
-| `prerelease_start_date` / `prerelease_end_date` | `2026-10-16` / `2026-10-22` | Prerelease window, set by `/prerelease-dates` |
-| `prerelease_set_name` | `Hyperia City` | Set name shown in the prerelease digest header (optional) |
+| `season_start_date` / `season_end_date` / `set_champs_*_date` / `prerelease_*` | | **Retired** — superseded by the Seasons tab. Still read as a fallback for one season when the current season has no row there |
 | `set_champs_msg_ids` / `prerelease_msg_ids` | `id\|id\|…` | Digest message IDs, header first, so the daily refresh edits in place |
 | `wtp_msg_0` / `wtp_msg_1` / `wtp_msg_2` | Discord message ID | Persists `#where-to-play` message IDs across restarts so the bot edits in-place rather than reposting |
 | `recheck:<thread_id>` | `1` | Crash-loop guard — set before a startup recheck attempt, cleared on success |

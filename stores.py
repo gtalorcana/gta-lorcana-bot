@@ -40,6 +40,7 @@ from constants import (
     STORE_CLASSIFICATIONS_RANGE_NAME,
     STORE_OVERRIDES_RANGE_NAME,
     BOT_STATE_RANGE_NAME,
+    SEASONS_RANGE_NAME,
     WHERE_TO_PLAY_MIN_CONSECUTIVE_WEEKS,
     STORE_DEBUG_SHEET_NAME,
     STORE_DEBUG_RANGE_NAME,
@@ -429,6 +430,167 @@ def get_gta_store_ids() -> set:
 
 
 # ── Overrides ─────────────────────────────────────────────────────────────────
+
+# ── Season calendar ───────────────────────────────────────────────────────────
+
+_SEASON_ID_RE = re.compile(r'^S\d+$')
+
+# Date formats accepted from the hand-edited Seasons tab. get_values returns
+# FORMATTED_VALUE, so what comes back depends on the cell's number format: a cell
+# left on the default format renders 2026-10-16 as "10/16/2026" or "Oct 16, 2026".
+# D/M/YYYY is deliberately absent — 03/04/2026 is either March 4th or April 3rd and
+# guessing wrong moves a season boundary silently, which is worse than a refused row.
+_CALENDAR_DATE_FORMATS = ('%Y-%m-%d', '%m/%d/%Y', '%b %d, %Y', '%B %d, %Y')
+
+
+def _parse_calendar_date(raw: str, field: str, season_id: str, problems: list) -> str | None:
+    """
+    Normalise one hand-entered date cell to an ISO 'YYYY-MM-DD' string, or None.
+
+    Everything downstream expects ISO specifically: results.py compares an event's
+    date to the season bounds as *strings* (see _fetch_single_event), which is only
+    correct while both are ISO. Conversion therefore belongs here, not at the call
+    sites. Unparseable values append a problem and return None.
+    """
+    raw = (raw or '').strip().lstrip("'")
+    if not raw:
+        return None
+    for fmt in _CALENDAR_DATE_FORMATS:
+        try:
+            return datetime.strptime(raw, fmt).date().isoformat()
+        except ValueError:
+            continue
+    problems.append(f"{season_id}: {field} {raw!r} is not a date the bot can read "
+                    f"(use YYYY-MM-DD)")
+    return None
+
+
+def _is_missing_sheet(err: Exception) -> bool:
+    """
+    True if a Sheets error means the range's tab does not exist.
+
+    Like _is_already_exists, this matches on message text because the API returns a
+    bare 400 with no machine-readable reason — here 'Unable to parse range: X!A2:H'.
+    """
+    return 'unable to parse range' in str(err).lower()
+
+
+def load_season_calendar() -> tuple[list[dict], list[str]]:
+    """
+    Read the Seasons tab. Returns (rows, problems), rows sorted oldest season first.
+
+    Raises on a genuine Sheets read failure, so callers keep whatever calendar they
+    already hold in memory. Returning [] on an outage would blank every season
+    window at once — which, unlike the flat Bot State keys this replaces, also
+    switches off the results pipeline's date eligibility checks.
+
+    A *missing* tab is not a failure: it returns ([], [problem]) so a deployment
+    that runs before the tab exists falls back to the legacy flat keys instead of
+    refusing to start.
+
+    Rows are dropped, never half-applied: a row with an unreadable date or a
+    one-sided window is reported and skipped, because a season with a start and no
+    end scores differently from one with neither.
+    """
+    problems: list[str] = []
+    try:
+        result = _gs.get_values(BOT_DATABASE_SPREADSHEET_ID, SEASONS_RANGE_NAME)
+    except Exception as e:
+        if _is_missing_sheet(e):
+            return [], [f"Seasons tab not found in the Bot Database sheet ({e})"]
+        raise
+
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for i, raw_row in enumerate(result.get('values', []), start=2):  # A2 is the first data row
+        if not any(str(c).strip() for c in raw_row):
+            continue  # blank spacer rows are normal in a hand-edited tab
+        cells     = [str(c).strip() for c in raw_row] + [''] * (8 - len(raw_row))
+        season_id = cells[0].lstrip("'")
+
+        if not _SEASON_ID_RE.match(season_id):
+            problems.append(f"row {i}: season {season_id!r} must look like S14 — row skipped")
+            continue
+        if season_id in seen:
+            problems.append(f"row {i}: {season_id} is already defined above — row skipped")
+            continue
+
+        before = len(problems)
+        row = {
+            'season':           season_id,
+            'set_name':         cells[1],
+            'sheet_row':        i,
+            'source':           'sheet',
+            'prerelease_start': _parse_calendar_date(cells[2], 'prerelease start', season_id, problems),
+            'prerelease_end':   _parse_calendar_date(cells[3], 'prerelease end',   season_id, problems),
+            'season_start':     _parse_calendar_date(cells[4], 'season start',     season_id, problems),
+            'season_end':       _parse_calendar_date(cells[5], 'season end',       season_id, problems),
+            'set_champs_start': _parse_calendar_date(cells[6], 'set champs start', season_id, problems),
+            'set_champs_end':   _parse_calendar_date(cells[7], 'set champs end',   season_id, problems),
+        }
+        if len(problems) > before:
+            problems.append(f"{season_id}: row skipped because a date could not be read")
+            continue
+
+        # A window is used whole or not at all, but one bad window never discards the
+        # rest of the row: an unusable window is blanked and reported, and the other
+        # two still work. Dropping the row instead would take a valid prerelease
+        # window down with an unannounced Set Champs one.
+        #
+        # A season start with no end is legitimate, and the common case for the next
+        # season: S14 had its start (Oct 16, its prerelease weekend) recorded weeks
+        # before anyone knew when it would finish. It only has to be complete once
+        # that season is current, which results.py enforces on the live path.
+        def _blank(label: str, why: str, *keys: str) -> None:
+            problems.append(f"{season_id}: {label} {why} — ignoring those dates")
+            for k in keys:
+                row[k] = None
+
+        if row['season_end'] and not row['season_start']:
+            _blank('season', 'has an end but no start', 'season_end')
+        elif row['season_start'] and row['season_end'] and row['season_start'] > row['season_end']:
+            _blank('season', f"ends ({row['season_end']}) before it starts ({row['season_start']})",
+                   'season_start', 'season_end')
+
+        for label, s_key, e_key in (('prerelease', 'prerelease_start', 'prerelease_end'),
+                                    ('set champs', 'set_champs_start', 'set_champs_end')):
+            start, end = row[s_key], row[e_key]
+            if bool(start) != bool(end):
+                _blank(label, 'has only one of its two dates', s_key, e_key)
+            elif start and end and start > end:
+                _blank(label, f"ends ({end}) before it starts ({start})", s_key, e_key)
+
+        # Cross-window ordering, over the dates that are actually present. Set Champs
+        # must start during the season but may end after it (S11: season ended Apr 24,
+        # set champs Apr 26). Nothing is asserted between the prerelease and the
+        # season: S14's prerelease started the same day its season did.
+        sc_s = row['set_champs_start']
+        if sc_s and row['season_start'] and sc_s < row['season_start']:
+            _blank('set champs', f"starts ({sc_s}) before the season ({row['season_start']})",
+                   'set_champs_start', 'set_champs_end')
+        elif sc_s and row['season_end'] and sc_s > row['season_end']:
+            _blank('set champs', f"starts ({sc_s}) after the season ends ({row['season_end']})",
+                   'set_champs_start', 'set_champs_end')
+
+        seen.add(season_id)
+        rows.append(row)
+
+    # Numeric sort so S9 sorts before S10, as roles.py does for role seasons.
+    rows.sort(key=lambda r: int(r['season'][1:]))
+    print(f"  ✓ Loaded {len(rows)} season(s) from the Seasons tab"
+          + (f" ({len(problems)} problem(s))" if problems else ""))
+    return rows, problems
+
+
+def load_season_config() -> tuple[dict, list[dict], list[str]]:
+    """
+    Read Bot State and the Seasons calendar together — one executor call for the
+    pair season.init() needs. Raises if either read fails outright.
+    """
+    state = load_bot_state(strict=True)
+    calendar, problems = load_season_calendar()
+    return state, calendar, problems
+
 
 def _load_overrides() -> list:
     """
