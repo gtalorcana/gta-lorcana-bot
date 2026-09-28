@@ -77,6 +77,11 @@ a design note below changes.
 - `ADMIN_USER_IDS` is a list (not set) — supports indexing for pings and `in` checks
 - `_sheet_lock` serializes all sheet writes — never bypass it
 - Bot State sheet is key-value; all runtime state (message IDs, watches, recheck guards) lives there
+- **Never let a Bot State read fail quietly on a path that writes it back.** `set_bot_state_key`
+  reads the whole tab and rewrites it, and `save_bot_state` clears the range first, so `{}` from a
+  failed read wipes every key. `load_bot_state(strict=True)` is mandatory before any write, and
+  `save_bot_state` refuses an empty dict. Background tasks must catch the resulting exception —
+  an exception escaping a `tasks.loop` body kills that loop until the next restart
 - Roles never auto-downgrade — every path that grants them is additive only
 - Registry role columns (G–J) hold the **earliest** season earned: a blank cell takes the new
   value, a populated one is replaced only by an earlier season (numeric compare, so S9 < S10)

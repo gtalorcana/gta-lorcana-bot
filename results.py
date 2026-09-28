@@ -123,7 +123,8 @@ def _fetch_single_event(rph_url, thread_id, note=None, validate_eligibility=Fals
 
     Raises RuntimeError if the API call fails all retries or returns no event.
     Raises ValueError  if the format is wrong, or validate_eligibility=True and the
-                       event is out of season or a Set Championship.
+                       event is out of season, a Set Championship, or the season
+                       window is not configured at all.
     """
     warnings      = []
     standing_rows = []
@@ -163,11 +164,22 @@ def _fetch_single_event(rph_url, thread_id, note=None, validate_eligibility=Fals
                 f"Event: {event.get('name') or event_id}"
             )
 
-        if season.SEASON_START_DATE and event_date < season.SEASON_START_DATE:
+        # Refuse rather than skip when the window is missing. These checks used to be
+        # conditional on the dates being truthy, so an unconfigured season accepted
+        # submissions from any date at all -- silently, and only on the live path where
+        # it matters. The dates now come from one Seasons-tab read instead of four
+        # independent Bot State cells, so a single failure can blank both at once.
+        if not season.SEASON_START_DATE or not season.SEASON_END_DATE:
+            raise ValueError(
+                "The season window is not configured, so this event cannot be checked "
+                "against it. Ask an admin to check the Seasons tab, then re-run `/recheck`."
+            )
+
+        if event_date < season.SEASON_START_DATE:
             raise ValueError(
                 f"Event date {event_date} is before the current season start ({season.SEASON_START_DATE})."
             )
-        if season.SEASON_END_DATE and event_date > season.SEASON_END_DATE:
+        if event_date > season.SEASON_END_DATE:
             raise ValueError(
                 f"Event date {event_date} is after the current season end ({season.SEASON_END_DATE})."
             )

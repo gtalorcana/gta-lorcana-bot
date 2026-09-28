@@ -356,7 +356,9 @@ async def _post_where_to_play(channel, messages: list[str], loop) -> None:
 
     _where_to_play_msg_ids = new_ids + [None] * (4 - len(new_ids))
     def _save_wtp_ids():
-        state = load_bot_state()
+        # strict=True: this reads the whole tab and writes it back, so a quietly
+        # failed read would save {} over every other key — see set_bot_state_key.
+        state = load_bot_state(strict=True)
         state['wtp_msg_ids'] = '|'.join(str(i) for i in new_ids)
         # Remove legacy per-index keys if present
         for i in range(4):
@@ -595,6 +597,22 @@ def _watch_key(event_id: int) -> str:
     return f"{_RPH_WATCH_KEY_PREFIX}{event_id}"
 
 
+async def _try_delete_state_key(loop, key: str, what: str) -> bool:
+    """
+    Delete a Bot State key, logging instead of raising on failure.
+
+    For background-task cleanup only. delete_bot_state_key reads the tab with
+    strict=True, so a Sheets outage raises — and an exception escaping a
+    tasks.loop body kills that loop until the next restart.
+    """
+    try:
+        await loop.run_in_executor(None, delete_bot_state_key, key)
+        return True
+    except Exception as e:
+        print(f"  ⚠ Could not remove {what} ({key}): {e} — will retry next tick")
+        return False
+
+
 def _load_watches(state: dict) -> dict[str, dict]:
     """Return all active rph_watch entries from bot state as {key: data}."""
     return {
@@ -630,14 +648,17 @@ async def rph_watcher():
         name      = watch.get('name', f'Event {event_id}')
         subs      = watch.get('subscribers', [])
 
-        # Auto-expire past end_date
+        # Auto-expire past end_date. Cleanup failures are logged and retried on the
+        # next tick rather than raised: an unhandled exception in a tasks.loop body
+        # stops the loop for good, and a stale watch is a far smaller problem than a
+        # dead watcher.
         if end_date and today > end_date:
             print(f"  🗑 rph_watcher: {name} (id={event_id}) past end_date {end_date} — removing")
-            await loop.run_in_executor(None, delete_bot_state_key, key)
+            await _try_delete_state_key(loop, key, f"expired watch {event_id}")
             continue
 
         if not subs:
-            await loop.run_in_executor(None, delete_bot_state_key, key)
+            await _try_delete_state_key(loop, key, f"empty watch {event_id}")
             continue
 
         # Fetch live event status
@@ -772,12 +793,16 @@ async def unwatch_rph_event(interaction: discord.Interaction, event_id: int):
 
     subs.remove(uid)
 
-    if subs:
-        watch['subscribers'] = subs
-        await loop.run_in_executor(None, set_bot_state_key, key, json.dumps(watch))
-    else:
-        # Last subscriber — remove the whole key
-        await loop.run_in_executor(None, delete_bot_state_key, key)
+    try:
+        if subs:
+            watch['subscribers'] = subs
+            await loop.run_in_executor(None, set_bot_state_key, key, json.dumps(watch))
+        else:
+            # Last subscriber — remove the whole key
+            await loop.run_in_executor(None, delete_bot_state_key, key)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Could not update the watch: {e}", ephemeral=True)
+        return
 
     await interaction.followup.send(
         f"✅ Stopped watching **{watch.get('name', f'Event {event_id}')}**.",
@@ -2138,7 +2163,14 @@ async def _find_and_reprocess_missed_threads(
         if startup:
             # Mark as attempted before trying — if we OOM mid-process the key
             # will already be set when the bot restarts, preventing a loop.
-            await loop.run_in_executor(None, set_bot_state_key, state_key, '1')
+            # If the guard cannot be written, skip the thread: processing it
+            # unguarded is what the guard exists to prevent.
+            try:
+                await loop.run_in_executor(None, set_bot_state_key, state_key, '1')
+            except Exception as e:
+                print(f"  ⚠ Startup recheck: could not set the crash-loop guard "
+                      f"for '{thread.name}': {e} — skipping this thread")
+                continue
 
         print(f"  🔄 {'Startup recheck' if startup else 'Rechecking'} missed thread: '{thread.name}'")
         await thread.join()
@@ -2706,7 +2738,8 @@ async def season_rollover(
             'set_champs_end_date':   set_champs_end,
         }
         def _update_state():
-            state = load_bot_state()
+            # strict=True: read-then-write — see set_bot_state_key
+            state = load_bot_state(strict=True)
             state.update(new_state_values)
             save_bot_state(state)
             return state
@@ -3013,7 +3046,8 @@ async def prerelease_dates_command(interaction: discord.Interaction, start_date:
     loop = asyncio.get_running_loop()
     try:
         def _update_state():
-            state = load_bot_state()
+            # strict=True: read-then-write — see set_bot_state_key
+            state = load_bot_state(strict=True)
             state.update({
                 'prerelease_start_date': start_date,
                 'prerelease_end_date':   end_date,

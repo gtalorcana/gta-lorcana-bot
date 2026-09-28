@@ -655,13 +655,14 @@ def save_debug_sheet(event_map: dict, analysis: dict, reference_date: date) -> N
 
 # ── Bot state persistence ─────────────────────────────────────────────────────
 
-
-# ── Bot state persistence ─────────────────────────────────────────────────────
-
-def load_bot_state() -> dict:
+def load_bot_state(strict: bool = False) -> dict:
     """
     Read persistent bot state from the Bot State tab in BOT_DATABASE_SPREADSHEET_ID.
     Returns a dict of key -> value strings, or {} if the sheet is empty.
+
+    strict: raise on a read failure instead of returning {}. Every caller that is
+        about to *write* the state back must pass strict=True — see the read-then-
+        write note in set_bot_state_key.
 
     # TODO: Replace Google Sheets bot state with a proper database (Postgres/SQLite)
     # when white-labelling. Sheets is fine for a single-server bot but won't scale
@@ -672,6 +673,8 @@ def load_bot_state() -> dict:
         rows   = result.get('values', [])
         return {row[0]: row[1] for row in rows if len(row) >= 2}
     except Exception as e:
+        if strict:
+            raise
         print(f"  ⚠ Could not load bot state: {e}")
         return {}
 
@@ -680,26 +683,42 @@ def save_bot_state(state: dict) -> None:
     """
     Write persistent bot state to the Bot State tab in BOT_DATABASE_SPREADSHEET_ID.
     Clears the range first so deleted keys don't linger as stale rows.
+
+    Refuses an empty dict. Because this clears before writing, saving {} wipes the
+    tab — and the only way to arrive here with {} is a caller that read the state,
+    got {} from a failed read, and believed the tab was empty. Emptying Bot State is
+    never a real operation: the season pointer alone is always present.
     """
+    if not state:
+        print("  ⚠ Refusing to save empty bot state — would clear the tab")
+        return
     try:
         _gs.clear_values(BOT_DATABASE_SPREADSHEET_ID, BOT_STATE_RANGE_NAME)
-        if state:
-            rows = [[k, v] for k, v in state.items()]
-            _gs.update_values(BOT_DATABASE_SPREADSHEET_ID, BOT_STATE_RANGE_NAME, "USER_ENTERED", rows)
+        rows = [[k, v] for k, v in state.items()]
+        _gs.update_values(BOT_DATABASE_SPREADSHEET_ID, BOT_STATE_RANGE_NAME, "USER_ENTERED", rows)
     except Exception as e:
         print(f"  ⚠ Could not save bot state: {e}")
 
 
 def set_bot_state_key(key: str, value: str) -> None:
-    """Add or update a single key in bot state without overwriting other keys."""
-    state = load_bot_state()
+    """
+    Add or update a single key in bot state without overwriting other keys.
+
+    Reads the whole tab and writes it back, so a read that fails *quietly* is a
+    data-loss bug, not a missed update: load_bot_state() used to return {} on any
+    Sheets error, and save_bot_state() clears the range before writing. One
+    transient read error during a digest post would therefore rewrite the tab as a
+    single row, dropping every message ID, event watch, recheck guard and the
+    season pointer. strict=True makes the read raise instead; callers already log.
+    """
+    state = load_bot_state(strict=True)
     state[key] = value
     save_bot_state(state)
 
 
 def delete_bot_state_key(key: str) -> None:
     """Remove a single key from bot state, silently ignoring if it doesn't exist."""
-    state = load_bot_state()
+    state = load_bot_state(strict=True)
     if key in state:
         del state[key]
         save_bot_state(state)
