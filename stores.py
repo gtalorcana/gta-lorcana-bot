@@ -246,6 +246,27 @@ def _parse_city(full_address: str) -> str:
     return ''
 
 
+def _parse_region(full_address: str) -> str:
+    """
+    Extract the province/state code from an RPH full_address, anchored the same way
+    as _parse_city: the first 2-letter uppercase token after the street.
+
+    Only the CCQ digest needs it. Its 600km radius spans Ontario, Quebec, New York,
+    Michigan and Maryland, where a bare city name is not enough to place a store.
+
+      "29 Boulevard du Curé-Labelle, Laval, QC, H7N 0G3, CA"  → "QC"
+      "175, Rockaway Ave, Valley Stream, NY, 11580, US"       → "NY"
+    """
+    if not full_address:
+        return ''
+    normalised = full_address.replace(', Canada', ', CA').replace(',Canada', ', CA')
+    parts = [p.strip() for p in normalised.split(',')]
+    for i, part in enumerate(parts):
+        if re.match(r'^[A-Z]{2}(\s|$)', part) and i > 0:
+            return part[:2]
+    return ''
+
+
 def _compute_streaks(week_starts: set, reference_date: date) -> tuple[int, int]:
     """
     Compute streak metrics for an event type given its week-start dates.
@@ -1556,21 +1577,28 @@ def refresh_set_champs() -> tuple[int, list]:
     return len(rows), rows
 
 
-def _event_digest_rows(events: list) -> list:
+def _event_digest_rows(events: list, with_region: bool = False) -> list:
     """
     Rows for a per-day event digest, sorted by date then time:
     Date | Time (Toronto) | Store ID | Store Name | City | Player Cap | Format | Event Name | RPH Link
+
+    with_region: append the province/state to the city ("Laval, QC"). Column count is
+        unchanged either way, because the Set Champs sheet writes these rows to a
+        fixed A2:I range. Only the CCQ digest needs it — everything else is one metro.
     """
     rows = []
     for e in events:
         dt_utc     = datetime.fromisoformat(e['start_datetime'].replace('Z', '+00:00'))
         dt_toronto = dt_utc.astimezone(_TZ_TORONTO)
+        address    = e['store'].get('full_address', '')
+        city       = _parse_city(address)
+        region     = _parse_region(address) if with_region else ''
         rows.append([
             dt_toronto.strftime('%Y-%m-%d'),
             dt_toronto.strftime('%I:%M %p').lstrip('0'),
             e['store']['id'],
             e['store']['name'],
-            _parse_city(e['store'].get('full_address', '')),
+            f"{city}, {region}" if city and region else (city or region),
             e.get('capacity', ''),
             e['gameplay_format']['name'],
             e.get('name', ''),
@@ -1633,4 +1661,113 @@ def fetch_prereleases() -> tuple[int, list]:
     filtered = [e for e in events if is_prerelease_event(e)]
     print(f"  ✓ {len(filtered)} prerelease event(s) found (of {len(events)} total in window)")
     rows = _event_digest_rows(filtered)
+    return len(rows), rows
+
+# ── CCQs ──────────────────────────────────────────────────────────────────────
+
+# CCQs (Challenge Championship Qualifiers) are matched on two independent signals,
+# union'd — the same shape as Set Champs, for different reasons, and without the arm
+# that carries Set Champs detection:
+#
+#   - Phase text is EMPTY on CCQ events. Event 986442 ("Topdeck Hero Laval CCQ")
+#     carries a bare "Phase 1"/"Phase 2" with no descriptions, so the arm
+#     _set_champs_phase_text() relies on simply is not there. The template UUID has
+#     to do that job instead.
+#
+#   - The event_configuration_template UUID, compared against a pinned literal. It
+#     is deliberately NOT resolved to a template *name* through RPH's
+#     event-configuration-templates endpoint: that lookup was added in 1510c31 and
+#     removed in 39ef4f0, because RPH dropped the "Attack of the Vine! Set
+#     Championship" template from that endpoint two days into the S13 Set Champs
+#     window and the lookup silently returned nothing for every event. A name also
+#     buys nothing here — "CCQ" carries no set name, so there is no pattern to match,
+#     only identity, which the raw UUID settles with no extra request and no endpoint
+#     that can vanish. It is a tuple so a rotated UUID is *added*: already-listed
+#     events keep matching.
+#
+#     Because the template name carries no set, this UUID has a fair chance of
+#     outliving the set — unlike the Set Champs templates, which are new every time.
+#     If RPH does rotate it, nothing errors: the arm just stops contributing and the
+#     digest degrades to name-only, losing any CCQ whose store did not title it "CCQ".
+#     fetch_ccqs logs the per-arm counts so a zero is visible.
+#
+#   - The store-authored event name, with a left word boundary rather than a bare
+#     substring. "ccq" is a three-letter token, far more collision-prone than
+#     "prerelease" or "Set Champ", and this digest scans 373 miles across two
+#     countries with no season window to bound a false positive.
+_CCQ_TEMPLATE_IDS = ("bfb07b77-db0c-4a4f-adbe-f05e0ddf8a7a",)
+_CCQ_NAME_RE      = re.compile(r'(?<![a-z])ccq', re.IGNORECASE)
+
+# 600km. The league's own fetch stays at the num_miles=250 default in
+# util/rph_api_utils.py: that default defines the store universe behind store
+# classification, #where-to-play and results eligibility, so widening it there would
+# silently pull Quebec and US stores into all three. Override per fetch, never there.
+_CCQ_RADIUS_MILES = 373
+
+# Six months ahead. CCQs have no season window — they are rare, scheduled far out
+# (the first one found was five months away) and worth travelling to. A fixed day
+# count keeps the fetch's cost predictable, and requirements.txt has no dateutil.
+_CCQ_LOOKAHEAD_DAYS = 183
+
+
+def is_ccq_event(event: dict) -> bool:
+    """True if the event is built on the CCQ template, or its name says CCQ."""
+    return (event.get('event_configuration_template') in _CCQ_TEMPLATE_IDS
+            or bool(_CCQ_NAME_RE.search(event.get('name') or '')))
+
+
+def fetch_ccqs(today: date | None = None) -> tuple[int, list]:
+    """
+    Fetch upcoming CCQs within _CCQ_RADIUS_MILES over the next _CCQ_LOOKAHEAD_DAYS,
+    as digest rows (see _event_digest_rows). Nothing is written to a sheet.
+
+    No season is involved: the window is a rolling lookahead from today. Called daily
+    by event_digests_daily in bot.py.
+    """
+    today    = today or datetime.now(_TZ_TORONTO).date()
+    start_dt = season.rph_day_start(today.isoformat())
+    end_dt   = season.rph_day_end((today + timedelta(days=_CCQ_LOOKAHEAD_DAYS)).isoformat())
+    print(f"  → Fetching CCQs ({today} → +{_CCQ_LOOKAHEAD_DAYS}d, {_CCQ_RADIUS_MILES} miles)...")
+
+    matched, scanned, by_template, by_name = [], 0, 0, 0
+    # Streamed, not collected: this is the widest fetch the bot runs — hundreds of
+    # pages' worth of events across two countries — and only the handful that match
+    # is worth keeping in memory.
+    for event in _rph_api.iter_events(
+        start_date_after=start_dt,
+        start_date_before=end_dt,
+        extra_params={
+            'display_status':   None,
+            # Upcoming only. A past CCQ is nobody's travel plan, and it keeps this
+            # wide fetch to roughly a quarter of the events in the window.
+            'display_statuses': ['upcoming', 'inProgress'],
+            'num_miles':        _CCQ_RADIUS_MILES,
+            # gameplay_format_ids is deliberately left at the league default
+            # (Core + Infinity Constructed). Measured 2026-09-28 over this window:
+            # 2,728 events / ~55 pages with the filter against 3,373 / ~68 without,
+            # and both known CCQs are Constructed, so the filter costs nothing today.
+            # It would hide a CCQ run in any other format — re-check with
+            # KEEP_FORMAT_FILTER=False in scripts/rph_get_ccq_events.py if one is
+            # ever reported missing.
+        },
+        require_started=False,
+        countries=None,   # cross-border: Buffalo, Detroit and Syracuse are all inside 600km
+    ):
+        scanned += 1
+        if not is_ccq_event(event):
+            continue
+        matched.append(event)
+        if event.get('event_configuration_template') in _CCQ_TEMPLATE_IDS:
+            by_template += 1
+        else:
+            by_name += 1
+
+    print(f"  ✓ {len(matched)} CCQ event(s) found (of {scanned} scanned in window)")
+    if matched and not by_template:
+        print(f"    ⚠ none matched the CCQ template UUID — RPH may have rotated it; "
+              f"check scripts/rph_get_ccq_events.py")
+    if by_name:
+        print(f"    ⚠ {by_name} matched on the store's event name only — no CCQ template")
+
+    rows = _event_digest_rows(matched, with_region=True)
     return len(rows), rows

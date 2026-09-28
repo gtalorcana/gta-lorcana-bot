@@ -19,3 +19,25 @@
 
 - `WHERE_TO_PLAY_POST_DAY` / `WHERE_TO_PLAY_POST_HOUR_ET` — code config, keep in constants (can override via .env)
 - `EVENTS_URL_RE`, `RPH_*` URLs — code config, keep in constants
+
+
+## RPH fetch width and memory
+
+`RphApi.iter_events()` yields events page by page; `get_events()` is `list(iter_events(...))`.
+The digests iterate and keep only what they match, so peak retention is one page plus the
+matches rather than every event in the window. This matters most for the CCQ digest, the widest
+fetch the bot runs.
+
+Measured 2026-09-28, six-month upcoming window at 373 miles with both countries:
+
+| Fetch | Events | ~Pages |
+|---|---|---|
+| CCQ, league format filter kept | 2,728 | 55 |
+| CCQ, no format filter | 3,373 | 68 |
+| CCQ, Canada only | 843 | 17 |
+
+**`num_miles` defaults to 250 in `util/rph_api_utils.py` and must stay there.** That default
+defines the store universe behind store classification, `#where-to-play` and results
+eligibility; widening it would pull Quebec and US stores into all three, silently and with no
+error. The 373-mile CCQ radius and its `countries=None` are per-fetch overrides in
+`stores.fetch_ccqs()` — the only call site that passes either.

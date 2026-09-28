@@ -20,6 +20,7 @@
 | `/archive-season` | Admin | Copy a completed season's tabs from the League sheet to the Archive spreadsheet |
 | `/seasons [reload]` | Admin | Show the season calendar as the bot reads it, what each digest resolves to, and any problems with the Seasons tab. Read-only |
 | `/set-champs` | Admin | Manually refresh and post the Set Champs digest |
+| `/ccqs` | Admin | Manually refresh and post the CCQ digest in `#ccqs`. No season involved — a rolling six-month lookahead |
 | `/prereleases` | Admin | Manually refresh and post the prerelease digest. The window comes from the **Seasons** tab — it is the incoming season's, not the current one's |
 
 > To restrict commands to specific roles, use Discord's server settings: **Server Settings → Integrations → GTA Lorcana Bot** — no code changes needed.
@@ -36,5 +37,6 @@ Admin commands are also accessible to any Discord user ID listed in `ADMIN_USER_
 | `event_digests_daily` | Every minute; acts at `DIGEST_HOUR_ET` (7 AM ET), one digest per minute in `_DIGESTS` order | Refreshes each digest that is active today. One per minute so two RPH window fetches are never in memory at once |
 | ↳ `:00` Set Champs | Season start → Set Champs end, current season | Refreshes the `S## Set Champs` tab and the digest in `#gta-set-championships` |
 | ↳ `:05` Prerelease | While any season's prerelease window has not ended (normally the incoming season) | Refreshes the digest in `#gta-prereleases`. No sheet |
+| ↳ `:10` CCQ | Always — rolling six-month lookahead, no season | Refreshes the digest in `#ccqs`. No sheet. The widest fetch the bot runs: 600 km, both countries, ~55 API pages |
 | `rph_watcher` | Every 15 min | Checks watched events for open spots and DMs subscribers |
 | `keepalive` | Every 30 min | Heartbeat log |

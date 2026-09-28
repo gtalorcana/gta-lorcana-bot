@@ -18,6 +18,7 @@
 3. URL not already reported by another thread (`results.py`)
 4. `gameplay_format` is Core Constructed or Infinity Constructed
 5. **Not a Set Championship** — `stores.is_set_champs_event()`
+6. **Not a CCQ** — `stores.is_ccq_event()`
 6. Event date inside the season window
 
 Rules 5 and 6 are gated behind `_fetch_single_event(..., validate_eligibility=True)`, set only for

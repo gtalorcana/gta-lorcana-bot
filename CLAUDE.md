@@ -42,6 +42,8 @@ the GTA-specific code is concentrated in these places:
 **`constants.py`** — `WHERE_TO_PLAY_MIN_CONSECUTIVE_WEEKS`, `WHERE_TO_PLAY_POST_DAY/HOUR_ET`
 
 **GTA-only features** (strip out entirely for white-label):
+- `_CCQ_TEMPLATE_IDS` / `_CCQ_RADIUS_MILES` / `_CCQ_LOOKAHEAD_DAYS` in `stores.py` and
+  `CCQ_CHANNEL_ID` in `constants.py` — GTA-specific CCQ digest tuning
 - `/etb-discount` command + `util/shopify_api_utils.py` — ETB discount integration
 - `SHOPIFY_TOKEN`, `SHOPIFY_STORE_DOMAIN` constants
 - `specs/SHOPIFY_DISCOUNT_SPEC.md`
@@ -83,7 +85,15 @@ a design note below changes.
 
 - `ADMIN_USER_IDS` is a list (not set) — supports indexing for pings and `in` checks
 - `_sheet_lock` serializes all sheet writes — never bypass it
-- Digests (Set Champs, prereleases) are one table: `_DIGESTS` in `bot.py`, refreshed by a single
+- CCQs match a **pinned template UUID** (`_CCQ_TEMPLATE_IDS`) plus a word-boundary name regex.
+  Their phase text is empty, so the Set Champs phase arm cannot work; the template *name* lookup
+  stays dead for the reason 39ef4f0 removed it. A rotated UUID is a silent precision loss, not an
+  outage — `fetch_ccqs` logs per-arm counts so a zero is visible
+- The CCQ digest is the only one with **no season**: a rolling six-month lookahead, upcoming only,
+  at 373 miles (600 km) across both countries. Those are per-fetch overrides; `num_miles` stays 250
+  in `util/rph_api_utils.py`, because that default defines store classification, `#where-to-play`
+  and results eligibility
+- Digests (Set Champs, prereleases, CCQs) are one table: `_DIGESTS` in `bot.py`, refreshed by a single
   `event_digests_daily` loop, one per minute from `DIGEST_HOUR_ET`. Adding one is a row, not a task.
   The stagger is what keeps two RPH window fetches out of memory at once on a 256MB machine
 - A digest's message IDs live in Bot State (`<key>_msg_ids`, header first) so the daily refresh edits

@@ -6,6 +6,13 @@ tools: Read, Edit, Write, Grep, Glob, Bash
 
 You own runtime, deployment, and the boundaries where this bot touches other systems.
 
+## RPH fetch width
+
+`iter_events()` streams pages so the digests never hold a whole window in memory. `num_miles`
+defaults to 250 and must stay there — it defines the store universe for classification,
+`#where-to-play` and results eligibility. `stores.fetch_ccqs()` is the only caller that overrides
+it (373 miles) or relaxes `countries` (both countries). See `docs/bot-infra/design-notes.md`.
+
 ## Files you own
 
 `Dockerfile`, `fly.toml`, `.github/workflows/{fly-deploy,worker-deploy}.yml`, `requirements.txt`,

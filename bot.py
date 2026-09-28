@@ -17,6 +17,7 @@ Features:
   - /set-champs      — manually refresh and post the Set Champs update (admins only)
   - /seasons         — show the season calendar and each digest's window (admins only)
   - /prereleases     — manually refresh and post the prerelease update (admins only)
+  - /ccqs            — manually refresh and post the CCQ update (admins only)
   - event_digests_daily — refreshes the Set Champs and prerelease digests each morning
   - on_member_join   — auto-assigns Common rarity role to new members
   - where_to_play_weekly — refreshes #where-to-play every Sunday evening
@@ -56,7 +57,7 @@ from typing import Callable
 
 from clients import gs as _gs, rph_api as _rph_api
 from results import process_event_data, remove_event_data
-from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, load_season_config, refresh_set_champs, fetch_prereleases, set_bot_state_key, delete_bot_state_key, fetch_event_status, create_season_sheets, archive_season_data, get_etb_approval, append_etb_approval, lookup_player_standings, get_current_display_names
+from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, load_season_config, refresh_set_champs, fetch_prereleases, fetch_ccqs, set_bot_state_key, delete_bot_state_key, fetch_event_status, create_season_sheets, archive_season_data, get_etb_approval, append_etb_approval, lookup_player_standings, get_current_display_names
 
 from constants import (
     DISCORD_BOT_TOKEN,
@@ -66,6 +67,7 @@ from constants import (
     MOD_CHANNEL_ID,
     SET_CHAMPS_CHANNEL_ID,
     PRERELEASE_CHANNEL_ID,
+    CCQ_CHANNEL_ID,
     DIGEST_HOUR_ET as _DIGEST_HOUR_ET,
     EVENTS_URL_RE,
     RPH_RETRY_DELAY,
@@ -440,7 +442,12 @@ def _build_event_digest_messages(title: str, empty_text: str, rows: list, as_of:
     messages = [header]
     for date_str in sorted(by_date.keys()):
         event_date = date.fromisoformat(date_str)
+        # Year only when it differs from today's: the CCQ digest looks six months
+        # ahead, where a bare "Saturday, Feb 6" is ambiguous. Same-year dates keep
+        # their existing wording, so the live digests are not rewritten for this.
         day_label  = event_date.strftime('%A, %b %-d')
+        if event_date.year != as_of.year:
+            day_label += f", {event_date.year}"
         day_header = f"─────────────────────\n\n**{day_label}**"
         current    = day_header
         for row in by_date[date_str]:
@@ -511,6 +518,10 @@ def _prerelease_active(today: date) -> bool:
     return season.active_prerelease(today) is not None
 
 
+def _ccq_title() -> str:
+    return "⚔️ **GTA Lorcana — Upcoming CCQs**"
+
+
 _DIGESTS: tuple[_DigestSpec, ...] = (
     _DigestSpec('set_champs', 'Set Champs', 'set_champs_msg_ids', SET_CHAMPS_CHANNEL_ID, 0,
                 refresh_set_champs, _set_champs_title,
@@ -518,6 +529,11 @@ _DIGESTS: tuple[_DigestSpec, ...] = (
     _DigestSpec('prerelease', 'Prerelease', 'prerelease_msg_ids', PRERELEASE_CHANNEL_ID, 5,
                 fetch_prereleases, _prerelease_title,
                 "No prerelease events found yet.", _prerelease_active),
+    # No window to be inside: CCQs are a rolling six-month lookahead, so this one is
+    # always active and the only digest that needs no season at all.
+    _DigestSpec('ccq', 'CCQ', 'ccq_msg_ids', CCQ_CHANNEL_ID, 10,
+                fetch_ccqs, _ccq_title,
+                "No CCQs announced in the next six months.", lambda today: True),
 )
 
 
@@ -3167,6 +3183,11 @@ async def seasons_command(interaction: discord.Interaction, reload: bool = True)
     await interaction.followup.send("\n".join(lines)[:1990], ephemeral=True)
 
 
+def _spec(key: str) -> _DigestSpec:
+    """Look a digest up by key — never by position, so _DIGESTS can be reordered."""
+    return next(d for d in _DIGESTS if d.key == key)
+
+
 async def _digest_command(interaction: discord.Interaction, spec: _DigestSpec) -> None:
     """Manual refresh for one digest — the same path the 7 AM loop takes."""
     if not _is_admin(interaction):
@@ -3190,12 +3211,17 @@ async def _digest_command(interaction: discord.Interaction, spec: _DigestSpec) -
 
 @tree.command(name="set-champs", description="Manually refresh and post the Set Champs update (admins only)")
 async def set_champs_command(interaction: discord.Interaction):
-    await _digest_command(interaction, _DIGESTS[0])
+    await _digest_command(interaction, _spec('set_champs'))
 
 
 @tree.command(name="prereleases", description="Manually refresh and post the prerelease update (admins only)")
 async def prereleases_command(interaction: discord.Interaction):
-    await _digest_command(interaction, _DIGESTS[1])
+    await _digest_command(interaction, _spec('prerelease'))
+
+
+@tree.command(name="ccqs", description="Manually refresh and post the CCQ update (admins only)")
+async def ccqs_command(interaction: discord.Interaction):
+    await _digest_command(interaction, _spec('ccq'))
 
 
 if __name__ == "__main__":

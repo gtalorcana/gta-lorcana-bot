@@ -6,7 +6,7 @@ from constants import (
     LEAGUE_SPREADSHEET_ID,
     RESULTS_REPORTING_CHANNEL_URL,
 )
-from stores import is_set_champs_event
+from stores import is_ccq_event, is_set_champs_event
 
 # ── Singletons ────────────────────────────────────────────────────────────────
 #
@@ -116,15 +116,15 @@ def _fetch_single_event(rph_url, thread_id, note=None, validate_eligibility=Fals
           Auto-corrections will overwrite this if they fire.
 
     validate_eligibility: if True, enforce the rules deciding whether an event may
-          enter the league at all -- in season, and not a Set Championship. Set only
-          for live submissions. The bulk re-fetch path leaves it False on purpose: it
+          enter the league at all -- in season, and neither a Set Championship nor a
+          CCQ. Set only for live submissions. The bulk re-fetch path leaves it False on purpose: it
           re-reads rows already accepted into the sheet, and must not start rejecting
           history when the eligibility rules change.
 
     Raises RuntimeError if the API call fails all retries or returns no event.
     Raises ValueError  if the format is wrong, or validate_eligibility=True and the
-                       event is out of season, a Set Championship, or the season
-                       window is not configured at all.
+                       event is out of season, a Set Championship, a CCQ, or the
+                       season window is not configured at all.
     """
     warnings      = []
     standing_rows = []
@@ -161,6 +161,16 @@ def _fetch_single_event(rph_url, thread_id, note=None, validate_eligibility=Fals
         if is_set_champs_event(event):
             raise ValueError(
                 f"This is a Set Championship, which does not count toward league standings.\n"
+                f"Event: {event.get('name') or event_id}"
+            )
+
+        # CCQs are their own track too, and need rejecting for the same reason: a CCQ
+        # is Core Constructed inside the season window, so nothing else here stops
+        # one. They also run well outside the GTA -- the first one found was in Laval,
+        # 493km out -- which the date and format checks say nothing about either.
+        if is_ccq_event(event):
+            raise ValueError(
+                f"This is a CCQ, which does not count toward league standings.\n"
                 f"Event: {event.get('name') or event_id}"
             )
 

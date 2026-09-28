@@ -64,23 +64,40 @@ class RphApi:
             current_page = _get_with_retry(self.session, RPH_GAME_STORES_URL, params)
             yield current_page['results']
 
-    def get_events(self, start_date_after, start_date_before, extra_params=None, require_started=True):
+    def iter_events(self, start_date_after, start_date_before, extra_params=None,
+                    require_started=True, countries=("CA",)):
         """
-        Fetch RPH events and filter to Canadian stores.
+        Yield filtered RPH events one at a time, a page at a time — nothing is
+        accumulated across pages.
+
+        Callers that keep only the events they match (the digests) should use this
+        rather than get_events: a wide fetch is thousands of event dicts, and holding
+        them all at once is what the gc.collect() calls around these fetches exist to
+        clean up. Peak retention here is one page plus the matches.
 
         require_started: if True (default), also drop events with starting_player_count == 0.
-            Set to False when pulling upcoming events (e.g. Set Champs preview) — upcoming
+            Set to False when pulling upcoming events (e.g. a digest preview) — upcoming
             events haven't started, so their starting_player_count is always 0.
+
+        countries: store country codes to keep, or None for every country. Defaults to
+            Canada, which is what the league scores. The CCQ digest passes None because
+            its 600km radius reaches New York and Michigan stores worth travelling to.
         """
-        results = []
         for page_results in self.fetch_events(start_date_after, start_date_before, extra_params=extra_params):
             for event in page_results:
-                if event['store']['country'] != "CA":
+                if countries and event['store']['country'] not in countries:
                     continue
                 if require_started and event['starting_player_count'] <= 0:
                     continue
-                results.append(event)
-        return results
+                yield event
+
+    def get_events(self, start_date_after, start_date_before, extra_params=None,
+                   require_started=True, countries=("CA",)):
+        """Every event iter_events would yield, as a list."""
+        return list(self.iter_events(start_date_after, start_date_before,
+                                     extra_params=extra_params,
+                                     require_started=require_started,
+                                     countries=countries))
 
     def fetch_events(self, start_date_after, start_date_before, extra_params=None):
         params = {

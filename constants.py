@@ -14,6 +14,7 @@ RESULTS_REPORTING_CHANNEL_URL = "https://discord.com/channels/" + DISCORD_GUILD_
 MOD_CHANNEL_ID        = int(os.getenv("MOD_CHANNEL_ID",        1483753550960922717))
 SET_CHAMPS_CHANNEL_ID = int(os.getenv("SET_CHAMPS_CHANNEL_ID", 1422319248218525727))
 PRERELEASE_CHANNEL_ID = int(os.getenv("PRERELEASE_CHANNEL_ID", 1550875788084125696))
+CCQ_CHANNEL_ID        = int(os.getenv("CCQ_CHANNEL_ID",        1554217109918064801))
 
 # Hour (ET) at which event_digests_daily refreshes each digest, one per minute
 # thereafter in _DIGESTS order. Overridable so a dev can fire the loop without
