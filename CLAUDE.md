@@ -76,11 +76,6 @@ a design note below changes.
   updated each season but still needs to be pushed to Discord. Plan: store the message ID in Bot
   State, add a `/update-league-post` command that reads the file and edits the message in-place.
   Message is a plain Discord message (not an embed). Do this after confirming message ID.
-- **Track two seasons at once**: review how the bot should hold S13 and S14 together. The
-  prerelease digest looks ahead to the next set (S14's Hyperia City prerelease, Oct 16-22)
-  while `CURRENT_SEASON` is still S13, so prerelease config lives outside the season today
-  (`prerelease_*` Bot State keys, set by `/prerelease-dates`, no season sheet tab). Decide
-  whether an "incoming season" concept should own it instead.
 
 ---
 
@@ -88,6 +83,12 @@ a design note below changes.
 
 - `ADMIN_USER_IDS` is a list (not set) — supports indexing for pings and `in` checks
 - `_sheet_lock` serializes all sheet writes — never bypass it
+- Digests (Set Champs, prereleases) are one table: `_DIGESTS` in `bot.py`, refreshed by a single
+  `event_digests_daily` loop, one per minute from `DIGEST_HOUR_ET`. Adding one is a row, not a task.
+  The stagger is what keeps two RPH window fetches out of memory at once on a 256MB machine
+- A digest's message IDs live in Bot State (`<key>_msg_ids`, header first) so the daily refresh edits
+  in place. If the in-memory list is empty, `_post_event_digest` re-reads the key before posting and
+  refuses to post when that read fails — assuming "never posted" duplicates the whole digest
 - Bot State sheet is key-value; all runtime state (message IDs, watches, recheck guards) lives there
 - **Never let a Bot State read fail quietly on a path that writes it back.** `set_bot_state_key`
   reads the whole tab and rewrites it, and `save_bot_state` clears the range first, so `{}` from a

@@ -1517,8 +1517,9 @@ def refresh_set_champs() -> tuple[int, list]:
     in-progress), filters to Set Championships via is_set_champs_event(), and
     overwrites the sheet with the latest data.
 
-    Called daily by the set_champs_daily task in bot.py during the window
-    defined by SET_CHAMPS_START_DATE and SET_CHAMPS_END_DATE.
+    Called daily by event_digests_daily in bot.py. The window is the *current*
+    season's, via season.set_champs_window(), because the sheet written here is
+    named for CURRENT_SEASON.
 
     Returns the number of rows written.
     """
@@ -1527,12 +1528,15 @@ def refresh_set_champs() -> tuple[int, list]:
         'display_statuses': ['past', 'inProgress', 'upcoming'],
     }
 
-    if not season.SET_CHAMPS_START_DT or not season.SET_CHAMPS_END_DT:
-        raise RuntimeError("Set Champs dates not configured — run /season-rollover to set them in Bot State.")
-    print(f"  → Fetching Set Championship events ({season.SET_CHAMPS_START_DT} → {season.SET_CHAMPS_END_DT})...")
+    window = season.set_champs_window()
+    if not window:
+        raise RuntimeError(f"{season.CURRENT_SEASON} has no Set Champs dates — "
+                           f"fill them in on the Seasons tab.")
+    start_dt, end_dt = window
+    print(f"  → Fetching Set Championship events ({start_dt} → {end_dt})...")
     events = _rph_api.get_events(
-        start_date_after=season.SET_CHAMPS_START_DT,
-        start_date_before=season.SET_CHAMPS_END_DT,
+        start_date_after=start_dt,
+        start_date_before=end_dt,
         extra_params=override_params,
         require_started=False,
     )
@@ -1602,17 +1606,23 @@ def is_prerelease_event(event: dict) -> bool:
 
 def fetch_prereleases() -> tuple[int, list]:
     """
-    Fetch prerelease events in the PRERELEASE date window, including upcoming and
+    Fetch prerelease events for the open prerelease window, including upcoming and
     in-progress, as digest rows (see _event_digest_rows). Nothing is written to a sheet.
 
-    Called daily by the prerelease_daily task in bot.py.
+    The window comes from season.prerelease_window() — the calendar row whose
+    prerelease has not ended, which is normally the *incoming* season, not the one
+    being scored. Called daily by event_digests_daily in bot.py.
     """
-    if not season.PRERELEASE_START_DT or not season.PRERELEASE_END_DT:
-        raise RuntimeError("Prerelease dates not configured — run /prerelease-dates to set them.")
-    print(f"  → Fetching prerelease events ({season.PRERELEASE_START_DT} → {season.PRERELEASE_END_DT})...")
+    window = season.prerelease_window()
+    if not window:
+        raise RuntimeError("No prerelease window is open — check the Seasons tab "
+                           "(prerelease start/end for the incoming season).")
+    start_dt, end_dt, set_name, season_id = window
+    print(f"  → Fetching prerelease events for {season_id} "
+          f"{set_name or '(no set name)'} ({start_dt} → {end_dt})...")
     events = _rph_api.get_events(
-        start_date_after=season.PRERELEASE_START_DT,
-        start_date_before=season.PRERELEASE_END_DT,
+        start_date_after=start_dt,
+        start_date_before=end_dt,
         extra_params={
             'display_status':      None,
             'display_statuses':    ['past', 'inProgress', 'upcoming'],

@@ -20,8 +20,7 @@
 | `/archive-season` | Admin | Copy a completed season's tabs from the League sheet to the Archive spreadsheet |
 | `/seasons [reload]` | Admin | Show the season calendar as the bot reads it, what each digest resolves to, and any problems with the Seasons tab. Read-only |
 | `/set-champs` | Admin | Manually refresh and post the Set Champs digest |
-| `/prerelease-dates start_date end_date [set_name]` | Admin | Set the prerelease window in Bot State, then refresh and post the prerelease digest. Separate from `/season-rollover` because stores list prereleases weeks before the set (and the season) starts |
-| `/prereleases` | Admin | Manually refresh and post the prerelease digest |
+| `/prereleases` | Admin | Manually refresh and post the prerelease digest. The window comes from the **Seasons** tab — it is the incoming season's, not the current one's |
 
 > To restrict commands to specific roles, use Discord's server settings: **Server Settings → Integrations → GTA Lorcana Bot** — no code changes needed.
 
@@ -34,7 +33,8 @@ Admin commands are also accessible to any Discord user ID listed in `ADMIN_USER_
 | Task | When | What it does |
 |------|------|-------------|
 | `where_to_play_weekly` | Sundays at 11 PM ET | Edits (or posts) the `#where-to-play` messages |
-| `set_champs_daily` | Daily at 7 AM ET, from `SEASON_START_DATE` through `SET_CHAMPS_END_DATE` | Refreshes the Set Champs tab in the League sheet from RPH |
-| `prerelease_daily` | Daily at 7:05 AM ET, through `PRERELEASE_END_DATE` | Edits (or posts) the prerelease digest in `PRERELEASE_CHANNEL_ID`. Nothing is written to a sheet. Offset 5 minutes from `set_champs_daily` so the two RPH fetches never overlap in memory |
+| `event_digests_daily` | Every minute; acts at `DIGEST_HOUR_ET` (7 AM ET), one digest per minute in `_DIGESTS` order | Refreshes each digest that is active today. One per minute so two RPH window fetches are never in memory at once |
+| ↳ `:00` Set Champs | Season start → Set Champs end, current season | Refreshes the `S## Set Champs` tab and the digest in `#gta-set-championships` |
+| ↳ `:05` Prerelease | While any season's prerelease window has not ended (normally the incoming season) | Refreshes the digest in `#gta-prereleases`. No sheet |
 | `rph_watcher` | Every 15 min | Checks watched events for open spots and DMs subscribers |
 | `keepalive` | Every 30 min | Heartbeat log |

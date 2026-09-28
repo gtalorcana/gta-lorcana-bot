@@ -17,9 +17,10 @@ roles posts), `docs/discord-surface/commands.md`, `docs/discord-surface/design-n
 | Area | Symbols |
 |---|---|
 | Bot setup & errors | `GtaLorcanaBot`, `on_app_command_error`, `_is_admin`, `_ch`, `make_embed`, `get_channel_by_id` |
-| Scheduled tasks | `keepalive` (30m), `where_to_play_weekly` (1m tick, posts Sun 11PM ET), `set_champs_daily` (1m tick, 7AM ET in window), `prerelease_daily` (1m tick, 7:05AM ET until window ends), `rph_watcher` (15m) |
+| Scheduled tasks | `keepalive` (30m), `where_to_play_weekly` (1m tick, posts Sun 11PM ET), `event_digests_daily` (1m tick; one digest per minute from `DIGEST_HOUR_ET`), `rph_watcher` (15m) |
 | Where-to-play | `_build_where_to_play_messages`, `_post_where_to_play`, `_grouped_by_day`, `_fmt`, `_last_sunday` |
-| Set champs / prerelease posts | `_build_event_digest_messages`, `_post_event_digest` (shared); `_post_set_champs`, `_post_prereleases` |
+| Adding a digest | A row in `_DIGESTS` — never another `@tasks.loop`. Give it a distinct `minute` so its RPH fetch never overlaps another's |
+| Event digests | `_DIGESTS` (the spec table), `_DigestSpec`, `_run_digest`, `event_digests_daily`, `_build_event_digest_messages`, `_post_event_digest` |
 | Event watcher | `watch_rph_event`, `unwatch_rph_event`, `list_watches`, `_watch_key`, `_load_watches` |
 | Results threads | `on_thread_create`, `on_message`, `on_message_edit`, `on_message_delete`, `on_thread_delete`, `process_results_reporting_thread`, `run_results_reporting_pipeline`, `_schedule_auto_retry` |
 | Linking & roles | `_post_linking_suggestions`, `on_raw_reaction_add`, `_assign_recorded_roles`, `_fmt_roles`, `on_member_join` |

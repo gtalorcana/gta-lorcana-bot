@@ -16,8 +16,8 @@ Features:
   - /where-to-play     — manually push the where-to-play post (admins only)
   - /set-champs      — manually refresh and post the Set Champs update (admins only)
   - /seasons         — show the season calendar and each digest's window (admins only)
-  - /prerelease-dates — set the prerelease window and post it (admins only)
   - /prereleases     — manually refresh and post the prerelease update (admins only)
+  - event_digests_daily — refreshes the Set Champs and prerelease digests each morning
   - on_member_join   — auto-assigns Common rarity role to new members
   - where_to_play_weekly — refreshes #where-to-play every Sunday evening
 
@@ -50,7 +50,9 @@ import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
+from dataclasses import dataclass
 from datetime import datetime, timezone, date, timedelta
+from typing import Callable
 
 from clients import gs as _gs, rph_api as _rph_api
 from results import process_event_data, remove_event_data
@@ -64,6 +66,7 @@ from constants import (
     MOD_CHANNEL_ID,
     SET_CHAMPS_CHANNEL_ID,
     PRERELEASE_CHANNEL_ID,
+    DIGEST_HOUR_ET as _DIGEST_HOUR_ET,
     EVENTS_URL_RE,
     RPH_RETRY_DELAY,
     RPH_RETRY_ATTEMPTS,
@@ -459,25 +462,63 @@ def _build_event_digest_messages(title: str, empty_text: str, rows: list, as_of:
     return messages
 
 
-def _build_set_champs_messages(rows: list, as_of: date) -> list[str]:
-    return _build_event_digest_messages(
-        f"🏆 **GTA Lorcana — {season.CURRENT_SEASON} Set Championships**",
-        "No Set Championship events found yet.",
-        rows, as_of,
-    )
-
-
-def _build_prerelease_messages(rows: list, as_of: date) -> list[str]:
-    set_name = f"{season.PRERELEASE_SET_NAME} " if season.PRERELEASE_SET_NAME else ""
-    return _build_event_digest_messages(
-        f"🎁 **GTA Lorcana — {set_name}Prereleases**",
-        "No prerelease events found yet.",
-        rows, as_of,
-    )
-
-
 # Digest message IDs, keyed by their Bot State key — restored on ready.
 _digest_msg_ids: dict[str, list[int]] = {}
+
+
+@dataclass(frozen=True)
+class _DigestSpec:
+    """
+    One scheduled digest. Adding a digest is a row in _DIGESTS, not another task:
+    the two that existed before were near-identical copies, and the season-overlap
+    rule they each got slightly differently now lives in one place.
+    """
+    key:        str                                 # short name, for logs
+    label:      str                                 # human label in messages
+    state_key:  str                                 # Bot State key holding '<id>|<id>|…'
+    channel_id: int
+    minute:     int                                 # minute past _DIGEST_HOUR_ET
+    fetch:      Callable[[], tuple[int, list]]      # zero-arg: resolves its own window
+    title:      Callable[[], str]
+    empty_text: str
+    active:     Callable[[date], bool]              # is there anything to post today?
+
+
+def _set_champs_title() -> str:
+    return f"🏆 **GTA Lorcana — {season.CURRENT_SEASON} Set Championships**"
+
+
+def _prerelease_title() -> str:
+    row      = season.active_prerelease()
+    set_name = f"{row['set_name']} " if row and row.get('set_name') else ""
+    return f"🎁 **GTA Lorcana — {set_name}Prereleases**"
+
+
+def _set_champs_active(today: date) -> bool:
+    """
+    Set Champs refresh runs from the season start through the Set Champs end.
+    It starts at the season start, not the window start, because stores list their
+    Set Championships weeks ahead and the channel is a preview as much as a result.
+    """
+    if not (season.SEASON_START_DATE and season.SET_CHAMPS_END_DATE):
+        print("  ⚠ set_champs digest: season dates not configured — skipping")
+        return False
+    return date.fromisoformat(season.SEASON_START_DATE) <= today <= date.fromisoformat(season.SET_CHAMPS_END_DATE)
+
+
+def _prerelease_active(today: date) -> bool:
+    """Active whenever some season's prerelease window has not yet ended."""
+    return season.active_prerelease(today) is not None
+
+
+_DIGESTS: tuple[_DigestSpec, ...] = (
+    _DigestSpec('set_champs', 'Set Champs', 'set_champs_msg_ids', SET_CHAMPS_CHANNEL_ID, 0,
+                refresh_set_champs, _set_champs_title,
+                "No Set Championship events found yet.", _set_champs_active),
+    _DigestSpec('prerelease', 'Prerelease', 'prerelease_msg_ids', PRERELEASE_CHANNEL_ID, 5,
+                fetch_prereleases, _prerelease_title,
+                "No prerelease events found yet.", _prerelease_active),
+)
 
 
 async def _post_event_digest(label: str, channel_id: int, state_key: str,
@@ -492,6 +533,20 @@ async def _post_event_digest(label: str, channel_id: int, state_key: str,
         return
 
     old_ids = _digest_msg_ids.get(state_key, [])
+    if not old_ids:
+        # Nothing in memory: either this digest has never posted, or the startup
+        # restore was skipped because Bot State could not be read. Re-read the key
+        # before posting — guessing "never posted" duplicates the whole digest.
+        try:
+            raw = (await loop.run_in_executor(None, load_bot_state)).get(state_key, '')
+            old_ids = [int(x) for x in raw.split('|') if x]
+            if old_ids:
+                print(f"  ✓ {label}: recovered {len(old_ids)} message ID(s) from Bot State")
+        except Exception as e:
+            print(f"  ⚠ {label}: could not re-read {state_key} ({e}) — not posting, "
+                  f"to avoid duplicating the digest")
+            return
+
     new_ids = []
 
     for i, content in enumerate(messages):
@@ -522,69 +577,43 @@ async def _post_event_digest(label: str, channel_id: int, state_key: str,
     print(f"  ✓ {label} Discord updated ({len(messages)} message(s))")
 
 
-async def _post_set_champs(rows: list, loop) -> None:
-    messages = _build_set_champs_messages(rows, date.today())
-    await _post_event_digest("Set Champs", SET_CHAMPS_CHANNEL_ID, 'set_champs_msg_ids', messages, loop)
-
-
-async def _post_prereleases(rows: list, loop) -> None:
-    messages = _build_prerelease_messages(rows, date.today())
-    await _post_event_digest("Prerelease", PRERELEASE_CHANNEL_ID, 'prerelease_msg_ids', messages, loop)
+async def _run_digest(spec: _DigestSpec, loop) -> int:
+    """
+    Fetch a digest's events and post or edit its messages. Returns the event count.
+    Shared by the scheduled loop and each manual command, so a hand-run digest and a
+    7 AM one cannot drift apart.
+    """
+    count, rows = await loop.run_in_executor(None, spec.fetch)
+    # TODO: remove when upgraded to 1GB RAM — each fetch pulls a window of RPH events
+    gc.collect()
+    messages = _build_event_digest_messages(spec.title(), spec.empty_text, rows, date.today())
+    await _post_event_digest(spec.label, spec.channel_id, spec.state_key, messages, loop)
+    return count
 
 
 @tasks.loop(minutes=1)
-async def set_champs_daily():
+async def event_digests_daily():
     """
-    Refreshes the Set Champs sheet once daily at 7:00 AM ET during the set champs window.
-    No-ops outside of SEASON_START_DATE to SET_CHAMPS_END_DATE.
-    """
-    now_et = _now_et()
-    if now_et.hour != 7 or now_et.minute != 0:
-        return
-    if not season.SEASON_START_DATE or not season.SET_CHAMPS_END_DATE:
-        print(f"  ⚠ set_champs_daily: season dates not configured — skipping")
-        return
-    _start = date.fromisoformat(season.SEASON_START_DATE)
-    _end   = date.fromisoformat(season.SET_CHAMPS_END_DATE)
-    if not (_start <= now_et.date() <= _end):
-        return
+    Refresh one digest per minute from _DIGEST_HOUR_ET, in spec order.
 
-    print(f"  🏆 set_champs_daily: refreshing Set Champs sheet for {now_et.date()}...")
-    loop = asyncio.get_running_loop()
-    try:
-        count, rows = await loop.run_in_executor(None, refresh_set_champs)
-        gc.collect()  # TODO: remove when upgraded to 1GB RAM — refresh_set_champs fetches a date range of RPH events
-        print(f"  ✓ Set Champs sheet refreshed ({count} event(s))")
-        await _post_set_champs(rows, loop)
-    except Exception as e:
-        print(f"  ✗ set_champs_daily failed: {e}")
-
-
-@tasks.loop(minutes=1)
-async def prerelease_daily():
-    """
-    Refreshes the prerelease post once daily at 7:05 AM ET, from whenever
-    /prerelease-dates is run through PRERELEASE_END_DATE. Offset from
-    set_champs_daily so the two RPH date-range fetches never overlap in memory.
+    Staggering by a minute each keeps two RPH window fetches from ever being in
+    memory at once, which matters on a 256MB machine. It is a property of the
+    schedule rather than a comment repeated in every task.
     """
     now_et = _now_et()
-    if now_et.hour != 7 or now_et.minute != 5:
+    if now_et.hour != _DIGEST_HOUR_ET:
         return
-    if not season.PRERELEASE_END_DATE:
-        return
-    if now_et.date() > date.fromisoformat(season.PRERELEASE_END_DATE):
+    spec = next((d for d in _DIGESTS if d.minute == now_et.minute), None)
+    if spec is None or not spec.active(now_et.date()):
         return
 
-    print(f"  🎁 prerelease_daily: refreshing prerelease post for {now_et.date()}...")
+    print(f"  🗓 {spec.key}_digest: refreshing for {now_et.date()}...")
     loop = asyncio.get_running_loop()
     try:
-        count, rows = await loop.run_in_executor(None, fetch_prereleases)
-        gc.collect()  # TODO: remove when upgraded to 1GB RAM — fetch_prereleases fetches a date range of RPH events
-        await _post_prereleases(rows, loop)
+        count = await _run_digest(spec, loop)
+        print(f"  ✓ {spec.label} refreshed ({count} event(s))")
     except Exception as e:
-        print(f"  ✗ prerelease_daily failed: {e}")
-
-
+        print(f"  ✗ {spec.key}_digest failed: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -926,8 +955,8 @@ async def on_ready():
     except Exception as e:
         print(f"  ⚠ Could not restore where-to-play message IDs: {e}")
 
-    # Restore persisted Set Champs / prerelease message IDs
-    for key in ('set_champs_msg_ids', 'prerelease_msg_ids'):
+    # Restore persisted digest message IDs so the daily refresh edits in place
+    for key in (spec.state_key for spec in _DIGESTS):
         try:
             raw = state.get(key, '')
             _digest_msg_ids[key] = [int(x) for x in raw.split('|') if x] if raw else []
@@ -941,12 +970,13 @@ async def on_ready():
     if not where_to_play_weekly.is_running():
         where_to_play_weekly.start()
         print(f"  ♻ Where-to-play weekly task started (fires Sundays at {WHERE_TO_PLAY_POST_HOUR_ET}:00 ET)")
-    if not set_champs_daily.is_running():
-        set_champs_daily.start()
-        print(f"  ♻ Set Champs daily task started (fires 7AM ET, {season.SEASON_START_DATE} → {season.SET_CHAMPS_END_DATE})")
-    if not prerelease_daily.is_running():
-        prerelease_daily.start()
-        print(f"  ♻ Prerelease daily task started (fires 7:05AM ET, until {season.PRERELEASE_END_DATE})")
+    if not event_digests_daily.is_running():
+        event_digests_daily.start()
+        today = _now_et().date()
+        for spec in _DIGESTS:
+            state = "active" if spec.active(today) else "idle"
+            print(f"  ♻ {spec.label} digest scheduled for "
+                  f"{_DIGEST_HOUR_ET}:{spec.minute:02d} ET ({state})")
     if not rph_watcher.is_running():
         rph_watcher.start()
         print(f"  ♻ RPH event watcher started (polls every 15 min)")
@@ -3137,96 +3167,36 @@ async def seasons_command(interaction: discord.Interaction, reload: bool = True)
     await interaction.followup.send("\n".join(lines)[:1990], ephemeral=True)
 
 
-@tree.command(name="set-champs", description="Manually refresh and post the Set Champs update (admins only)")
-async def set_champs_command(interaction: discord.Interaction):
+async def _digest_command(interaction: discord.Interaction, spec: _DigestSpec) -> None:
+    """Manual refresh for one digest — the same path the 7 AM loop takes."""
     if not _is_admin(interaction):
         await interaction.response.send_message("❌ Admins only.", ephemeral=True)
         return
 
     await interaction.response.defer(ephemeral=True)
+    if not spec.active(_now_et().date()):
+        await interaction.followup.send(
+            f"ℹ️ Nothing to post: no {spec.label.lower()} window is open. "
+            f"Check the **Seasons** tab with `/seasons`.", ephemeral=True)
+        return
+
     loop = asyncio.get_running_loop()
     try:
-        count, rows = await loop.run_in_executor(None, refresh_set_champs)
-        gc.collect()
-        await _post_set_champs(rows, loop)
-        await interaction.followup.send(f"✅ Set Champs updated ({count} event(s)).", ephemeral=True)
+        count = await _run_digest(spec, loop)
+        await interaction.followup.send(f"✅ {spec.label} updated ({count} event(s)).", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 
-
-@tree.command(name="prerelease-dates", description="Set the prerelease window and post the prerelease update (admins only)")
-@app_commands.describe(
-    start_date="First prerelease day (YYYY-MM-DD)",
-    end_date="Last prerelease day (YYYY-MM-DD)",
-    set_name="Set name for the post header, e.g. Hyperia City",
-)
-async def prerelease_dates_command(interaction: discord.Interaction, start_date: str, end_date: str,
-                                   set_name: str = ""):
-    if not _is_admin(interaction):
-        await interaction.response.send_message("❌ Admins only.", ephemeral=True)
-        return
-
-    await interaction.response.defer(ephemeral=True)
-    try:
-        start = datetime.strptime(start_date, "%Y-%m-%d").date()
-        end   = datetime.strptime(end_date, "%Y-%m-%d").date()
-    except ValueError:
-        await interaction.followup.send(
-            f"⚠️ Dates must be YYYY-MM-DD, got `{start_date}` and `{end_date}`.", ephemeral=True)
-        return
-    if start > end:
-        await interaction.followup.send(
-            f"⚠️ `start_date` must be on or before `end_date` (got {start_date} → {end_date}).", ephemeral=True)
-        return
-
-    loop = asyncio.get_running_loop()
-    try:
-        def _update_state():
-            # strict=True: read-then-write — see set_bot_state_key
-            state = load_bot_state(strict=True)
-            state.update({
-                'prerelease_start_date': start_date,
-                'prerelease_end_date':   end_date,
-                'prerelease_set_name':   set_name.strip(),
-            })
-            save_bot_state(state)
-            return state
-        season.init(await loop.run_in_executor(None, _update_state))
-    except Exception as e:
-        await interaction.followup.send(f"❌ Failed to update Bot State: {e}", ephemeral=True)
-        return
-
-    try:
-        count, rows = await loop.run_in_executor(None, fetch_prereleases)
-        gc.collect()
-        await _post_prereleases(rows, loop)
-    except Exception as e:
-        await interaction.followup.send(
-            f"⚠️ Dates saved ({start_date} → {end_date}) but the post failed: {e}", ephemeral=True)
-        return
-    await interaction.followup.send(
-        f"✅ Prerelease window set to {start_date} → {end_date} and posted ({count} event(s)). "
-        f"It refreshes daily at 7:05 AM ET until {end_date}.",
-        ephemeral=True,
-    )
+@tree.command(name="set-champs", description="Manually refresh and post the Set Champs update (admins only)")
+async def set_champs_command(interaction: discord.Interaction):
+    await _digest_command(interaction, _DIGESTS[0])
 
 
 @tree.command(name="prereleases", description="Manually refresh and post the prerelease update (admins only)")
 async def prereleases_command(interaction: discord.Interaction):
-    if not _is_admin(interaction):
-        await interaction.response.send_message("❌ Admins only.", ephemeral=True)
-        return
+    await _digest_command(interaction, _DIGESTS[1])
 
-    await interaction.response.defer(ephemeral=True)
-    loop = asyncio.get_running_loop()
-    try:
-        count, rows = await loop.run_in_executor(None, fetch_prereleases)
-        gc.collect()
-        await _post_prereleases(rows, loop)
-        await interaction.followup.send(f"✅ Prereleases updated ({count} event(s)).", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 if __name__ == "__main__":
     missing = [v for v in ["DISCORD_BOT_TOKEN", "WORKER_URL", "WORKER_SECRET"] if not os.getenv(v)]
