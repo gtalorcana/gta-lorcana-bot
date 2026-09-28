@@ -174,7 +174,9 @@ def init(bot_state: dict, calendar=_KEEP) -> None:
     CURRENT        = get_season(CURRENT_SEASON)
 
     if CURRENT:
-        CALENDAR_SOURCE = 'sheet'
+        # The row carries its own provenance so /seasons can flag dates that came
+        # from a command override and will not survive a restart.
+        CALENDAR_SOURCE = CURRENT.get('source') or 'sheet'
     else:
         # Legacy fallback: synthesize the current season from the flat Bot State keys
         # the Seasons tab replaces, so this ships before the tab exists and can be

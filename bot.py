@@ -2644,21 +2644,29 @@ async def invitational_roles(interaction: discord.Interaction, event_url: str, s
 @tree.command(name="season-rollover", description="Roll over to a new season: creates sheet tabs and reloads config (admins only)")
 @app_commands.describe(
     new_season="New season identifier, e.g. S12",
-    start_date="Season start date (YYYY-MM-DD)",
-    end_date="Season end date (YYYY-MM-DD)",
-    set_champs_start="Set Champs start date (YYYY-MM-DD)",
-    set_champs_end="Set Champs end date (YYYY-MM-DD)",
+    start_date="Override the Seasons tab's season start (YYYY-MM-DD)",
+    end_date="Override the Seasons tab's season end (YYYY-MM-DD)",
+    set_champs_start="Override the Seasons tab's Set Champs start (YYYY-MM-DD)",
+    set_champs_end="Override the Seasons tab's Set Champs end (YYYY-MM-DD)",
     force="Skip the check that the outgoing season's roles were recorded",
 )
 async def season_rollover(
     interaction: discord.Interaction,
     new_season: str,
-    start_date: str,
-    end_date: str,
-    set_champs_start: str,
-    set_champs_end: str,
+    start_date: str = "",
+    end_date: str = "",
+    set_champs_start: str = "",
+    set_champs_end: str = "",
     force: bool = False,
 ):
+    """
+    Flip the scoring season to new_season.
+
+    Dates come from that season's row in the Seasons tab. The four date arguments
+    are overrides for the rare case where the row is wrong and there is no time to
+    fix it — they apply *in memory only*, because the tab is operator-owned and the
+    bot does not write to it, so a restart reverts to the row.
+    """
     if not _is_admin(interaction):
         await interaction.response.send_message("⚠️ Admins only.", ephemeral=True)
         return
@@ -2671,11 +2679,24 @@ async def season_rollover(
         )
         return
 
+    loop = asyncio.get_running_loop()
+
+    # Re-read the calendar first, so a row typed moments ago is picked up without a
+    # restart — which is exactly when this command gets run.
+    _, cal_problems = await _reload_season(loop)
+    row = season.get_season(new_season) or {}
+
+    overrides = {'season_start': start_date, 'season_end': end_date,
+                 'set_champs_start': set_champs_start, 'set_champs_end': set_champs_end}
+    overridden = {k: v.strip() for k, v in overrides.items() if v.strip()}
+
+    resolved = {k: overridden.get(k) or row.get(k) for k in overrides}
+
     # Validate date formats before touching anything
-    date_fields = [("start_date", start_date), ("end_date", end_date),
-                   ("set_champs_start", set_champs_start), ("set_champs_end", set_champs_end)]
     parsed = {}
-    for field_name, value in date_fields:
+    for field_name, value in resolved.items():
+        if not value:
+            continue
         try:
             parsed[field_name] = datetime.strptime(value, "%Y-%m-%d").date()
         except ValueError:
@@ -2684,26 +2705,40 @@ async def season_rollover(
             )
             return
 
-    # Set Champs may end *after* the season end (e.g. S11: season ended Apr 24,
-    # set champs Apr 26). But it must start during the season.
-    ordered = (
-        parsed["start_date"] <= parsed["end_date"]
-        and parsed["start_date"] <= parsed["set_champs_start"] <= parsed["set_champs_end"]
-        and parsed["set_champs_start"] <= parsed["end_date"]
-    )
-    if not ordered:
+    missing = [k for k, v in resolved.items() if not v]
+    if missing:
+        problem_note = ("\n\n**Seasons tab problems:**\n"
+                        + "\n".join(f"  • {p}" for p in cal_problems[:5])) if cal_problems else ""
+        known = ", ".join(r['season'] for r in season.SEASONS) or "none"
         await interaction.followup.send(
-            f"⚠️ Date ordering invalid. Required: "
-            f"`start_date` ≤ `end_date`, "
-            f"`start_date` ≤ `set_champs_start` ≤ `set_champs_end`, and "
-            f"`set_champs_start` ≤ `end_date`. "
-            f"Got start={start_date}, end={end_date}, "
-            f"sc_start={set_champs_start}, sc_end={set_champs_end}.",
+            f"❌ **{new_season} is not ready to roll over to.**\n\n"
+            f"Missing: {', '.join(f'`{m}`' for m in missing)}\n"
+            f"Fill those cells in the **Seasons** tab (rows found there: {known}), then re-run. "
+            f"A future season normally has its Set Champs dates blank until they are announced.\n"
+            f"You can also pass them as arguments, but that applies in memory only — a restart "
+            f"reverts to the tab.{problem_note}",
             ephemeral=True,
         )
         return
 
-    loop = asyncio.get_running_loop()
+    # Set Champs may end *after* the season end (e.g. S11: season ended Apr 24,
+    # set champs Apr 26). But it must start during the season.
+    ordered = (
+        parsed["season_start"] <= parsed["season_end"]
+        and parsed["season_start"] <= parsed["set_champs_start"] <= parsed["set_champs_end"]
+        and parsed["set_champs_start"] <= parsed["season_end"]
+    )
+    if not ordered:
+        await interaction.followup.send(
+            f"⚠️ Date ordering invalid. Required: "
+            f"`season_start` ≤ `season_end`, "
+            f"`season_start` ≤ `set_champs_start` ≤ `set_champs_end`, and "
+            f"`set_champs_start` ≤ `season_end`. "
+            f"Got start={resolved['season_start']}, end={resolved['season_end']}, "
+            f"sc_start={resolved['set_champs_start']}, sc_end={resolved['set_champs_end']}.",
+            ephemeral=True,
+        )
+        return
 
     # ── Guard: has the outgoing season been recorded? ────────────────────────
     #
@@ -2751,19 +2786,16 @@ async def season_rollover(
         await interaction.followup.send(f"❌ Failed to create sheet tabs: {e}", ephemeral=True)
         return
 
-    # 2. Update Bot State with new season values
+    # 2. Move the season pointer. Only the pointer: the dates live in the Seasons
+    #    tab now. The retired flat date keys are deliberately left alone rather than
+    #    deleted here — flipping the pointer and erasing the fallback in one write is
+    #    how you end up with neither source of truth. They are removed by hand once
+    #    the tab has proven itself.
     try:
-        new_state_values = {
-            'season':                new_season,
-            'season_start_date':     start_date,
-            'season_end_date':       end_date,
-            'set_champs_start_date': set_champs_start,
-            'set_champs_end_date':   set_champs_end,
-        }
         def _update_state():
             # strict=True: read-then-write — see set_bot_state_key
             state = load_bot_state(strict=True)
-            state.update(new_state_values)
+            state['season'] = new_season
             save_bot_state(state)
             return state
         new_state = await loop.run_in_executor(None, _update_state)
@@ -2771,8 +2803,18 @@ async def season_rollover(
         await interaction.followup.send(f"❌ Sheet tabs created but failed to update Bot State: {e}", ephemeral=True)
         return
 
-    # 3. Reload season in memory
-    season.init(new_state)
+    # 3. Reload season in memory, applying any overrides on top of the new row
+    calendar = [dict(r) for r in season.SEASONS]
+    target   = next((r for r in calendar if r['season'] == new_season), None)
+    if target is None:
+        target = {'season': new_season, 'set_name': '', 'sheet_row': None, 'source': 'override',
+                  'prerelease_start': None, 'prerelease_end': None}
+        calendar.append(target)
+        calendar.sort(key=lambda r: int(r['season'][1:]))
+    target.update(resolved)
+    if overridden:
+        target['source'] = 'override'
+    season.init(new_state, calendar)
 
     # 4. Confirm
     tab_lines = "\n".join(f"  • {t}" for t in created) if created else "  (all tabs already existed)"
@@ -2784,12 +2826,33 @@ async def season_rollover(
             f"  • `/assign-roles-from-registry` — grant the roles just recorded\n"
             f"  • `/archive-season {outgoing}` — copy the tabs to the Archive sheet"
             ) if outgoing and outgoing != new_season else ""
+
+    override_note = ""
+    if overridden:
+        fields = ", ".join(f"`{k}`" for k in overridden)
+        override_note = (f"\n\n⚠️ **Overridden in memory only:** {fields}. A restart — or any reload, "
+                         f"including `/seasons` — reverts to the Seasons tab. Edit the "
+                         f"`{new_season}` row there to make this stick.")
+
+    # The Set Champs digest and its sheet follow CURRENT_SEASON, so flipping the
+    # pointer mid-window stops refreshing the outgoing season's tab.
+    sc_note = ""
+    if outgoing and outgoing != new_season:
+        out_row = season.get_season(outgoing) or {}
+        out_sc  = out_row.get('set_champs_end')
+        if out_sc and date.fromisoformat(out_sc) >= _now_et().date():
+            sc_note = (f"\n\n⚠️ **{outgoing}'s Set Champs run to {out_sc}**, but the Set Champs digest "
+                       f"and sheet follow the current season — `{outgoing} Set Champs` will stop "
+                       f"refreshing. Finish it with `/set-champs` before rolling over, or accept the "
+                       f"tab as final.")
+
     await interaction.followup.send(
         f"✅ **Season rolled over to {new_season}**\n\n"
         f"**New tabs created in League sheet:**\n{tab_lines}{skip_note}\n\n"
-        f"**Season window:** {start_date} → {end_date}\n"
-        f"**Set Champs:** {set_champs_start} → {set_champs_end}"
-        f"{todo}",
+        f"**Season window:** {resolved['season_start']} → {resolved['season_end']}\n"
+        f"**Set Champs:** {resolved['set_champs_start']} → {resolved['set_champs_end']}\n"
+        f"**Dates from:** {'the Seasons tab' if not overridden else 'the Seasons tab + overrides'}"
+        f"{override_note}{sc_note}{todo}",
         ephemeral=True,
     )
 
@@ -3065,6 +3128,9 @@ async def seasons_command(interaction: discord.Interaction, reload: bool = True)
     if season.CALENDAR_SOURCE == 'bot_state':
         lines += ["", f"⚠️ `{season.CURRENT_SEASON}` has no row in the Seasons tab — running on the "
                       f"legacy Bot State date keys. Add the row."]
+    elif season.CALENDAR_SOURCE == 'override':
+        lines += ["", f"⚠️ `{season.CURRENT_SEASON}`'s dates were overridden on the command line and "
+                      f"exist **in memory only** — a restart reverts to the Seasons tab."]
     if problems:
         lines += ["", "**Problems**"] + [f"  • {p}" for p in problems[:10]]
 

@@ -16,7 +16,7 @@
 | `/assign-roles-from-registry` | Admin | Assign every Discord rarity role the registry records. Additive only, idempotent, safe to re-run |
 | `/tidy-registry` | Admin | Remove blank rows from the Player Registry, refresh display names from this season's sheets, and sort by rarity tier, newest season first |
 | `/wheretoplay` | Admin | Manually trigger a `#where-to-play` refresh |
-| `/season-rollover` | Admin | Create new season tabs in League sheet, update Bot State, reload config in memory. Refuses if the outgoing season's Rare/Uncommon were never recorded — `force: true` overrides |
+| `/season-rollover new_season [dates…]` | Admin | Create new season tabs, move the `season` pointer, reload config in memory. Dates come from the **Seasons** tab; it refuses and names the empty cells if that row is incomplete. Date arguments override the row in memory only. Refuses if the outgoing season's Rare/Uncommon were never recorded — `force: true` overrides |
 | `/archive-season` | Admin | Copy a completed season's tabs from the League sheet to the Archive spreadsheet |
 | `/seasons [reload]` | Admin | Show the season calendar as the bot reads it, what each digest resolves to, and any problems with the Seasons tab. Read-only |
 | `/set-champs` | Admin | Manually refresh and post the Set Champs digest |
