@@ -93,6 +93,12 @@ a design note below changes.
   at 373 miles (600 km) across both countries. Those are per-fetch overrides; `num_miles` stays 250
   in `util/rph_api_utils.py`, because that default defines store classification, `#where-to-play`
   and results eligibility
+- **RPH's `/events` pagination silently skips rows** at page boundaries, and the same window
+  at the same `page_size` reproduces the identical gap — it is not a timing effect. `fetch_events`
+  re-walks at a different page size (250 then 173, coprime) whenever a pass comes up short of the
+  `count` the endpoint reports, and de-duplicates. A single walk is never trustworthy: 7 of 351
+  events vanished from one prerelease week, and 3 of 1,211 from the S13 season window that store
+  classification is built on
 - Digests (Set Champs, prereleases, CCQs) are one table: `_DIGESTS` in `bot.py`, refreshed by a single
   `event_digests_daily` loop, one per minute from `DIGEST_HOUR_ET`. Adding one is a row, not a task.
   The stagger is what keeps two RPH window fetches out of memory at once on a 256MB machine

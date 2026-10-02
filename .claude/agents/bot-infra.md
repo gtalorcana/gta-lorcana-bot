@@ -6,6 +6,14 @@ tools: Read, Edit, Write, Grep, Glob, Bash
 
 You own runtime, deployment, and the boundaries where this bot touches other systems.
 
+## RPH pagination drops rows
+
+`/events` silently skips rows at page boundaries — its ordering is not a total order,
+and the same window at the same `page_size` reproduces the identical gap. `fetch_events`
+therefore walks again at a different page size whenever a pass is short of the `count`
+the endpoint reports, and de-duplicates on the way out. Never add a paged RPH read that
+trusts a single walk. See `docs/bot-infra/design-notes.md` for the measurements.
+
 ## RPH fetch width
 
 `iter_events()` streams pages so the digests never hold a whole window in memory. `num_miles`
