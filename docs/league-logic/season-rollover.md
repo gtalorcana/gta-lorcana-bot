@@ -1,6 +1,33 @@
 # Season Rollover
 
-## End-of-Season Checklist
+## Season-close checklist (automatic)
+
+The day after the current season's `season_end` (from the Seasons tab), the bot posts a checklist
+to the mod channel — and immediately on startup if that day has already passed. It is one message,
+edited in place, refreshed on every button click and daily at `DIGEST_HOUR_ET`:20.
+
+| Step | Button | Ticked when |
+|---|---|---|
+| 1. Rare / Uncommon | **Record & assign roles** — previews the final leaderboard's earners first | marker `rare_uncommon`, or registry I/J carry the season — *and* every linked member holds those roles |
+| 2. Invitational | **Submit invitational URL** (opens a box → the usual ✅/❌ preview; ✅ also grants roles) or **No invitational** | marker `invitational`, or registry G/H carry the season — and the roles are on Discord |
+| 3. Rollover | **Roll over to S##** — appears only once step 1 is recorded and the next row is complete; re-validated at click time | marker `rolled_over`, or the pointer is past the season |
+| 4. Archive | **Archive S##** — after the rollover | marker `archived`, or the Archive sheet has `S## Leaderboard` |
+
+The next season's dates come **only** from the Seasons tab; the checklist links it and has a
+**Reload** button. When all four are done the message becomes a one-line `🏁 S## closed` summary
+and is never touched again. Steps can finish out of order — the invitational usually lands after
+the rollover, so the checklist stays open into the next season.
+
+Every step checks what it *produced*, so the slash commands below tick it too. State lives in one
+Bot State key per season, `season_close:S##` (JSON: `msg_id`, the step markers, `closed`).
+Buttons are admin-only (`ADMIN_USER_IDS`) and route by custom_id, so they survive restarts.
+
+**Why the markers exist:** registry role columns keep the *earliest* season. If every S13 earner
+already held their role from S12, recording S13 changes no cell, and the registry alone cannot
+tell "recorded, nothing new" from "never recorded". The record steps (button or slash) write the
+marker either way, and `/season-rollover`'s guard accepts it — so that case no longer needs `force`.
+
+## End-of-Season Checklist (manual)
 
 1. Fill the new season's row in the **Seasons** tab — season start/end and Set Champs
    start/end. Check it with `/seasons`

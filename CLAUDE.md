@@ -137,6 +137,12 @@ a design note below changes.
 - `SORTN`'s `sort_column` indexes the *filtered array*, not the source sheet. An out-of-range
   index silently disables the sort instead of erroring — that is how "best 10 results" ran as
   "first 10" for a whole season
+- The **season-close checklist** (`season_close:S##` in Bot State) ticks each step by what it
+  produced — registry stamps, the pointer, the Archive sheet — *or* a marker the step writes. The
+  marker is load-bearing: earliest-season-wins means a season whose earners all held their roles
+  already leaves no registry trace. Any new path that records, rolls over or archives must call
+  `_season_close_mark`, or the checklist and the rollover guard won't see it.
+  See `docs/league-logic/season-rollover.md`
 - `create_season_sheets` seeds the Results/Leaderboard formulas for a new season. Any formula
   fix applied to the live sheet must be mirrored there, or rollover reintroduces the bug.
   Editing a live formula by *inserting columns* is especially deceptive: Sheets silently

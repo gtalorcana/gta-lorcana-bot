@@ -19,6 +19,7 @@ Features:
   - /prereleases     — manually refresh and post the prerelease update (admins only)
   - /ccqs            — manually refresh and post the CCQ update (admins only)
   - event_digests_daily — refreshes the Set Champs and prerelease digests each morning
+  - season_close_daily — posts/refreshes the end-of-season checklist in the mod channel
   - on_member_join   — auto-assigns Common rarity role to new members
   - where_to_play_weekly — refreshes #where-to-play every Sunday evening
 
@@ -82,6 +83,8 @@ from constants import (
     LEGENDARY_ROLE_ID,
     SUPER_RARE_ROLE_ID,
     LEAGUE_SPREADSHEET_ID,
+    ARCHIVE_SPREADSHEET_ID,
+    BOT_DATABASE_SPREADSHEET_ID,
     DISCORD_GUILD_ID,
     SHOPIFY_CLIENT_ID,
     SHOPIFY_STORE_DOMAIN,
@@ -111,6 +114,9 @@ intents.members = True  # on_member_join event
 
 class GtaLorcanaBot(commands.Bot):
     async def setup_hook(self):
+        # Season-close checklist buttons route by custom_id, so clicks on a
+        # checklist posted before a restart still land.
+        self.add_dynamic_items(_SeasonCloseButton)
         if os.getenv("SYNC_COMMANDS_ONLY") == "1":
             guild = discord.Object(id=int(DISCORD_GUILD_ID))
             print(f"  SYNC_COMMANDS_ONLY mode — guild_id={DISCORD_GUILD_ID}, commands registered={len(self.tree.get_commands())}")
@@ -996,6 +1002,12 @@ async def on_ready():
     if not rph_watcher.is_running():
         rph_watcher.start()
         print(f"  ♻ RPH event watcher started (polls every 15 min)")
+    if not season_close_daily.is_running():
+        season_close_daily.start()
+        print(f"  ♻ Season-close checklist scheduled for {_DIGEST_HOUR_ET}:20 ET")
+        # Once at startup too, so a season that ended while the bot was down —
+        # or before this shipped — gets its checklist now rather than tomorrow.
+        await _season_close_tick()
 
     # Auto-recheck any unprocessed results threads from the last 3 days.
     # Catches threads that were mid-flight when the bot last crashed or restarted.
@@ -1683,6 +1695,23 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     ))
                 return
 
+            # Marked whether or not any cell changed — see _record_rare_and_uncommon.
+            await _season_close_mark(season_label,
+                                     invitational=_now_et().date().isoformat(),
+                                     invitational_n=len(all_candidates))
+
+            assign_note = "\n\nRun `/assign-roles-from-registry` to grant the Discord roles."
+            if assignment.get('assign') and guild:
+                try:
+                    registry = await loop.run_in_executor(None, get_player_registry)
+                    assigned, failed, _gone, _unlinked = await _assign_all_from_registry(guild, registry)
+                    assign_note = (f"\n\n{len(assigned)} Discord role(s) granted"
+                                   + (f", {len(failed)} failed" if failed else "") + ".")
+                except Exception as e:
+                    print(f"  ✗ invitational: role assignment failed: {e}")
+                    assign_note = (f"\n\n⚠️ Recorded, but granting roles failed: `{e}` — "
+                                   f"run `/assign-roles-from-registry`.")
+
             recorded = [f"**{name}** → {role_name}"
                         + ("" if member else " *(unlinked)*")
                         for _pid, name, member, _rid, role_name in all_candidates]
@@ -1693,9 +1722,10 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     description="\n".join(recorded)
                                 + (f"\n\n{unlinked_n} finisher(s) not yet linked — their role lands on link."
                                    if unlinked_n else "")
-                                + "\n\nRun `/assign-roles-from-registry` to grant the Discord roles.",
+                                + assign_note,
                     colour=discord.Colour.gold()
                 ))
+            await _refresh_season_close_quietly(season_label)
         else:
             if mod_ch:
                 await mod_ch.send(embed=make_embed(
@@ -1703,6 +1733,590 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     description=f"Nothing was recorded for **{assignment['event_name']}**.",
                     colour=discord.Colour.red()
                 ))
+
+
+# ═══════════════════════════════════════════════════════════════
+# SEASON-CLOSE CHECKLIST
+# ═══════════════════════════════════════════════════════════════
+#
+# One mod-channel message per finished season, edited in place, walking the
+# end-of-season steps in order: record + assign Rare/Uncommon, record the
+# invitational, roll over, archive. Posted the day after the current season's
+# end; closed into a one-line summary once every step is done.
+#
+# A step is ticked by what it produced — the registry, the season pointer, the
+# Archive sheet — or by the marker the step writes to Bot State, never by
+# remembering which button was pressed. So the slash commands tick it too, and a
+# step that got undone un-ticks. The marker is what covers a season whose earners
+# all held their roles from an earlier one: earliest-season-wins leaves no trace
+# of that season in the registry at all.
+#
+# State is one Bot State key per season, `season_close:S13`, a JSON object:
+#   msg_id, rare_uncommon(+_n), invitational(+_n | 'skipped'), rolled_over,
+#   rolled_to, archived, closed — dates as YYYY-MM-DD.
+# Buttons are a DynamicItem keyed by custom_id, so they keep working across
+# restarts without any in-memory registry of pending prompts.
+
+_SEASON_CLOSE_PREFIX = "season_close:"
+_season_close_lock   = asyncio.Lock()   # serialises marker read-modify-writes
+_season_close_tick_lock = asyncio.Lock()  # one post/refresh pass at a time
+_season_close_busy: set[str] = set()    # seasons with a button action in flight
+
+
+def _season_close_key(season_id: str) -> str:
+    return f"{_SEASON_CLOSE_PREFIX}{season_id}"
+
+
+def _parse_season_close(raw: str) -> dict:
+    try:
+        entry = json.loads(raw) if raw else {}
+    except ValueError:
+        return {}
+    return entry if isinstance(entry, dict) else {}
+
+
+def _season_close_entry(season_id: str) -> dict:
+    """The season's checklist record ({} if none). Raises if Bot State can't be read."""
+    return _parse_season_close(load_bot_state(strict=True).get(_season_close_key(season_id), ''))
+
+
+async def _season_close_mark(season_id: str, **fields) -> bool:
+    """
+    Merge fields into a season's checklist record. Returns False on failure.
+
+    Logs rather than raises: every caller has already done the real work (recorded,
+    rolled over, archived), and a failed marker must not report that as failed.
+    """
+    season_id = season_id.strip().upper()
+    loop = asyncio.get_running_loop()
+
+    def _write():
+        # strict=True: read-then-write — see set_bot_state_key
+        state = load_bot_state(strict=True)
+        key   = _season_close_key(season_id)
+        entry = _parse_season_close(state.get(key, ''))
+        entry.update(fields)
+        state[key] = json.dumps(entry, separators=(',', ':'))
+        save_bot_state(state)
+
+    async with _season_close_lock:
+        try:
+            await loop.run_in_executor(None, _write)
+            return True
+        except Exception as e:
+            print(f"  ✗ season-close: could not save {fields} for {season_id}: {e}")
+            return False
+
+
+def _season_num(season_id: str) -> int | None:
+    m = re.fullmatch(r'S(\d+)', (season_id or '').strip())
+    return int(m.group(1)) if m else None
+
+
+def _short_date(iso: str | None) -> str:
+    """'2026-10-08' → 'Oct 8'; anything unparseable comes back as-is."""
+    if not iso:
+        return "—"
+    try:
+        d = date.fromisoformat(iso)
+    except ValueError:
+        return iso
+    return f"{d:%b} {d.day}"
+
+
+def _archive_has_season(season_id: str) -> bool:
+    """True if the Archive spreadsheet has `<season> Leaderboard`."""
+    from googleapiclient.errors import HttpError as _HttpError
+    try:
+        _gs.get_values(ARCHIVE_SPREADSHEET_ID, f"{season_id} Leaderboard!A1")
+        return True
+    except _HttpError as e:
+        # A missing tab is "Unable to parse range" — a 400, like every other
+        # Sheets complaint, so anything that isn't a 400 is a real failure.
+        if getattr(e, 'resp', None) is not None and e.resp.status == 400:
+            return False
+        raise
+
+
+def _season_close_snapshot(season_id: str) -> dict:
+    """
+    Everything the checklist reads from the sheets, in one executor call.
+    Raises only if Bot State can't be read — without it the checklist cannot
+    tell a fresh season from one it already posted, and would post twice.
+    """
+    snap = {'entry': _season_close_entry(season_id), 'errors': []}
+    entry = snap['entry']
+
+    try:
+        snap['registry'] = get_player_registry()
+    except Exception as e:
+        snap['registry'] = None
+        snap['errors'].append(f"Player Registry: {e}")
+
+    snap['earners'] = None
+    if not entry.get('rare_uncommon'):
+        try:
+            snap['earners'] = _rare_uncommon_earners(season_id)
+        except Exception as e:
+            snap['errors'].append(f"{season_id} Leaderboard: {e}")
+
+    snap['archived_tab'] = None
+    if not entry.get('archived'):
+        try:
+            snap['archived_tab'] = _archive_has_season(season_id)
+        except Exception as e:
+            snap['errors'].append(f"Archive sheet: {e}")
+    return snap
+
+
+def _missing_roles(registry: list[dict], guild: discord.Guild,
+                   season_id: str, keys: tuple[str, ...]) -> int:
+    """Roles stamped `season_id` in `keys` that a linked, present member doesn't hold."""
+    role_for = {key: rid for rid, key in _REGISTRY_ROLE_KEYS}
+    missing = 0
+    for r in registry:
+        if not r['discord_id']:
+            continue
+        member = guild.get_member(r['discord_id']) if guild else None
+        if not member:
+            continue
+        held = {role.id for role in member.roles}
+        missing += sum(1 for k in keys if r[k] == season_id and role_for[k] not in held)
+    return missing
+
+
+def _name_list(names: list[str], limit: int = 600) -> str:
+    out, used = [], 0
+    for i, n in enumerate(names):
+        if used + len(n) + 2 > limit:
+            return ", ".join(out) + f" … +{len(names) - i} more"
+        out.append(n)
+        used += len(n) + 2
+    return ", ".join(out)
+
+
+class _SeasonCloseButton(discord.ui.DynamicItem[discord.ui.Button],
+                         template=r'sc:(?P<season>S\d+):(?P<action>[a-z_]+)'):
+    """Every checklist button. Routed by custom_id, so it survives restarts."""
+
+    def __init__(self, season_id: str, action: str, label: str = "…",
+                 style: discord.ButtonStyle = discord.ButtonStyle.secondary):
+        super().__init__(discord.ui.Button(label=label, style=style,
+                                           custom_id=f"sc:{season_id}:{action}"))
+        self.season_id = season_id
+        self.action    = action
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction,
+                             item: discord.ui.Button, match: re.Match, /):
+        return cls(match['season'], match['action'], item.label, item.style)
+
+    async def callback(self, interaction: discord.Interaction):
+        await _season_close_action(interaction, self.season_id, self.action)
+
+
+class _InvitationalUrlModal(discord.ui.Modal):
+    def __init__(self, season_id: str):
+        super().__init__(title=f"{season_id} Invitational", timeout=600)
+        self.season_id = season_id
+        self.url = discord.ui.TextInput(
+            label="RPH event URL or ID",
+            placeholder="https://tcg.ravensburgerplay.com/events/123456",
+            max_length=200,
+        )
+        self.add_item(self.url)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        reply = await _post_invitational_preview(
+            interaction.guild, self.url.value, self.season_id, assign=True
+        )
+        await interaction.followup.send(reply, ephemeral=True)
+
+
+async def _render_season_close(season_id: str, snap: dict, guild: discord.Guild,
+                               loop) -> tuple[discord.Embed, discord.ui.View | None, dict | None]:
+    """
+    Build the checklist message. Returns (embed, view, closing) — closing is the
+    summary fields to store once every step is done, else None.
+    """
+    entry    = snap['entry']
+    registry = snap['registry']
+    seq      = _season_num(season_id)
+    nxt      = f"S{seq + 1}"
+    row      = season.get_season(season_id) or {}
+    set_name = f" ({row['set_name']})" if row.get('set_name') else ""
+    view     = discord.ui.View(timeout=None)
+    lines    = []
+
+    def button(action, label, style=discord.ButtonStyle.secondary):
+        view.add_item(_SeasonCloseButton(season_id, action, label, style))
+
+    assign_shown = False
+
+    # ── 1. Rare / Uncommon ──────────────────────────────────────────
+    stamped1  = [r for r in registry or [] if season_id in (r['rare'], r['uncommon'])]
+    recorded1 = bool(entry.get('rare_uncommon') or stamped1)
+    missing1  = _missing_roles(registry, guild, season_id, ('rare', 'uncommon')) if registry else 0
+    n1        = entry.get('rare_uncommon_n', len(stamped1))
+    done1     = recorded1 and missing1 == 0
+
+    if done1:
+        when = f" on {_short_date(entry['rare_uncommon'])}" if entry.get('rare_uncommon') else ""
+        lines.append(f"**1. ✅ Rare / Uncommon** — {n1} player(s) recorded{when}, roles on Discord")
+    elif recorded1:
+        lines.append(f"**1. ⚠️ Rare / Uncommon** — recorded, but **{missing1}** role(s) "
+                     f"aren't on Discord yet")
+        button('assign', "Assign roles", discord.ButtonStyle.success)
+        assign_shown = True
+    else:
+        earners = snap['earners']
+        if earners is None:
+            lines.append(f"**1. ⏳ Rare / Uncommon** — ⚠️ couldn't read the `{season_id} Leaderboard`")
+        elif not earners:
+            lines.append(f"**1. ⏳ Rare / Uncommon** — nobody earned Rare or Uncommon. "
+                         f"Approving marks {season_id} as recorded.")
+        else:
+            rare     = [m['name'] for m in earners if RARE_ROLE_ID in m['roles']]
+            uncommon = [m['name'] for m in earners if UNCOMMON_ROLE_ID in m['roles']]
+            by_id    = {r['playhub_id']: r for r in registry or [] if r['playhub_id']}
+            by_name  = {r['playhub_name'].lower(): r for r in registry or []}
+            key_for  = {RARE_ROLE_ID: 'rare', UNCOMMON_ROLE_ID: 'uncommon'}
+            prior = 0
+            for m in earners:
+                reg = (by_id.get(m['id']) if m['id'] else None) or by_name.get(m['name'].lower())
+                if reg and all((_season_num(reg[key_for[r]]) or seq) < seq for r in m['roles']):
+                    prior += 1
+            lines.append(f"**1. ⏳ Rare / Uncommon** — {len(earners)} player(s) earned roles "
+                         f"on the final {season_id} leaderboard")
+            lines.append(f"Rare ({len(rare)}): {_name_list(rare) or '—'}")
+            lines.append(f"Uncommon ({len(uncommon)}): {_name_list(uncommon) or '—'}")
+            if prior == len(earners):
+                lines.append(f"All {prior} already hold their roles from earlier seasons — nothing new "
+                             f"to stamp; approving marks {season_id} as recorded.")
+            elif prior:
+                lines.append(f"({prior} already hold theirs from an earlier season.)")
+        if earners is not None:
+            button('record', "Record & assign roles", discord.ButtonStyle.success)
+    lines.append("")
+
+    # ── 2. Invitational ─────────────────────────────────────────────
+    stamped2  = [r for r in registry or [] if season_id in (r['legendary'], r['super_rare'])]
+    inv       = entry.get('invitational')
+    recorded2 = bool(inv or stamped2)
+    missing2  = (_missing_roles(registry, guild, season_id, ('legendary', 'super_rare'))
+                 if registry and inv != 'skipped' else 0)
+    done2     = recorded2 and missing2 == 0
+
+    if inv == 'skipped':
+        lines.append("**2. ✅ Invitational** — skipped")
+    elif done2:
+        n2   = entry.get('invitational_n', len(stamped2))
+        when = f" on {_short_date(inv)}" if inv else ""
+        lines.append(f"**2. ✅ Invitational** — {n2} player(s) recorded{when}, roles on Discord")
+    elif recorded2:
+        lines.append(f"**2. ⚠️ Invitational** — recorded, but **{missing2}** role(s) "
+                     f"aren't on Discord yet")
+        if not assign_shown:
+            button('assign', "Assign roles", discord.ButtonStyle.success)
+    else:
+        lines.append(f"**2. ⏳ Invitational** — waiting for the {season_id} invitational. "
+                     f"Submit its RPH link once it's finished; it doesn't block the rollover.")
+        button('invite', "Submit invitational URL", discord.ButtonStyle.primary)
+        button('skip_invite', "No invitational")
+    lines.append("")
+
+    # ── 3. Rollover ─────────────────────────────────────────────────
+    cur_num = _season_num(season.CURRENT_SEASON)
+    rolled  = bool(entry.get('rolled_over')) or (cur_num is not None and cur_num > seq)
+    nrow    = season.get_season(nxt) or {}
+    nname   = f" ({nrow['set_name']})" if nrow.get('set_name') else ""
+
+    if rolled:
+        to   = entry.get('rolled_to') or season.CURRENT_SEASON
+        when = f" on {_short_date(entry['rolled_over'])}" if entry.get('rolled_over') else ""
+        lines.append(f"**3. ✅ Rolled over to {to}**{when}")
+    else:
+        def d(k):
+            return _short_date(nrow.get(k)) if nrow.get(k) else "**blank** ⚠️"
+        row_line = (f"{nxt} row: season {d('season_start')} → {d('season_end')} · "
+                    f"Set Champs {d('set_champs_start')} → {d('set_champs_end')}"
+                    if nrow else f"⚠️ No {nxt} row in the Seasons tab yet.")
+        if season.CURRENT_SEASON != season_id:
+            lines.append(f"**3. ⚠️ Roll over to {nxt}** — the current season is "
+                         f"{season.CURRENT_SEASON}, not {season_id}; nothing to roll over from here.")
+        elif not recorded1:
+            lines.append(f"**3. 🔒 Roll over to {nxt}{nname}** — needs step 1 first.")
+            lines.append(row_line)
+        else:
+            plan, err = await _plan_rollover(loop, nxt)
+            if plan:
+                r = plan.resolved
+                lines.append(f"**3. ⏳ Roll over to {nxt}{nname}** — ready")
+                lines.append(f"Pointer: {season_id} → {nxt}")
+                lines.append(f"Season: {_short_date(r['season_start'])} → {_short_date(r['season_end'])}"
+                             f" · Set Champs: {_short_date(r['set_champs_start'])} → "
+                             f"{_short_date(r['set_champs_end'])}")
+                lines.append("Creates: " + ", ".join(f"{nxt} {t}" for t in _SEASON_TAB_SUFFIXES))
+                lines.extend(plan.warnings)
+                button('rollover', f"Roll over to {nxt}", discord.ButtonStyle.danger)
+            else:
+                lines.append(f"**3. ⏳ Roll over to {nxt}{nname}** — not ready")
+                lines.append(row_line)
+                lines.append("Fill the blanks in the Seasons tab, then press **Reload**.")
+        view.add_item(discord.ui.Button(
+            label="Seasons tab", style=discord.ButtonStyle.link,
+            url=f"https://docs.google.com/spreadsheets/d/{BOT_DATABASE_SPREADSHEET_ID}/edit"))
+        button('reload', "Reload")
+    lines.append("")
+
+    # ── 4. Archive ──────────────────────────────────────────────────
+    archived = entry.get('archived') or (_now_et().date().isoformat() if snap['archived_tab'] else None)
+    if archived:
+        when = f" on {_short_date(entry['archived'])}" if entry.get('archived') else ""
+        lines.append(f"**4. ✅ Archived {season_id}**{when}")
+    elif not rolled:
+        lines.append(f"**4. 🔒 Archive {season_id}** — unlocks after the rollover")
+    else:
+        lines.append(f"**4. ⏳ Archive {season_id}** — copies the {season_id} tabs to the Archive sheet")
+        button('archive', f"Archive {season_id}", discord.ButtonStyle.success)
+
+    if snap['errors']:
+        lines += ["", "⚠️ **Couldn't read:** " + "; ".join(snap['errors'])[:500]]
+
+    now = _now_et()
+    if done1 and done2 and rolled and archived:
+        today = now.date().isoformat()
+        inv_s = "skipped" if inv == 'skipped' else str(entry.get('invitational_n', len(stamped2)))
+        summary = (f"Rare/Uncommon: {n1} · Invitational: {inv_s} · "
+                   f"Rolled to {entry.get('rolled_to') or season.CURRENT_SEASON}"
+                   f"{' ' + _short_date(entry['rolled_over']) if entry.get('rolled_over') else ''} · "
+                   f"Archived {_short_date(entry.get('archived') or today)}")
+        embed = make_embed(title=f"🏁 {season_id} closed — {_short_date(today)}",
+                           description=summary, colour=discord.Colour.green())
+        return embed, None, {'closed': today, 'summary': summary}
+
+    header = (f"Ended {_short_date(row.get('season_end'))} · "
+              f"refreshed {_short_date(now.date().isoformat())}, "
+              f"{now.hour % 12 or 12}:{now:%M %p} ET")
+    embed = make_embed(
+        title=f"🏁 Season {seq}{set_name} is over",
+        description=(header + "\n\n" + "\n".join(lines))[:4000],
+        colour=discord.Colour.blurple(),
+    )
+    return embed, view, None
+
+
+async def _refresh_season_close(season_id: str, post_if_missing: bool = False) -> None:
+    """
+    Re-render a season's checklist in place. post_if_missing posts it when there
+    is no message yet (or it was deleted). Raises if Bot State can't be read.
+    """
+    guild  = bot.get_guild(int(DISCORD_GUILD_ID)) or (bot.guilds[0] if bot.guilds else None)
+    mod_ch = guild.get_channel(MOD_CHANNEL_ID) if guild else None
+    if not mod_ch:
+        print("  ⚠ season-close: mod channel not found")
+        return
+
+    loop  = asyncio.get_running_loop()
+    snap  = await loop.run_in_executor(None, _season_close_snapshot, season_id)
+    entry = snap['entry']
+    if entry.get('closed'):
+        return
+    msg_id = int(entry['msg_id']) if entry.get('msg_id') else None
+    if not msg_id and not post_if_missing:
+        return
+
+    embed, view, closing = await _render_season_close(season_id, snap, guild, loop)
+
+    msg = None
+    if msg_id:
+        try:
+            msg = await mod_ch.fetch_message(msg_id)
+            await msg.edit(embed=embed, view=view)
+        except discord.NotFound:
+            msg = None
+            print(f"  ⚠ season-close: {season_id} checklist message {msg_id} is gone — reposting")
+
+    if msg is None:
+        msg = await mod_ch.send(embed=embed, view=view)
+        if not await _season_close_mark(season_id, msg_id=str(msg.id)):
+            # Unsaved, tomorrow's pass would post a second copy — take this one back.
+            await msg.delete()
+            return
+        print(f"  ✓ season-close: posted the {season_id} checklist")
+
+    if closing:
+        await _season_close_mark(season_id, **closing)
+        print(f"  ✓ season-close: {season_id} closed")
+
+
+async def _refresh_season_close_quietly(season_id: str) -> None:
+    """Refresh after a slash command or reaction did a step. Never raises."""
+    try:
+        await _refresh_season_close(season_id)
+    except Exception as e:
+        print(f"  ⚠ season-close: refresh of {season_id} failed: {e}")
+
+
+async def _refresh_open_season_closes() -> None:
+    """Refresh every open checklist — for steps that aren't tied to one season."""
+    loop = asyncio.get_running_loop()
+    try:
+        state = await loop.run_in_executor(None, lambda: load_bot_state(strict=True))
+    except Exception as e:
+        print(f"  ⚠ season-close: could not read Bot State: {e}")
+        return
+    for key, raw in state.items():
+        if key.startswith(_SEASON_CLOSE_PREFIX) and not _parse_season_close(raw).get('closed'):
+            await _refresh_season_close_quietly(key.removeprefix(_SEASON_CLOSE_PREFIX))
+
+
+async def _season_close_tick() -> None:
+    """
+    Daily pass: refresh open checklists, and post one for the current season once
+    its season end has passed. Never raises — it runs inside a tasks.loop.
+    """
+    async with _season_close_tick_lock:
+        loop = asyncio.get_running_loop()
+        try:
+            state = await loop.run_in_executor(None, lambda: load_bot_state(strict=True))
+        except Exception as e:
+            # Without Bot State a posted checklist looks unposted — skip, don't duplicate.
+            print(f"  ⚠ season-close: could not read Bot State ({e}) — skipping")
+            return
+
+        seen = set()
+        for key, raw in state.items():
+            if key.startswith(_SEASON_CLOSE_PREFIX):
+                entry = _parse_season_close(raw)
+                if entry.get('msg_id') and not entry.get('closed'):
+                    sid = key.removeprefix(_SEASON_CLOSE_PREFIX)
+                    seen.add(sid)
+                    await _refresh_season_close_quietly(sid)
+
+        cur, end = season.CURRENT_SEASON, season.SEASON_END_DATE
+        if cur and end and cur not in seen and _now_et().date() > date.fromisoformat(end):
+            if not _parse_season_close(state.get(_season_close_key(cur), '')).get('closed'):
+                try:
+                    await _refresh_season_close(cur, post_if_missing=True)
+                except Exception as e:
+                    print(f"  ⚠ season-close: could not post the {cur} checklist: {e}")
+
+
+@tasks.loop(minutes=1)
+async def season_close_daily():
+    """Run _season_close_tick once a day, after the digests have had their minutes."""
+    now_et = _now_et()
+    if now_et.hour == _DIGEST_HOUR_ET and now_et.minute == 20:
+        await _season_close_tick()
+
+
+# ── Button actions ──────────────────────────────────────────────────
+
+async def _sc_record(interaction, season_id, loop) -> str:
+    result = await _record_rare_and_uncommon(interaction.guild, season_id, loop)
+    registry = await loop.run_in_executor(None, get_player_registry)
+    assigned, failed, _gone, _unlinked = await _assign_all_from_registry(interaction.guild, registry)
+    msg = (f"✅ Recorded {result['recorded']} player(s) for {season_id}"
+           if result['recorded'] else f"✅ Nobody earned roles in {season_id} — marked as recorded")
+    if result['unlinked']:
+        msg += f", {len(result['unlinked'])} not yet linked (their roles land on link)"
+    msg += f". {len(assigned)} Discord role(s) granted"
+    return msg + (f", {len(failed)} failed." if failed else ".")
+
+
+async def _sc_assign(interaction, season_id, loop) -> str:
+    registry = await loop.run_in_executor(None, get_player_registry)
+    assigned, failed, gone, _unlinked = await _assign_all_from_registry(interaction.guild, registry)
+    msg = f"✅ {len(assigned)} Discord role(s) granted"
+    if failed:
+        msg += f", {len(failed)} failed"
+    if gone:
+        msg += f", {len(gone)} linked player(s) no longer in the server"
+    return msg + "."
+
+
+async def _sc_skip_invite(interaction, season_id, loop) -> str:
+    await _season_close_mark(season_id, invitational='skipped')
+    return f"✅ Marked {season_id} as having no invitational."
+
+
+async def _sc_reload(interaction, season_id, loop) -> str:
+    _, problems = await _reload_season(loop)
+    return "🔄 Reloaded the Seasons tab." + (
+        "\n" + "\n".join(f"• {p}" for p in problems[:5]) if problems else "")
+
+
+async def _sc_rollover(interaction, season_id, loop) -> str:
+    if season.CURRENT_SEASON != season_id:
+        return f"⚠️ The current season is {season.CURRENT_SEASON}, not {season_id} — nothing rolled over."
+    nxt = f"S{_season_num(season_id) + 1}"
+    # Checked again at click time: the preview may be days old.
+    plan, err = await _plan_rollover(loop, nxt)
+    if not plan:
+        return err
+    ok, detail = await _outgoing_roles_recorded(loop, season_id)
+    if not ok:
+        return detail
+    try:
+        created = await _execute_rollover(loop, plan)
+    except RuntimeError as e:
+        return str(e)
+    r = plan.resolved
+    return (f"✅ **Rolled over to {nxt}.** Season {r['season_start']} → {r['season_end']}, "
+            f"Set Champs {r['set_champs_start']} → {r['set_champs_end']}.\n"
+            f"Tabs created: {', '.join(created) or 'none (all existed)'}"
+            + "".join(f"\n\n{w}" for w in plan.warnings))
+
+
+async def _sc_archive(interaction, season_id, loop) -> str:
+    archived = await loop.run_in_executor(None, archive_season_data, season_id)
+    if not archived:
+        return f"⚠️ Nothing was archived for {season_id} — all tabs were empty or missing."
+    await _season_close_mark(season_id, archived=_now_et().date().isoformat())
+    return f"✅ Archived {len(archived)} tab(s): {', '.join(archived)}."
+
+
+_SEASON_CLOSE_ACTIONS = {
+    'record':      _sc_record,
+    'assign':      _sc_assign,
+    'skip_invite': _sc_skip_invite,
+    'reload':      _sc_reload,
+    'rollover':    _sc_rollover,
+    'archive':     _sc_archive,
+}
+
+
+async def _season_close_action(interaction: discord.Interaction, season_id: str, action: str) -> None:
+    if interaction.user.id not in ADMIN_USER_IDS:
+        await interaction.response.send_message("⚠️ Admins only.", ephemeral=True)
+        return
+    if action == 'invite':
+        await interaction.response.send_modal(_InvitationalUrlModal(season_id))
+        return
+    handler = _SEASON_CLOSE_ACTIONS.get(action)
+    if not handler:
+        await interaction.response.send_message(f"⚠️ Unknown action `{action}`.", ephemeral=True)
+        return
+    # One action per season at a time — a double-click must not record or roll twice.
+    if season_id in _season_close_busy:
+        await interaction.response.send_message("⏳ Still working on the last click.", ephemeral=True)
+        return
+
+    _season_close_busy.add(season_id)
+    try:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        loop = asyncio.get_running_loop()
+        try:
+            reply = await handler(interaction, season_id, loop)
+        except Exception as e:
+            print(f"  ✗ season-close {season_id}:{action} failed:\n{traceback.format_exc()}")
+            reply = f"❌ `{action}` failed: `{type(e).__name__}: {e}`"
+        await _refresh_season_close_quietly(season_id)
+    finally:
+        _season_close_busy.discard(season_id)
+    await interaction.followup.send(reply[:1990], ephemeral=True)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -2442,27 +3056,20 @@ async def link_command(interaction: discord.Interaction, member: discord.Member,
 # Records only — it writes the season into registry columns I and J and stops
 # there. Granting the Discord roles is /assign-roles-from-registry, so the
 # registry stays the single source of truth for who has earned what.
-@tree.command(name="record-rare-and-uncommon",
-              description="Record Rare/Uncommon earned this season into the Player Registry (mods only)")
-async def record_rare_and_uncommon(interaction: discord.Interaction):
-    if not _is_admin(interaction):
-        await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
-        return
+def _rare_uncommon_earners(season_id: str) -> list[dict]:
+    """
+    Rare/Uncommon earners from a season's leaderboard: [{'id', 'name', 'roles'}].
 
-    await interaction.response.defer(ephemeral=True)
-    loop = asyncio.get_running_loop()
-
-    # 1. Read leaderboard
-    lb_data = await loop.run_in_executor(
-        None, _gs.get_values, LEAGUE_SPREADSHEET_ID, season.LEADERBOARD_RANGE_NAME
-    )
+    Reads `<season_id> Leaderboard` by name rather than season.LEADERBOARD_RANGE_NAME,
+    so the season-close checklist can preview a season that is no longer current.
+    """
+    lb_data = _gs.get_values(LEAGUE_SPREADSHEET_ID, f"{season_id} Leaderboard!A2:E")
     leaderboard_rows = lb_data.get('values', [])
 
-    # 2. Build earners from the leaderboard.
-    #    Layout: A=rank, B=Player ID, C=Name, D=Points, E=Events Attended.
-    #    Player ID is the stable key — RPH display names change over time, so we
-    #    match players to the registry by ID (name only as a fallback).
-    earners_meta = []   # [{'id', 'name', 'roles'}]
+    # Layout: A=rank, B=Player ID, C=Name, D=Points, E=Events Attended.
+    # Player ID is the stable key — RPH display names change over time, so we
+    # match players to the registry by ID (name only as a fallback).
+    earners_meta = []
     seen = set()
     for row in leaderboard_rows:
         if len(row) < 3:
@@ -2487,38 +3094,50 @@ async def record_rare_and_uncommon(interaction: discord.Interaction):
         earners_meta.append({
             'id':    playhub_id,
             'name':  player_name,
-            'roles': {r: season.CURRENT_SEASON for r in earned},
+            'roles': {r: season_id for r in earned},
         })
+    return earners_meta
 
-    if not earners_meta:
-        await interaction.followup.send("✅ No players have earned roles this season.", ephemeral=True)
-        return
 
-    # 3. Batch-upsert all role changes in one registry read + one API write.
-    #    Pass the Playhub ID so the registry matches by stable ID, not display name.
-    #
-    #    prefer_earliest: running seasons in order, this never fires — the season
-    #    being recorded is always later than what is stored, so a populated cell
-    #    is kept either way. It matters when an old season is recorded late, e.g.
-    #    repointing CURRENT_SEASON to fix data that was missed. Blank-only would
-    #    keep whatever later season got there first and permanently misattribute
-    #    the role; earliest-wins corrects it. Same rule the invitational path uses.
-    earners = [(m['name'], m['roles'], m['id'] or None) for m in earners_meta]
-    try:
+async def _record_rare_and_uncommon(guild: discord.Guild, season_id: str, loop) -> dict:
+    """
+    Record a season's Rare/Uncommon earners into the registry and mark the season
+    recorded. Shared by the slash command and the season-close checklist.
+
+    Records only — granting the Discord roles is _assign_all_from_registry.
+    Returns {'recorded': n, 'unlinked': [names], 'merged': n}. Raises on a failed
+    registry write, and nothing is marked in that case.
+    """
+    earners_meta = await loop.run_in_executor(None, _rare_uncommon_earners, season_id)
+
+    if earners_meta:
+        # Batch-upsert all role changes in one registry read + one API write.
+        # Pass the Playhub ID so the registry matches by stable ID, not display name.
+        #
+        # prefer_earliest: running seasons in order, this never fires — the season
+        # being recorded is always later than what is stored, so a populated cell
+        # is kept either way. It matters when an old season is recorded late, e.g.
+        # repointing CURRENT_SEASON to fix data that was missed. Blank-only would
+        # keep whatever later season got there first and permanently misattribute
+        # the role; earliest-wins corrects it. Same rule the invitational path uses.
+        earners = [(m['name'], m['roles'], m['id'] or None) for m in earners_meta]
         await loop.run_in_executor(
             None, lambda: batch_upsert_player_roles(earners, prefer_earliest=True)
         )
-    except Exception as e:
-        print(f"  ✗ record-rare-and-uncommon: batch upsert failed: {e}")
-        await interaction.followup.send(
-            f"❌ Recording failed — the registry is unchanged: `{e}`", ephemeral=True
-        )
-        return
 
-    # 4. Read the registry back to report coverage, and collapse any duplicate
-    #    rows for the players just recorded (same Discord ID across two rows).
-    #    Only fires where the snapshot already shows a duplicate, so there is no
-    #    full registry read per player.
+    # Marked even when nothing was stamped: a season whose earners all hold their
+    # roles from an earlier season leaves no trace in the registry, and this marker
+    # is then the only evidence it was recorded at all.
+    await _season_close_mark(season_id, rare_uncommon=_now_et().date().isoformat(),
+                             rare_uncommon_n=len(earners_meta))
+
+    if not earners_meta:
+        return {'recorded': 0, 'unlinked': [], 'merged': 0}
+
+    # Read the registry back to report coverage, and collapse any duplicate
+    # rows for the players just recorded (same Discord ID across two rows).
+    # Only fires where the snapshot already shows a duplicate, so there is no
+    # full registry read per player.
     registry = await loop.run_in_executor(None, get_player_registry)
     registry_by_id   = {r['playhub_id']: r for r in registry if r['playhub_id']}
     registry_by_name = {r['playhub_name'].lower(): r for r in registry}
@@ -2547,31 +3166,60 @@ async def record_rare_and_uncommon(interaction: discord.Interaction):
             except Exception as e:
                 print(f"  ⚠ record-rare-and-uncommon: dedupe failed for discord_id {did}: {e}")
 
-    mod_ch = get_channel_by_id(interaction.guild, MOD_CHANNEL_ID)
+    mod_ch = get_channel_by_id(guild, MOD_CHANNEL_ID) if guild else None
     if mod_ch:
-        lines = [f"Recorded **{len(earners_meta)}** player(s) for **{season.CURRENT_SEASON}**."]
+        lines = [f"Recorded **{len(earners_meta)}** player(s) for **{season_id}**."]
         if unlinked:
             lines.append(f"\n**Earned roles but not yet linked ({len(unlinked)}):**")
             lines.extend(f"• {name}" for name in unlinked[:20])
             if len(unlinked) > 20:
                 lines.append(f"  *(and {len(unlinked) - 20} more)*")
-        lines.append("\nRun `/assign-roles-from-registry` to grant the Discord roles.")
         await mod_ch.send(embed=make_embed(
-            title=f"Rare/Uncommon Recorded — {season.CURRENT_SEASON}",
+            title=f"Rare/Uncommon Recorded — {season_id}",
             description="\n".join(lines),
             colour=discord.Colour.gold()
         ))
 
-    summary = f"✅ Recorded {len(earners_meta)} player(s) for {season.CURRENT_SEASON}"
-    if unlinked:
-        summary += f", {len(unlinked)} not yet linked"
-    if merged:
-        summary += f", {merged} duplicate registry row(s) merged"
+    return {'recorded': len(earners_meta), 'unlinked': unlinked, 'merged': merged}
+
+
+@tree.command(name="record-rare-and-uncommon",
+              description="Record Rare/Uncommon earned this season into the Player Registry (mods only)")
+async def record_rare_and_uncommon(interaction: discord.Interaction):
+    if not _is_admin(interaction):
+        await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    loop = asyncio.get_running_loop()
+    season_id = season.CURRENT_SEASON
+
+    try:
+        result = await _record_rare_and_uncommon(interaction.guild, season_id, loop)
+    except Exception as e:
+        print(f"  ✗ record-rare-and-uncommon: failed: {e}")
+        await interaction.followup.send(
+            f"❌ Recording failed — the registry is unchanged: `{e}`", ephemeral=True
+        )
+        return
+
+    await _refresh_season_close_quietly(season_id)
+
+    if not result['recorded']:
+        await interaction.followup.send(
+            f"✅ No players earned roles in {season_id} — marked as recorded.", ephemeral=True
+        )
+        return
+
+    summary = f"✅ Recorded {result['recorded']} player(s) for {season_id}"
+    if result['unlinked']:
+        summary += f", {len(result['unlinked'])} not yet linked"
+    if result['merged']:
+        summary += f", {result['merged']} duplicate registry row(s) merged"
     await interaction.followup.send(
         summary + ".\n\nNow run `/assign-roles-from-registry` to grant the Discord roles.",
         ephemeral=True,
     )
-
 
 
 # ── /record-legendary-and-super-rare ──────────────────────────
@@ -2597,23 +3245,33 @@ async def invitational_roles(interaction: discord.Interaction, event_url: str, s
         season_label = season.CURRENT_SEASON
 
     await interaction.response.defer(ephemeral=True)
+    reply = await _post_invitational_preview(interaction.guild, event_url, season_label)
+    await interaction.followup.send(reply, ephemeral=True)
 
+
+async def _post_invitational_preview(guild: discord.Guild, event_url: str,
+                                     season_label: str, assign: bool = False) -> str:
+    """
+    Fetch an invitational's final standings and post the ✅/❌ recording prompt to
+    the mod channel. Shared by /record-legendary-and-super-rare and the
+    season-close checklist; returns the ephemeral reply for whoever asked.
+
+    assign: also grant the Discord roles on ✅. The checklist sets it, because its
+    step is "record and assign"; the slash command keeps the two separate.
+    """
     event_id = event_url.strip().rstrip("/").split("/")[-1]
 
     loop = asyncio.get_running_loop()
     try:
         event = await loop.run_in_executor(None, _rph_api.get_event_by_id, event_id)
     except Exception as e:
-        await interaction.followup.send(f"❌ Failed to fetch event: {e}", ephemeral=True)
-        return
+        return f"❌ Failed to fetch event: {e}"
 
     if not event:
-        await interaction.followup.send(f"❌ No event found for ID `{event_id}`.", ephemeral=True)
-        return
+        return f"❌ No event found for ID `{event_id}`."
 
     if not event.get('tournament_phases') or not event['tournament_phases'][-1].get('rounds'):
-        await interaction.followup.send("❌ Event has no tournament rounds.", ephemeral=True)
-        return
+        return "❌ Event has no tournament rounds."
 
     last_round_id = event['tournament_phases'][-1]['rounds'][-1]['id']
     try:
@@ -2621,8 +3279,7 @@ async def invitational_roles(interaction: discord.Interaction, event_url: str, s
             None, _rph_api.get_standings_from_tournament_round_id, str(last_round_id)
         )
     except Exception as e:
-        await interaction.followup.send(f"❌ Failed to fetch standings: {e}", ephemeral=True)
-        return
+        return f"❌ Failed to fetch standings: {e}"
 
     standings.sort(key=lambda s: s['rank'])
     registry_list      = await loop.run_in_executor(None, get_player_registry)
@@ -2632,7 +3289,7 @@ async def invitational_roles(interaction: discord.Interaction, event_url: str, s
         pid    = str(s['player']['id'])
         name   = s['user_event_status']['best_identifier']
         did    = playhub_to_discord.get(pid)
-        member = interaction.guild.get_member(did) if did else None
+        member = guild.get_member(did) if did else None
         return pid, name, member
 
     rank1 = next((s for s in standings if s['rank'] == 1), None)
@@ -2651,27 +3308,25 @@ async def invitational_roles(interaction: discord.Interaction, event_url: str, s
         mention = member.mention if member else f"**{name}** *(unlinked)*"
         lines.append(f"⭐ **Super Rare** (rank {i}) → {mention}")
 
-    mod_ch = get_channel_by_id(interaction.guild, MOD_CHANNEL_ID)
+    mod_ch = get_channel_by_id(guild, MOD_CHANNEL_ID)
     if not mod_ch:
-        await interaction.followup.send("⚠️ Mod channel not configured.", ephemeral=True)
-        return
+        return "⚠️ Mod channel not configured."
 
+    roles_note = ("\nApproving also grants the Discord roles." if assign else
+                  "\nDiscord roles are granted separately by `/assign-roles-from-registry`.")
     embed = make_embed(
         title=f"🏆 Invitational Results — {event_name}",
         description="\n".join(lines)
                     + f"\n\nWill record these as **{season_label}** in the Player Registry."
-                    + "\nDiscord roles are granted separately by `/assign-roles-from-registry`."
+                    + roles_note
                     + "\n\nReact ✅ to confirm or ❌ to cancel.",
         colour=discord.Colour.gold()
     )
     try:
         msg = await mod_ch.send(embed=embed)
     except discord.Forbidden:
-        await interaction.followup.send(
-            f"❌ Bot lacks permission to send messages in the mod channel (ID: `{MOD_CHANNEL_ID}`). "
-            f"Check channel permissions.", ephemeral=True
-        )
-        return
+        return (f"❌ Bot lacks permission to send messages in the mod channel (ID: `{MOD_CHANNEL_ID}`). "
+                f"Check channel permissions.")
 
     await msg.add_reaction("✅")
     await msg.add_reaction("❌")
@@ -2680,13 +3335,192 @@ async def invitational_roles(interaction: discord.Interaction, event_url: str, s
         'season':     season_label,
         'legendary':  legendary_entry,
         'super_rare': sr_entries,
+        'assign':     assign,
     }
-    await interaction.followup.send(
-        f"Check {mod_ch.mention} to confirm.", ephemeral=True
-    )
+    return f"Check {mod_ch.mention} to confirm."
 
 
 # ── /season-rollover ──────────────────────────────────────────
+#
+# Split into plan → guard → execute so the season-close checklist previews and
+# runs exactly what the command does. Two copies of these checks would drift,
+# and every one of them exists because a rollover once went wrong without it.
+
+# The tabs create_season_sheets makes — shown in the checklist's preview.
+_SEASON_TAB_SUFFIXES = ("Standings", "Events", "Leaderboard", "Results", "Set Champs")
+
+
+@dataclass
+class _RolloverPlan:
+    new_season: str
+    outgoing:   str
+    resolved:   dict          # the four dates, as YYYY-MM-DD strings
+    overridden: dict          # the subset that came from command arguments
+    warnings:   list
+
+
+async def _plan_rollover(loop, new_season: str,
+                         overrides: dict | None = None) -> tuple[_RolloverPlan | None, str]:
+    """
+    Resolve and validate a rollover to new_season without changing anything.
+    Returns (plan, '') or (None, a message saying what is wrong).
+
+    Re-reads the calendar first, so a row typed moments ago is picked up without a
+    restart — which is exactly when a rollover gets attempted.
+    """
+    if not re.match(r'^S\d+$', new_season):
+        return None, f"⚠️ `new_season` must look like `S12` (got `{new_season}`)."
+
+    _, cal_problems = await _reload_season(loop)
+    row = season.get_season(new_season) or {}
+
+    overrides  = overrides or {}
+    overridden = {k: v.strip() for k, v in overrides.items() if v and v.strip()}
+    fields     = ('season_start', 'season_end', 'set_champs_start', 'set_champs_end')
+    resolved   = {k: overridden.get(k) or row.get(k) for k in fields}
+
+    parsed = {}
+    for field_name, value in resolved.items():
+        if not value:
+            continue
+        try:
+            parsed[field_name] = datetime.strptime(value, "%Y-%m-%d").date()
+        except ValueError:
+            return None, f"⚠️ `{field_name}` must be YYYY-MM-DD, got `{value}`."
+
+    missing = [k for k, v in resolved.items() if not v]
+    if missing:
+        problem_note = ("\n\n**Seasons tab problems:**\n"
+                        + "\n".join(f"  • {p}" for p in cal_problems[:5])) if cal_problems else ""
+        known = ", ".join(r['season'] for r in season.SEASONS) or "none"
+        return None, (
+            f"❌ **{new_season} is not ready to roll over to.**\n\n"
+            f"Missing: {', '.join(f'`{m}`' for m in missing)}\n"
+            f"Fill those cells in the **Seasons** tab (rows found there: {known}), then re-run. "
+            f"A future season normally has its Set Champs dates blank until they are announced."
+            f"{problem_note}"
+        )
+
+    # Set Champs may end *after* the season end (e.g. S11: season ended Apr 24,
+    # set champs Apr 26). But it must start during the season.
+    ordered = (
+        parsed["season_start"] <= parsed["season_end"]
+        and parsed["season_start"] <= parsed["set_champs_start"] <= parsed["set_champs_end"]
+        and parsed["set_champs_start"] <= parsed["season_end"]
+    )
+    if not ordered:
+        return None, (
+            f"⚠️ Date ordering invalid. Required: "
+            f"`season_start` ≤ `season_end`, "
+            f"`season_start` ≤ `set_champs_start` ≤ `set_champs_end`, and "
+            f"`set_champs_start` ≤ `season_end`. "
+            f"Got start={resolved['season_start']}, end={resolved['season_end']}, "
+            f"sc_start={resolved['set_champs_start']}, sc_end={resolved['set_champs_end']}."
+        )
+
+    outgoing = season.CURRENT_SEASON
+    warnings = []
+    # The Set Champs digest and its sheet follow CURRENT_SEASON, so flipping the
+    # pointer mid-window stops refreshing the outgoing season's tab.
+    if outgoing and outgoing != new_season:
+        out_sc = (season.get_season(outgoing) or {}).get('set_champs_end')
+        if out_sc and date.fromisoformat(out_sc) >= _now_et().date():
+            warnings.append(
+                f"⚠️ **{outgoing}'s Set Champs run to {out_sc}**, but the Set Champs digest "
+                f"and sheet follow the current season — `{outgoing} Set Champs` will stop "
+                f"refreshing. Finish it with `/set-champs` before rolling over, or accept the "
+                f"tab as final.")
+
+    return _RolloverPlan(new_season, outgoing, resolved, overridden, warnings), ''
+
+
+async def _outgoing_roles_recorded(loop, outgoing: str) -> tuple[bool, str]:
+    """
+    Has the outgoing season's Rare/Uncommon been recorded? Returns (ok, message).
+
+    /record-rare-and-uncommon reads the leaderboard for CURRENT_SEASON and
+    stamps CURRENT_SEASON. Run after rollover it reads the *new* season's
+    empty leaderboard, finds nobody, and reports success — so the finished
+    season is silently never recorded. Nothing else would notice.
+
+    Either the registry carries the season in columns I/J, or the season-close
+    marker says it was recorded. The marker is what covers a season whose
+    earners all held their roles from an earlier one: earliest-season-wins
+    leaves no trace of it in the registry. G/H come from invitationals, which
+    happen after the season ends and so are not expected to be present yet.
+    """
+    try:
+        entry = await loop.run_in_executor(None, _season_close_entry, outgoing)
+        if entry.get('rare_uncommon'):
+            return True, f"{outgoing} marked recorded on {entry['rare_uncommon']}"
+        registry = await loop.run_in_executor(None, get_player_registry)
+        recorded = sum(1 for r in registry
+                       if r['rare'] == outgoing or r['uncommon'] == outgoing)
+    except Exception as e:
+        # Can't verify — say so rather than blocking or silently proceeding.
+        print(f"  ⚠ season-rollover: registry check failed: {e}")
+        return False, (f"⚠️ Couldn't read the registry to check whether **{outgoing}** roles "
+                       f"were recorded: `{e}`")
+
+    if recorded == 0:
+        return False, (
+            f"❌ **No {outgoing} roles are recorded in the Player Registry.**\n\n"
+            f"Run `/record-rare-and-uncommon` first — it reads the "
+            f"`{outgoing} Leaderboard`, and once the season rolls over it will "
+            f"read the new season's empty one instead, losing {outgoing} for good."
+        )
+    return True, f"{recorded} {outgoing} role record(s) found"
+
+
+async def _execute_rollover(loop, plan: _RolloverPlan) -> list[str]:
+    """
+    Create the new season's tabs, move the season pointer, reload in memory, and
+    mark the outgoing season rolled over. Returns the tabs created.
+    Raises RuntimeError with a user-facing message if a step fails.
+    """
+    new_season = plan.new_season
+
+    # 1. Create new season tabs in the League spreadsheet
+    try:
+        created = await loop.run_in_executor(None, create_season_sheets, new_season)
+    except Exception as e:
+        raise RuntimeError(f"❌ Failed to create sheet tabs: {e}") from e
+
+    # 2. Move the season pointer. Only the pointer: the dates live in the Seasons
+    #    tab now. The retired flat date keys are deliberately left alone rather than
+    #    deleted here — flipping the pointer and erasing the fallback in one write is
+    #    how you end up with neither source of truth. They are removed by hand once
+    #    the tab has proven itself.
+    try:
+        def _update_state():
+            # strict=True: read-then-write — see set_bot_state_key
+            state = load_bot_state(strict=True)
+            state['season'] = new_season
+            save_bot_state(state)
+            return state
+        new_state = await loop.run_in_executor(None, _update_state)
+    except Exception as e:
+        raise RuntimeError(f"❌ Sheet tabs created but failed to update Bot State: {e}") from e
+
+    # 3. Reload season in memory, applying any overrides on top of the new row
+    calendar = [dict(r) for r in season.SEASONS]
+    target   = next((r for r in calendar if r['season'] == new_season), None)
+    if target is None:
+        target = {'season': new_season, 'set_name': '', 'sheet_row': None, 'source': 'override',
+                  'prerelease_start': None, 'prerelease_end': None}
+        calendar.append(target)
+        calendar.sort(key=lambda r: int(r['season'][1:]))
+    target.update(plan.resolved)
+    if plan.overridden:
+        target['source'] = 'override'
+    season.init(new_state, calendar)
+
+    if plan.outgoing and plan.outgoing != new_season:
+        await _season_close_mark(plan.outgoing, rolled_over=_now_et().date().isoformat(),
+                                 rolled_to=new_season)
+    return created
+
+
 @tree.command(name="season-rollover", description="Roll over to a new season: creates sheet tabs and reloads config (admins only)")
 @app_commands.describe(
     new_season="New season identifier, e.g. S12",
@@ -2718,151 +3552,37 @@ async def season_rollover(
         return
 
     await interaction.response.defer(ephemeral=True)
-
-    if not re.match(r'^S\d+$', new_season):
-        await interaction.followup.send(
-            f"⚠️ `new_season` must look like `S12` (got `{new_season}`).", ephemeral=True
-        )
-        return
-
     loop = asyncio.get_running_loop()
 
-    # Re-read the calendar first, so a row typed moments ago is picked up without a
-    # restart — which is exactly when this command gets run.
-    _, cal_problems = await _reload_season(loop)
-    row = season.get_season(new_season) or {}
-
-    overrides = {'season_start': start_date, 'season_end': end_date,
-                 'set_champs_start': set_champs_start, 'set_champs_end': set_champs_end}
-    overridden = {k: v.strip() for k, v in overrides.items() if v.strip()}
-
-    resolved = {k: overridden.get(k) or row.get(k) for k in overrides}
-
-    # Validate date formats before touching anything
-    parsed = {}
-    for field_name, value in resolved.items():
-        if not value:
-            continue
-        try:
-            parsed[field_name] = datetime.strptime(value, "%Y-%m-%d").date()
-        except ValueError:
-            await interaction.followup.send(
-                f"⚠️ `{field_name}` must be YYYY-MM-DD, got `{value}`.", ephemeral=True
-            )
-            return
-
-    missing = [k for k, v in resolved.items() if not v]
-    if missing:
-        problem_note = ("\n\n**Seasons tab problems:**\n"
-                        + "\n".join(f"  • {p}" for p in cal_problems[:5])) if cal_problems else ""
-        known = ", ".join(r['season'] for r in season.SEASONS) or "none"
-        await interaction.followup.send(
-            f"❌ **{new_season} is not ready to roll over to.**\n\n"
-            f"Missing: {', '.join(f'`{m}`' for m in missing)}\n"
-            f"Fill those cells in the **Seasons** tab (rows found there: {known}), then re-run. "
-            f"A future season normally has its Set Champs dates blank until they are announced.\n"
-            f"You can also pass them as arguments, but that applies in memory only — a restart "
-            f"reverts to the tab.{problem_note}",
-            ephemeral=True,
-        )
+    plan, err = await _plan_rollover(loop, new_season, {
+        'season_start': start_date, 'season_end': end_date,
+        'set_champs_start': set_champs_start, 'set_champs_end': set_champs_end,
+    })
+    if not plan:
+        if err.startswith("❌") and "not ready" in err:
+            err += ("\nYou can also pass them as arguments, but that applies in memory only — "
+                    "a restart reverts to the tab.")
+        await interaction.followup.send(err, ephemeral=True)
         return
 
-    # Set Champs may end *after* the season end (e.g. S11: season ended Apr 24,
-    # set champs Apr 26). But it must start during the season.
-    ordered = (
-        parsed["season_start"] <= parsed["season_end"]
-        and parsed["season_start"] <= parsed["set_champs_start"] <= parsed["set_champs_end"]
-        and parsed["set_champs_start"] <= parsed["season_end"]
-    )
-    if not ordered:
-        await interaction.followup.send(
-            f"⚠️ Date ordering invalid. Required: "
-            f"`season_start` ≤ `season_end`, "
-            f"`season_start` ≤ `set_champs_start` ≤ `set_champs_end`, and "
-            f"`set_champs_start` ≤ `season_end`. "
-            f"Got start={resolved['season_start']}, end={resolved['season_end']}, "
-            f"sc_start={resolved['set_champs_start']}, sc_end={resolved['set_champs_end']}.",
-            ephemeral=True,
-        )
-        return
-
-    # ── Guard: has the outgoing season been recorded? ────────────────────────
-    #
-    # /record-rare-and-uncommon reads the leaderboard for CURRENT_SEASON and
-    # stamps CURRENT_SEASON. Run after rollover it reads the *new* season's
-    # empty leaderboard, finds nobody, and reports success — so the finished
-    # season is silently never recorded. Nothing else would notice.
-    #
-    # Checks columns I/J only: those are what the leaderboard produces and what
-    # becomes unrecoverable. G/H come from invitationals, which happen after the
-    # season ends and so are not expected to be present yet.
-    outgoing = season.CURRENT_SEASON
+    outgoing = plan.outgoing
     if not force and outgoing and outgoing != new_season:
-        try:
-            registry = await loop.run_in_executor(None, get_player_registry)
-            recorded = sum(1 for r in registry
-                           if r['rare'] == outgoing or r['uncommon'] == outgoing)
-        except Exception as e:
-            # Can't verify — say so rather than blocking or silently proceeding.
-            print(f"  ⚠ season-rollover: registry check failed: {e}")
+        ok, detail = await _outgoing_roles_recorded(loop, outgoing)
+        if not ok:
             await interaction.followup.send(
-                f"⚠️ Couldn't read the registry to check whether **{outgoing}** roles "
-                f"were recorded: `{e}`\n"
-                f"Verify manually, then re-run with `force: true`.",
-                ephemeral=True,
+                detail + f"\n\nIf you're sure, re-run with `force: true`.", ephemeral=True
             )
             return
+        print(f"  ✓ season-rollover: {detail} — proceeding")
 
-        if recorded == 0:
-            await interaction.followup.send(
-                f"❌ **No {outgoing} roles are recorded in the Player Registry.**\n\n"
-                f"Run `/record-rare-and-uncommon` first — it reads the "
-                f"`{outgoing} Leaderboard`, and once the season rolls over it will "
-                f"read `{new_season}`'s empty one instead, losing {outgoing} for good.\n\n"
-                f"If {outgoing} genuinely had no earners, re-run with `force: true`.",
-                ephemeral=True,
-            )
-            return
-        print(f"  ✓ season-rollover: {recorded} {outgoing} role record(s) found — proceeding")
-
-    # 1. Create new season tabs in the League spreadsheet
     try:
-        created = await loop.run_in_executor(None, create_season_sheets, new_season)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Failed to create sheet tabs: {e}", ephemeral=True)
+        created = await _execute_rollover(loop, plan)
+    except RuntimeError as e:
+        await interaction.followup.send(str(e), ephemeral=True)
         return
+    await _refresh_season_close_quietly(outgoing)
 
-    # 2. Move the season pointer. Only the pointer: the dates live in the Seasons
-    #    tab now. The retired flat date keys are deliberately left alone rather than
-    #    deleted here — flipping the pointer and erasing the fallback in one write is
-    #    how you end up with neither source of truth. They are removed by hand once
-    #    the tab has proven itself.
-    try:
-        def _update_state():
-            # strict=True: read-then-write — see set_bot_state_key
-            state = load_bot_state(strict=True)
-            state['season'] = new_season
-            save_bot_state(state)
-            return state
-        new_state = await loop.run_in_executor(None, _update_state)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Sheet tabs created but failed to update Bot State: {e}", ephemeral=True)
-        return
-
-    # 3. Reload season in memory, applying any overrides on top of the new row
-    calendar = [dict(r) for r in season.SEASONS]
-    target   = next((r for r in calendar if r['season'] == new_season), None)
-    if target is None:
-        target = {'season': new_season, 'set_name': '', 'sheet_row': None, 'source': 'override',
-                  'prerelease_start': None, 'prerelease_end': None}
-        calendar.append(target)
-        calendar.sort(key=lambda r: int(r['season'][1:]))
-    target.update(resolved)
-    if overridden:
-        target['source'] = 'override'
-    season.init(new_state, calendar)
-
-    # 4. Confirm
+    resolved = plan.resolved
     tab_lines = "\n".join(f"  • {t}" for t in created) if created else "  (all tabs already existed)"
     skipped = 4 - len(created)
     skip_note = f"\n⚠️ {skipped} tab(s) already existed and were skipped." if skipped else ""
@@ -2874,30 +3594,20 @@ async def season_rollover(
             ) if outgoing and outgoing != new_season else ""
 
     override_note = ""
-    if overridden:
-        fields = ", ".join(f"`{k}`" for k in overridden)
+    if plan.overridden:
+        fields = ", ".join(f"`{k}`" for k in plan.overridden)
         override_note = (f"\n\n⚠️ **Overridden in memory only:** {fields}. A restart — or any reload, "
                          f"including `/seasons` — reverts to the Seasons tab. Edit the "
                          f"`{new_season}` row there to make this stick.")
 
-    # The Set Champs digest and its sheet follow CURRENT_SEASON, so flipping the
-    # pointer mid-window stops refreshing the outgoing season's tab.
-    sc_note = ""
-    if outgoing and outgoing != new_season:
-        out_row = season.get_season(outgoing) or {}
-        out_sc  = out_row.get('set_champs_end')
-        if out_sc and date.fromisoformat(out_sc) >= _now_et().date():
-            sc_note = (f"\n\n⚠️ **{outgoing}'s Set Champs run to {out_sc}**, but the Set Champs digest "
-                       f"and sheet follow the current season — `{outgoing} Set Champs` will stop "
-                       f"refreshing. Finish it with `/set-champs` before rolling over, or accept the "
-                       f"tab as final.")
+    sc_note = "".join(f"\n\n{w}" for w in plan.warnings)
 
     await interaction.followup.send(
         f"✅ **Season rolled over to {new_season}**\n\n"
         f"**New tabs created in League sheet:**\n{tab_lines}{skip_note}\n\n"
         f"**Season window:** {resolved['season_start']} → {resolved['season_end']}\n"
         f"**Set Champs:** {resolved['set_champs_start']} → {resolved['set_champs_end']}\n"
-        f"**Dates from:** {'the Seasons tab' if not overridden else 'the Seasons tab + overrides'}"
+        f"**Dates from:** {'the Seasons tab' if not plan.overridden else 'the Seasons tab + overrides'}"
         f"{override_note}{sc_note}{todo}",
         ephemeral=True,
     )
@@ -2927,6 +3637,9 @@ async def archive_season(interaction: discord.Interaction, season_name: str):
         )
         return
 
+    await _season_close_mark(season_name, archived=_now_et().date().isoformat())
+    await _refresh_season_close_quietly(season_name)
+
     tab_lines = "\n".join(f"  • {t}" for t in archived)
     await interaction.followup.send(
         f"✅ **{season_name} archived** ({len(archived)} tab(s))\n\n{tab_lines}\n\n"
@@ -2946,6 +3659,66 @@ async def archive_season(interaction: discord.Interaction, season_name: str):
 # one implementation of role assignment regardless of what triggered it. Being
 # additive-only it is idempotent, which makes this the repair path when someone
 # loses a role — a rejoin, a manual removal, or an add_roles call that failed.
+_REGISTRY_ROLE_KEYS = [
+    (LEGENDARY_ROLE_ID,  'legendary'),
+    (SUPER_RARE_ROLE_ID, 'super_rare'),
+    (RARE_ROLE_ID,       'rare'),
+    (UNCOMMON_ROLE_ID,   'uncommon'),
+]
+
+
+async def _assign_all_from_registry(guild: discord.Guild,
+                                    registry: list[dict]) -> tuple[list, list, list, int]:
+    """
+    Grant every linked member the rarity roles their registry row records, and
+    post a summary to the mod channel. Shared by /assign-roles-from-registry and
+    the season-close checklist.
+
+    Returns (assigned, failed, gone, unlinked): assigned is [(mention, role_id,
+    season)], failed is display strings, gone is names of linked players no longer
+    in the server, unlinked counts rows holding roles with no Discord ID.
+    """
+    assigned = []
+    failed   = []
+    gone     = []
+    unlinked = 0
+
+    for entry in registry:
+        recorded = {rid: entry[key] for rid, key in _REGISTRY_ROLE_KEYS if entry[key]}
+        if not recorded:
+            continue
+        if not entry['discord_id']:
+            unlinked += 1
+            continue
+
+        member = guild.get_member(entry['discord_id'])
+        if not member:
+            gone.append(entry['playhub_name'])
+            continue
+
+        added, errs = await _assign_recorded_roles(
+            guild, member, recorded, "assign-roles-from-registry"
+        )
+        assigned.extend((member.mention, rid, s) for rid, s in added)
+        failed.extend(f"{member.mention} — {RARITY_ROLE_NAMES.get(rid, rid)}: {e}" for rid, e in errs)
+
+    mod_ch = get_channel_by_id(guild, MOD_CHANNEL_ID)
+    if mod_ch and (assigned or failed):
+        lines = [f"{mention}: +{_fmt_roles([(rid, s)])}" for mention, rid, s in assigned[:40]]
+        if len(assigned) > 40:
+            lines.append(f"*(and {len(assigned) - 40} more)*")
+        if failed:
+            lines.append("\n**Failed:**")
+            lines.extend(f"• {f}" for f in failed[:10])
+        await mod_ch.send(embed=make_embed(
+            title=f"Roles Assigned — {len(assigned)} applied",
+            description="\n".join(lines),
+            colour=discord.Colour.gold()
+        ))
+
+    return assigned, failed, gone, unlinked
+
+
 @tree.command(name="assign-roles-from-registry",
               description="Assign every Discord rarity role recorded in the Player Registry (mods only)")
 async def assign_roles_from_registry(interaction: discord.Interaction):
@@ -2963,50 +3736,8 @@ async def assign_roles_from_registry(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ Couldn't read the registry: `{e}`", ephemeral=True)
         return
 
-    role_key = [
-        (LEGENDARY_ROLE_ID,  'legendary'),
-        (SUPER_RARE_ROLE_ID, 'super_rare'),
-        (RARE_ROLE_ID,       'rare'),
-        (UNCOMMON_ROLE_ID,   'uncommon'),
-    ]
-
-    assigned = []   # (mention, role_id, season)
-    failed   = []
-    gone     = []   # linked rows whose member has left the server
-    unlinked = 0    # rows holding roles with no Discord ID at all
-
-    for entry in registry:
-        recorded = {rid: entry[key] for rid, key in role_key if entry[key]}
-        if not recorded:
-            continue
-        if not entry['discord_id']:
-            unlinked += 1
-            continue
-
-        member = interaction.guild.get_member(entry['discord_id'])
-        if not member:
-            gone.append(entry['playhub_name'])
-            continue
-
-        added, errs = await _assign_recorded_roles(
-            interaction.guild, member, recorded, "assign-roles-from-registry"
-        )
-        assigned.extend((member.mention, rid, s) for rid, s in added)
-        failed.extend(f"{member.mention} — {RARITY_ROLE_NAMES.get(rid, rid)}: {e}" for rid, e in errs)
-
-    mod_ch = get_channel_by_id(interaction.guild, MOD_CHANNEL_ID)
-    if mod_ch and (assigned or failed):
-        lines = [f"{mention}: +{_fmt_roles([(rid, s)])}" for mention, rid, s in assigned[:40]]
-        if len(assigned) > 40:
-            lines.append(f"*(and {len(assigned) - 40} more)*")
-        if failed:
-            lines.append("\n**Failed:**")
-            lines.extend(f"• {f}" for f in failed[:10])
-        await mod_ch.send(embed=make_embed(
-            title=f"Roles Assigned — {len(assigned)} applied",
-            description="\n".join(lines),
-            colour=discord.Colour.gold()
-        ))
+    assigned, failed, gone, unlinked = await _assign_all_from_registry(interaction.guild, registry)
+    await _refresh_open_season_closes()
 
     parts = ([f"✅ **{len(assigned)}** role(s) assigned"] if assigned
              else ["✅ Everyone already holds the roles recorded for them — nothing to do"])
