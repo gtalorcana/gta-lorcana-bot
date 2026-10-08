@@ -1887,20 +1887,96 @@ def _season_close_snapshot(season_id: str) -> dict:
     return snap
 
 
-def _missing_roles(registry: list[dict], guild: discord.Guild,
-                   season_id: str, keys: tuple[str, ...]) -> int:
-    """Roles stamped `season_id` in `keys` that a linked, present member doesn't hold."""
+_RARITY_LADDER = ('uncommon', 'rare', 'super_rare', 'legendary')   # low → high
+_RARITY_LABEL  = {'uncommon': 'Uncommon', 'rare': 'Rare',
+                  'super_rare': 'Super Rare', 'legendary': 'Legendary'}
+
+
+def _highest(keys: set) -> str:
+    """The top rarity among registry keys, or Common for none."""
+    return next((_RARITY_LABEL[k] for k in reversed(_RARITY_LADDER) if k in keys), "Common")
+
+
+def _progression(before: set, new: set) -> str:
+    """'Common → Rare', 'Uncommon → Rare (+Uncommon)', or 'Rare (+Uncommon)'."""
+    b, a = _highest(before), _highest(before | new)
+    extra = sorted((k for k in new if _RARITY_LABEL[k] != a), key=_RARITY_LADDER.index)
+    tail  = f" (+{', '.join(_RARITY_LABEL[k] for k in extra)})" if extra else ""
+    return f"{b} → {a}{tail}" if a != b else f"{b}{tail}"
+
+
+def _held_before(reg: dict | None, seq: int) -> set:
+    """Registry keys this player already held from a season before `seq`."""
+    if not reg:
+        return set()
+    return {k for k in _RARITY_LADDER if reg[k] and (_season_num(reg[k]) or seq) < seq}
+
+
+def _season_progression(season_id: str, registry: list[dict], guild: discord.Guild,
+                        keys: tuple[str, ...], earners: list[dict] | None = None) -> dict:
+    """
+    Who moves up a rarity this season, who doesn't, and who isn't on Discord.
+
+    earners given (before recording): reads what each would gain from the
+    leaderboard. earners None (after recording): reads it back from the registry,
+    where earliest-season-wins means a cell stamped with this season is exactly a
+    role first earned in it.
+
+    Returns {'up': [(label, member, missing_keys)], 'unchanged': [names],
+             'off': [names with reason], 'missing': n roles a present member lacks}.
+    """
+    seq      = _season_num(season_id)
     role_for = {key: rid for rid, key in _REGISTRY_ROLE_KEYS}
-    missing = 0
-    for r in registry:
-        if not r['discord_id']:
+    by_id    = {r['playhub_id']: r for r in registry if r['playhub_id']}
+    by_name  = {r['playhub_name'].lower(): r for r in registry}
+    key_for  = {rid: key for rid, key in _REGISTRY_ROLE_KEYS}
+
+    if earners is not None:
+        rows = []
+        for m in earners:
+            reg = (by_id.get(m['id']) if m['id'] else None) or by_name.get(m['name'].lower())
+            new = {key_for[r] for r in m['roles']} - _held_before(reg, seq)
+            rows.append((m['name'], reg, new))
+    else:
+        rows = [(r['playhub_name'], r, {k for k in keys if r[k] == season_id})
+                for r in registry if any(r[k] == season_id for k in keys)]
+
+    out = {'up': [], 'unchanged': [], 'off': [], 'missing': 0}
+    for name, reg, new in rows:
+        if not new:
+            out['unchanged'].append(name)
             continue
-        member = guild.get_member(r['discord_id']) if guild else None
+        label  = f"{name}: {_progression(_held_before(reg, seq), new)}"
+        member = guild.get_member(reg['discord_id']) if guild and reg and reg['discord_id'] else None
+        if not (reg and reg['discord_id']):
+            out['off'].append(f"{name} (not linked)")
+            continue
         if not member:
+            out['off'].append(f"{name} (left the server)")
             continue
-        held = {role.id for role in member.roles}
-        missing += sum(1 for k in keys if r[k] == season_id and role_for[k] not in held)
-    return missing
+        held    = {role.id for role in member.roles}
+        missing = {k for k in new if role_for[k] not in held}
+        out['missing'] += len(missing)
+        out['up'].append((label, member, missing))
+    return out
+
+
+def _progression_lines(prog: dict, pending_only: bool = False, limit: int = 15) -> list[str]:
+    """Render _season_progression for the checklist embed."""
+    up = [u for u in prog['up'] if u[2]] if pending_only else prog['up']
+    lines = []
+    if up:
+        lines.append(("Still to assign" if pending_only else "⬆️ Moving up") + f" ({len(up)}):")
+        for label, member, _missing in up[:limit]:
+            lines.append(f"  {member.mention} — {label.split(': ', 1)[1]}")
+        if len(up) > limit:
+            lines.append(f"  *…and {len(up) - limit} more*")
+    if prog['unchanged'] and not pending_only:
+        lines.append(f"➖ Already hold theirs ({len(prog['unchanged'])}): {_name_list(prog['unchanged'], 400)}")
+    if prog['off']:
+        lines.append(f"🔕 Not on Discord ({len(prog['off'])}) — their roles land when linked with "
+                     f"`/link`: {_name_list(prog['off'], 400)}")
+    return lines
 
 
 def _name_list(names: list[str], limit: int = 600) -> str:
@@ -1975,46 +2051,42 @@ async def _render_season_close(season_id: str, snap: dict, guild: discord.Guild,
     # ── 1. Rare / Uncommon ──────────────────────────────────────────
     stamped1  = [r for r in registry or [] if season_id in (r['rare'], r['uncommon'])]
     recorded1 = bool(entry.get('rare_uncommon') or stamped1)
-    missing1  = _missing_roles(registry, guild, season_id, ('rare', 'uncommon')) if registry else 0
     n1        = entry.get('rare_uncommon_n', len(stamped1))
+    prog1     = (_season_progression(season_id, registry, guild, ('rare', 'uncommon'))
+                 if registry is not None and recorded1 else None)
+    missing1  = prog1['missing'] if prog1 else 0
     done1     = recorded1 and missing1 == 0
 
-    if done1:
-        when = f" on {_short_date(entry['rare_uncommon'])}" if entry.get('rare_uncommon') else ""
-        lines.append(f"**1. ✅ Rare / Uncommon** — {n1} player(s) recorded{when}, roles on Discord")
-    elif recorded1:
-        lines.append(f"**1. ⚠️ Rare / Uncommon** — recorded, but **{missing1}** role(s) "
-                     f"aren't on Discord yet")
-        button('assign', "Assign roles", discord.ButtonStyle.success)
-        assign_shown = True
+    if recorded1:
+        when  = f" {_short_date(entry['rare_uncommon'])}" if entry.get('rare_uncommon') else ""
+        moved = len(prog1['up']) + len(prog1['off']) if prog1 else len(stamped1)
+        tally = f"{moved} moved up, {max(n1 - moved, 0)} unchanged"
+        if done1:
+            lines.append(f"**1. ✅ Rare / Uncommon** — recorded{when}: {tally}, roles on Discord")
+            if prog1:
+                lines += _progression_lines(prog1)
+        else:
+            lines.append(f"**1. ⚠️ Rare / Uncommon** — recorded{when}: {tally}; "
+                         f"**{missing1}** role(s) still to assign")
+            lines += _progression_lines(prog1, pending_only=True)
+            button('assign', "Assign roles", discord.ButtonStyle.success)
+            assign_shown = True
     else:
         earners = snap['earners']
-        if earners is None:
-            lines.append(f"**1. ⏳ Rare / Uncommon** — ⚠️ couldn't read the `{season_id} Leaderboard`")
+        if earners is None or registry is None:
+            what = f"the `{season_id} Leaderboard`" if earners is None else "the Player Registry"
+            lines.append(f"**1. ⏳ Rare / Uncommon** — ⚠️ couldn't read {what}")
         elif not earners:
             lines.append(f"**1. ⏳ Rare / Uncommon** — nobody earned Rare or Uncommon. "
                          f"Approving marks {season_id} as recorded.")
         else:
-            rare     = [m['name'] for m in earners if RARE_ROLE_ID in m['roles']]
-            uncommon = [m['name'] for m in earners if UNCOMMON_ROLE_ID in m['roles']]
-            by_id    = {r['playhub_id']: r for r in registry or [] if r['playhub_id']}
-            by_name  = {r['playhub_name'].lower(): r for r in registry or []}
-            key_for  = {RARE_ROLE_ID: 'rare', UNCOMMON_ROLE_ID: 'uncommon'}
-            prior = 0
-            for m in earners:
-                reg = (by_id.get(m['id']) if m['id'] else None) or by_name.get(m['name'].lower())
-                if reg and all((_season_num(reg[key_for[r]]) or seq) < seq for r in m['roles']):
-                    prior += 1
+            prog = _season_progression(season_id, registry, guild, ('rare', 'uncommon'), earners)
             lines.append(f"**1. ⏳ Rare / Uncommon** — {len(earners)} player(s) earned roles "
                          f"on the final {season_id} leaderboard")
-            lines.append(f"Rare ({len(rare)}): {_name_list(rare) or '—'}")
-            lines.append(f"Uncommon ({len(uncommon)}): {_name_list(uncommon) or '—'}")
-            if prior == len(earners):
-                lines.append(f"All {prior} already hold their roles from earlier seasons — nothing new "
-                             f"to stamp; approving marks {season_id} as recorded.")
-            elif prior:
-                lines.append(f"({prior} already hold theirs from an earlier season.)")
-        if earners is not None:
+            lines += _progression_lines(prog)
+            if not prog['up'] and not prog['off']:
+                lines.append(f"Nothing new to stamp — approving marks {season_id} as recorded.")
+        if earners is not None and registry is not None:
             button('record', "Record & assign roles", discord.ButtonStyle.success)
     lines.append("")
 
@@ -2022,21 +2094,28 @@ async def _render_season_close(season_id: str, snap: dict, guild: discord.Guild,
     stamped2  = [r for r in registry or [] if season_id in (r['legendary'], r['super_rare'])]
     inv       = entry.get('invitational')
     recorded2 = bool(inv or stamped2)
-    missing2  = (_missing_roles(registry, guild, season_id, ('legendary', 'super_rare'))
-                 if registry and inv != 'skipped' else 0)
+    prog2     = (_season_progression(season_id, registry, guild, ('legendary', 'super_rare'))
+                 if registry is not None and recorded2 and inv != 'skipped' else None)
+    missing2  = prog2['missing'] if prog2 else 0
     done2     = recorded2 and missing2 == 0
 
     if inv == 'skipped':
         lines.append("**2. ✅ Invitational** — skipped")
-    elif done2:
-        n2   = entry.get('invitational_n', len(stamped2))
-        when = f" on {_short_date(inv)}" if inv else ""
-        lines.append(f"**2. ✅ Invitational** — {n2} player(s) recorded{when}, roles on Discord")
     elif recorded2:
-        lines.append(f"**2. ⚠️ Invitational** — recorded, but **{missing2}** role(s) "
-                     f"aren't on Discord yet")
-        if not assign_shown:
-            button('assign', "Assign roles", discord.ButtonStyle.success)
+        n2    = entry.get('invitational_n', len(stamped2))
+        when  = f" {_short_date(inv)}" if inv else ""
+        moved = len(prog2['up']) + len(prog2['off']) if prog2 else len(stamped2)
+        tally = f"{moved} moved up, {max(n2 - moved, 0)} unchanged"
+        if done2:
+            lines.append(f"**2. ✅ Invitational** — recorded{when}: {tally}, roles on Discord")
+            if prog2:
+                lines += _progression_lines(prog2)
+        else:
+            lines.append(f"**2. ⚠️ Invitational** — recorded{when}: {tally}; "
+                         f"**{missing2}** role(s) still to assign")
+            lines += _progression_lines(prog2, pending_only=True)
+            if not assign_shown:
+                button('assign', "Assign roles", discord.ButtonStyle.success)
     else:
         lines.append(f"**2. ⏳ Invitational** — waiting for the {season_id} invitational. "
                      f"Submit its RPH link once it's finished; it doesn't block the rollover.")
@@ -3336,14 +3415,23 @@ async def _post_invitational_preview(guild: discord.Guild, event_url: str,
     sr_entries      = [resolve(s) for s in top8]
 
     event_name = event.get('name', f"Event {event_id}")
+    seq_label  = _season_num(season_label)
+    reg_by_pid = {r['playhub_id']: r for r in registry_list if r['playhub_id']}
+
+    def change(pid, key):
+        # Before → after, the same progression the season-close checklist shows.
+        before = _held_before(reg_by_pid.get(pid), seq_label)
+        new    = {key} - before
+        return _progression(before, new) if new else f"already {_RARITY_LABEL[key]}"
+
     lines = []
     if legendary_entry:
         pid, name, member = legendary_entry
         mention = member.mention if member else f"**{name}** *(unlinked — use /link first)*"
-        lines.append(f"🏆 **Legendary** → {mention}")
+        lines.append(f"🏆 **Legendary** → {mention} — {change(pid, 'legendary')}")
     for i, (pid, name, member) in enumerate(sr_entries, 2):
         mention = member.mention if member else f"**{name}** *(unlinked)*"
-        lines.append(f"⭐ **Super Rare** (rank {i}) → {mention}")
+        lines.append(f"⭐ **Super Rare** (rank {i}) → {mention} — {change(pid, 'super_rare')}")
 
     mod_ch = get_channel_by_id(guild, MOD_CHANNEL_ID)
     if not mod_ch:

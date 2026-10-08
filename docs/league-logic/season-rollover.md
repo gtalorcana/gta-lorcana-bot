@@ -13,6 +13,13 @@ edited in place, refreshed on every button click and daily at `DIGEST_HOUR_ET`:2
 | 3. Rollover | **Roll over to S##** — appears only once step 1 is recorded and the next row is complete; re-validated at click time | marker `rolled_over`, or the pointer is past the season |
 | 4. Archive | **Archive S##** — after the rollover | marker `archived`, or the Archive sheet has `S## Leaderboard` |
 
+Steps 1 and 2 show each player's progression — highest rarity before → after, e.g.
+`Common → Rare (+Uncommon)` — split into **Moving up**, **Already hold theirs** (nothing new to
+stamp) and **Not on Discord** (unlinked or left the server; their roles land on `/link`). After
+recording, "moved up" is read back from cells stamped with the season, which under
+earliest-season-wins are exactly the roles first earned in it. The invitational ✅/❌ preview
+shows the same before → after per finisher.
+
 The next season's dates come **only** from the Seasons tab; the checklist links it and has a
 **Reload** button. When all four are done the message becomes a one-line `🏁 S## closed` summary
 and is never touched again. Steps can finish out of order — the invitational usually lands after
