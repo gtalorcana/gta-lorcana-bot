@@ -15,6 +15,8 @@ MOD_CHANNEL_ID        = int(os.getenv("MOD_CHANNEL_ID",        14837535509609227
 SET_CHAMPS_CHANNEL_ID = int(os.getenv("SET_CHAMPS_CHANNEL_ID", 1422319248218525727))
 PRERELEASE_CHANNEL_ID = int(os.getenv("PRERELEASE_CHANNEL_ID", 1550875788084125696))
 CCQ_CHANNEL_ID        = int(os.getenv("CCQ_CHANNEL_ID",        1554217109918064801))
+# #season-manager — the season-close checklist and the prompts it triggers
+SEASON_CLOSE_CHANNEL_ID = int(os.getenv("SEASON_CLOSE_CHANNEL_ID", 1557615130769096724))
 
 # Hour (ET) at which event_digests_daily refreshes each digest, one per minute
 # thereafter in _DIGESTS order. Overridable so a dev can fire the loop without

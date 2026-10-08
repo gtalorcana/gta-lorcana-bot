@@ -66,6 +66,7 @@ from constants import (
     WORKER_SECRET,
     CHANNELS,
     MOD_CHANNEL_ID,
+    SEASON_CLOSE_CHANNEL_ID,
     SET_CHAMPS_CHANNEL_ID,
     PRERELEASE_CHANNEL_ID,
     CCQ_CHANNEL_ID,
@@ -1709,7 +1710,8 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             if assignment.get('assign') and guild:
                 try:
                     registry = await loop.run_in_executor(None, get_player_registry)
-                    assigned, failed, _gone, _unlinked = await _assign_all_from_registry(guild, registry)
+                    assigned, failed, _gone, _unlinked = await _assign_all_from_registry(
+                        guild, registry, payload.channel_id)
                     assign_note = (f"\n\n{len(assigned)} Discord role(s) granted"
                                    + (f", {len(failed)} failed" if failed else "") + ".")
                 except Exception as e:
@@ -2027,7 +2029,8 @@ class _InvitationalUrlModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
         reply = await _post_invitational_preview(
-            interaction.guild, self.url.value, self.season_id, assign=True
+            interaction.guild, self.url.value, self.season_id, assign=True,
+            channel_id=SEASON_CLOSE_CHANNEL_ID,
         )
         await interaction.followup.send(reply, ephemeral=True)
 
@@ -2214,9 +2217,9 @@ async def _refresh_season_close(season_id: str, post_if_missing: bool = False) -
     is no message yet (or it was deleted). Raises if Bot State can't be read.
     """
     guild  = bot.get_guild(int(DISCORD_GUILD_ID)) or (bot.guilds[0] if bot.guilds else None)
-    mod_ch = guild.get_channel(MOD_CHANNEL_ID) if guild else None
+    mod_ch = guild.get_channel(SEASON_CLOSE_CHANNEL_ID) if guild else None
     if not mod_ch:
-        _sc_log("⚠ season-close: mod channel not found")
+        _sc_log(f"⚠ season-close: channel {SEASON_CLOSE_CHANNEL_ID} not found")
         return
 
     loop  = asyncio.get_running_loop()
@@ -2338,9 +2341,10 @@ async def season_close_daily():
 # ── Button actions ──────────────────────────────────────────────────
 
 async def _sc_record(interaction, season_id, loop) -> str:
-    result = await _record_rare_and_uncommon(interaction.guild, season_id, loop)
+    result = await _record_rare_and_uncommon(interaction.guild, season_id, loop, SEASON_CLOSE_CHANNEL_ID)
     registry = await loop.run_in_executor(None, get_player_registry)
-    assigned, failed, _gone, _unlinked = await _assign_all_from_registry(interaction.guild, registry)
+    assigned, failed, _gone, _unlinked = await _assign_all_from_registry(
+        interaction.guild, registry, SEASON_CLOSE_CHANNEL_ID)
     msg = (f"✅ Recorded {result['recorded']} player(s) for {season_id}"
            if result['recorded'] else f"✅ Nobody earned roles in {season_id} — marked as recorded")
     if result['unlinked']:
@@ -2351,7 +2355,8 @@ async def _sc_record(interaction, season_id, loop) -> str:
 
 async def _sc_assign(interaction, season_id, loop) -> str:
     registry = await loop.run_in_executor(None, get_player_registry)
-    assigned, failed, gone, _unlinked = await _assign_all_from_registry(interaction.guild, registry)
+    assigned, failed, gone, _unlinked = await _assign_all_from_registry(
+        interaction.guild, registry, SEASON_CLOSE_CHANNEL_ID)
     msg = f"✅ {len(assigned)} Discord role(s) granted"
     if failed:
         msg += f", {len(failed)} failed"
@@ -3222,7 +3227,8 @@ def _rare_uncommon_earners(season_id: str) -> list[dict]:
     return earners_meta
 
 
-async def _record_rare_and_uncommon(guild: discord.Guild, season_id: str, loop) -> dict:
+async def _record_rare_and_uncommon(guild: discord.Guild, season_id: str, loop,
+                                    channel_id: int = MOD_CHANNEL_ID) -> dict:
     """
     Record a season's Rare/Uncommon earners into the registry and mark the season
     recorded. Shared by the slash command and the season-close checklist.
@@ -3289,7 +3295,7 @@ async def _record_rare_and_uncommon(guild: discord.Guild, season_id: str, loop) 
             except Exception as e:
                 print(f"  ⚠ record-rare-and-uncommon: dedupe failed for discord_id {did}: {e}")
 
-    mod_ch = get_channel_by_id(guild, MOD_CHANNEL_ID) if guild else None
+    mod_ch = get_channel_by_id(guild, channel_id) if guild else None
     if mod_ch:
         lines = [f"Recorded **{len(earners_meta)}** player(s) for **{season_id}**."]
         if unlinked:
@@ -3373,7 +3379,8 @@ async def invitational_roles(interaction: discord.Interaction, event_url: str, s
 
 
 async def _post_invitational_preview(guild: discord.Guild, event_url: str,
-                                     season_label: str, assign: bool = False) -> str:
+                                     season_label: str, assign: bool = False,
+                                     channel_id: int = MOD_CHANNEL_ID) -> str:
     """
     Fetch an invitational's final standings and post the ✅/❌ recording prompt to
     the mod channel. Shared by /record-legendary-and-super-rare and the
@@ -3440,9 +3447,9 @@ async def _post_invitational_preview(guild: discord.Guild, event_url: str,
         mention = member.mention if member else f"**{name}** *(unlinked)*"
         lines.append(f"⭐ **Super Rare** (rank {i}) → {mention} — {change(pid, 'super_rare')}")
 
-    mod_ch = get_channel_by_id(guild, MOD_CHANNEL_ID)
+    mod_ch = get_channel_by_id(guild, channel_id)
     if not mod_ch:
-        return "⚠️ Mod channel not configured."
+        return f"⚠️ Channel `{channel_id}` not found."
 
     roles_note = ("\nApproving also grants the Discord roles." if assign else
                   "\nDiscord roles are granted separately by `/assign-roles-from-registry`.")
@@ -3457,7 +3464,7 @@ async def _post_invitational_preview(guild: discord.Guild, event_url: str,
     try:
         msg = await mod_ch.send(embed=embed)
     except discord.Forbidden:
-        return (f"❌ Bot lacks permission to send messages in the mod channel (ID: `{MOD_CHANNEL_ID}`). "
+        return (f"❌ Bot lacks permission to send messages in {mod_ch.mention} (ID: `{channel_id}`). "
                 f"Check channel permissions.")
 
     await msg.add_reaction("✅")
@@ -3799,8 +3806,8 @@ _REGISTRY_ROLE_KEYS = [
 ]
 
 
-async def _assign_all_from_registry(guild: discord.Guild,
-                                    registry: list[dict]) -> tuple[list, list, list, int]:
+async def _assign_all_from_registry(guild: discord.Guild, registry: list[dict],
+                                    channel_id: int = MOD_CHANNEL_ID) -> tuple[list, list, list, int]:
     """
     Grant every linked member the rarity roles their registry row records, and
     post a summary to the mod channel. Shared by /assign-roles-from-registry and
@@ -3834,7 +3841,7 @@ async def _assign_all_from_registry(guild: discord.Guild,
         assigned.extend((member.mention, rid, s) for rid, s in added)
         failed.extend(f"{member.mention} — {RARITY_ROLE_NAMES.get(rid, rid)}: {e}" for rid, e in errs)
 
-    mod_ch = get_channel_by_id(guild, MOD_CHANNEL_ID)
+    mod_ch = get_channel_by_id(guild, channel_id)
     if mod_ch and (assigned or failed):
         lines = [f"{mention}: +{_fmt_roles([(rid, s)])}" for mention, rid, s in assigned[:40]]
         if len(assigned) > 40:
