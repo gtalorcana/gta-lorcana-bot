@@ -1005,10 +1005,14 @@ async def on_ready():
     if not season_close_daily.is_running():
         season_close_daily.start()
         print(f"  ♻ Season-close checklist scheduled for {_DIGEST_HOUR_ET}:20 ET")
-        # Once at startup too, so a season that ended while the bot was down —
+        # Once after startup too, so a season that ended while the bot was down —
         # or before this shipped — gets its checklist now rather than tomorrow.
-        _sc_log("· season-close: startup pass")
-        await _season_close_tick()
+        # Two minutes out, not in on_ready itself: every task fires its first Sheets
+        # reads in the minute after a restart, and the checklist's timed out in that
+        # rush on every deploy it was tried in.
+        global _season_close_retry_at
+        _season_close_retry_at = _now_et() + timedelta(minutes=2)
+        _sc_log(f"· season-close: startup pass scheduled for {_season_close_retry_at:%H:%M}")
 
     # Auto-recheck any unprocessed results threads from the last 3 days.
     # Catches threads that were mid-flight when the bot last crashed or restarted.
@@ -2248,12 +2252,14 @@ async def _refresh_season_close(season_id: str, post_if_missing: bool = False) -
         _sc_log(f"✓ season-close: {season_id} closed")
 
 
-async def _refresh_season_close_quietly(season_id: str) -> None:
-    """Refresh after a slash command or reaction did a step. Never raises."""
+async def _refresh_season_close_quietly(season_id: str) -> bool:
+    """Refresh after a slash command or reaction did a step. Never raises; False on failure."""
     try:
         await _refresh_season_close(season_id)
+        return True
     except Exception as e:
-        _sc_log(f"⚠ season-close: refresh of {season_id} failed: {e}")
+        _sc_log(f"⚠ season-close: refresh of {season_id} failed: {type(e).__name__}: {e}")
+        return False
 
 
 async def _refresh_open_season_closes() -> None:
@@ -2284,14 +2290,14 @@ async def _season_close_tick() -> None:
             _sc_log(f"⚠ season-close: could not read Bot State ({e}) — skipping")
             return
 
-        seen = set()
+        seen, failed = set(), False
         for key, raw in state.items():
             if key.startswith(_SEASON_CLOSE_PREFIX):
                 entry = _parse_season_close(raw)
                 if entry.get('msg_id') and not entry.get('closed'):
                     sid = key.removeprefix(_SEASON_CLOSE_PREFIX)
                     seen.add(sid)
-                    await _refresh_season_close_quietly(sid)
+                    failed |= not await _refresh_season_close_quietly(sid)
 
         cur, end = season.CURRENT_SEASON, season.SEASON_END_DATE
         if cur in seen:
@@ -2313,7 +2319,8 @@ async def _season_close_tick() -> None:
                         f"{type(e).__name__}: {e} — retrying at {_season_close_retry_at:%H:%M}")
                 print(traceback.format_exc())
                 return
-        _season_close_retry_at = None
+        _season_close_retry_at = (_now_et() + timedelta(minutes=_SEASON_CLOSE_RETRY_MINUTES)
+                                  if failed else None)
 
 
 @tasks.loop(minutes=1)
