@@ -1765,6 +1765,8 @@ _season_close_busy: set[str] = set()    # seasons with a button action in flight
 
 
 _season_close_log: list[str] = []      # recent lines, shown by /season-close
+_SEASON_CLOSE_RETRY_MINUTES = 10
+_season_close_retry_at: datetime | None = None   # set when a post failed
 
 
 def _sc_log(line: str) -> None:
@@ -2193,6 +2195,7 @@ async def _season_close_tick() -> None:
     Daily pass: refresh open checklists, and post one for the current season once
     its season end has passed. Never raises — it runs inside a tasks.loop.
     """
+    global _season_close_retry_at
     async with _season_close_tick_lock:
         loop = asyncio.get_running_loop()
         try:
@@ -2224,16 +2227,25 @@ async def _season_close_tick() -> None:
             try:
                 await _refresh_season_close(cur, post_if_missing=True)
             except Exception as e:
+                # Usually a Sheets read timing out in the startup rush. Waiting for
+                # tomorrow's pass would leave the season with no checklist all day.
+                _season_close_retry_at = _now_et() + timedelta(minutes=_SEASON_CLOSE_RETRY_MINUTES)
                 _sc_log(f"⚠ season-close: could not post the {cur} checklist: "
-                        f"{type(e).__name__}: {e}")
+                        f"{type(e).__name__}: {e} — retrying at {_season_close_retry_at:%H:%M}")
                 print(traceback.format_exc())
+                return
+        _season_close_retry_at = None
 
 
 @tasks.loop(minutes=1)
 async def season_close_daily():
-    """Run _season_close_tick once a day, after the digests have had their minutes."""
+    """
+    Run _season_close_tick once a day, after the digests have had their minutes —
+    and again whenever a failed post scheduled a retry.
+    """
     now_et = _now_et()
-    if now_et.hour == _DIGEST_HOUR_ET and now_et.minute == 20:
+    retry_due = _season_close_retry_at is not None and now_et >= _season_close_retry_at
+    if retry_due or (now_et.hour == _DIGEST_HOUR_ET and now_et.minute == 20):
         await _season_close_tick()
 
 
