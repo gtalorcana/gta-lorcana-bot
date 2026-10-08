@@ -1007,6 +1007,7 @@ async def on_ready():
         print(f"  ♻ Season-close checklist scheduled for {_DIGEST_HOUR_ET}:20 ET")
         # Once at startup too, so a season that ended while the bot was down —
         # or before this shipped — gets its checklist now rather than tomorrow.
+        _sc_log("· season-close: startup pass")
         await _season_close_tick()
 
     # Auto-recheck any unprocessed results threads from the last 3 days.
@@ -1763,6 +1764,17 @@ _season_close_tick_lock = asyncio.Lock()  # one post/refresh pass at a time
 _season_close_busy: set[str] = set()    # seasons with a button action in flight
 
 
+_season_close_log: list[str] = []      # recent lines, shown by /season-close
+
+
+def _sc_log(line: str) -> None:
+    """Print a checklist log line and keep it for /season-close, which is how the
+    outcome of the startup pass can be seen without the Fly logs."""
+    print(f"  {line}")
+    _season_close_log.append(f"{_now_et():%b %d %H:%M} {line}")
+    del _season_close_log[:-15]
+
+
 def _season_close_key(season_id: str) -> str:
     return f"{_SEASON_CLOSE_PREFIX}{season_id}"
 
@@ -1798,13 +1810,17 @@ async def _season_close_mark(season_id: str, **fields) -> bool:
         entry.update(fields)
         state[key] = json.dumps(entry, separators=(',', ':'))
         save_bot_state(state)
+        # save_bot_state logs and swallows its own failures, so confirm the write
+        # landed — a checklist posted with an unsaved msg_id is posted twice.
+        if load_bot_state(strict=True).get(key) != state[key]:
+            raise RuntimeError("Bot State write did not persist")
 
     async with _season_close_lock:
         try:
             await loop.run_in_executor(None, _write)
             return True
         except Exception as e:
-            print(f"  ✗ season-close: could not save {fields} for {season_id}: {e}")
+            _sc_log(f"✗ season-close: could not save {fields} for {season_id}: {e}")
             return False
 
 
@@ -2115,7 +2131,7 @@ async def _refresh_season_close(season_id: str, post_if_missing: bool = False) -
     guild  = bot.get_guild(int(DISCORD_GUILD_ID)) or (bot.guilds[0] if bot.guilds else None)
     mod_ch = guild.get_channel(MOD_CHANNEL_ID) if guild else None
     if not mod_ch:
-        print("  ⚠ season-close: mod channel not found")
+        _sc_log("⚠ season-close: mod channel not found")
         return
 
     loop  = asyncio.get_running_loop()
@@ -2136,7 +2152,7 @@ async def _refresh_season_close(season_id: str, post_if_missing: bool = False) -
             await msg.edit(embed=embed, view=view)
         except discord.NotFound:
             msg = None
-            print(f"  ⚠ season-close: {season_id} checklist message {msg_id} is gone — reposting")
+            _sc_log(f"⚠ season-close: {season_id} checklist message {msg_id} is gone — reposting")
 
     if msg is None:
         msg = await mod_ch.send(embed=embed, view=view)
@@ -2144,11 +2160,11 @@ async def _refresh_season_close(season_id: str, post_if_missing: bool = False) -
             # Unsaved, tomorrow's pass would post a second copy — take this one back.
             await msg.delete()
             return
-        print(f"  ✓ season-close: posted the {season_id} checklist")
+        _sc_log(f"✓ season-close: posted the {season_id} checklist")
 
     if closing:
         await _season_close_mark(season_id, **closing)
-        print(f"  ✓ season-close: {season_id} closed")
+        _sc_log(f"✓ season-close: {season_id} closed")
 
 
 async def _refresh_season_close_quietly(season_id: str) -> None:
@@ -2156,7 +2172,7 @@ async def _refresh_season_close_quietly(season_id: str) -> None:
     try:
         await _refresh_season_close(season_id)
     except Exception as e:
-        print(f"  ⚠ season-close: refresh of {season_id} failed: {e}")
+        _sc_log(f"⚠ season-close: refresh of {season_id} failed: {e}")
 
 
 async def _refresh_open_season_closes() -> None:
@@ -2165,7 +2181,7 @@ async def _refresh_open_season_closes() -> None:
     try:
         state = await loop.run_in_executor(None, lambda: load_bot_state(strict=True))
     except Exception as e:
-        print(f"  ⚠ season-close: could not read Bot State: {e}")
+        _sc_log(f"⚠ season-close: could not read Bot State: {e}")
         return
     for key, raw in state.items():
         if key.startswith(_SEASON_CLOSE_PREFIX) and not _parse_season_close(raw).get('closed'):
@@ -2183,7 +2199,7 @@ async def _season_close_tick() -> None:
             state = await loop.run_in_executor(None, lambda: load_bot_state(strict=True))
         except Exception as e:
             # Without Bot State a posted checklist looks unposted — skip, don't duplicate.
-            print(f"  ⚠ season-close: could not read Bot State ({e}) — skipping")
+            _sc_log(f"⚠ season-close: could not read Bot State ({e}) — skipping")
             return
 
         seen = set()
@@ -2196,12 +2212,21 @@ async def _season_close_tick() -> None:
                     await _refresh_season_close_quietly(sid)
 
         cur, end = season.CURRENT_SEASON, season.SEASON_END_DATE
-        if cur and end and cur not in seen and _now_et().date() > date.fromisoformat(end):
-            if not _parse_season_close(state.get(_season_close_key(cur), '')).get('closed'):
-                try:
-                    await _refresh_season_close(cur, post_if_missing=True)
-                except Exception as e:
-                    print(f"  ⚠ season-close: could not post the {cur} checklist: {e}")
+        if cur in seen:
+            _sc_log(f"· season-close: refreshed open checklist(s): {', '.join(sorted(seen))}")
+        elif not (cur and end):
+            _sc_log(f"· season-close: {cur} has no season end in the Seasons tab — nothing to post")
+        elif _now_et().date() <= date.fromisoformat(end):
+            _sc_log(f"· season-close: {cur} runs to {end} — checklist posts the day after")
+        elif _parse_season_close(state.get(_season_close_key(cur), '')).get('closed'):
+            _sc_log(f"· season-close: {cur} is already closed")
+        else:
+            try:
+                await _refresh_season_close(cur, post_if_missing=True)
+            except Exception as e:
+                _sc_log(f"⚠ season-close: could not post the {cur} checklist: "
+                        f"{type(e).__name__}: {e}")
+                print(traceback.format_exc())
 
 
 @tasks.loop(minutes=1)
@@ -3861,6 +3886,23 @@ async def where_to_play_command(interaction: discord.Interaction):
 
     except Exception as e:
         await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
+
+@tree.command(name="season-close", description="Post or refresh the end-of-season checklist now (admins only)")
+async def season_close_command(interaction: discord.Interaction):
+    """The daily season-close pass, on demand, with its log shown back."""
+    if interaction.user.id not in ADMIN_USER_IDS:
+        await interaction.response.send_message("❌ Admins only.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True)
+    before = len(_season_close_log)
+    earlier = list(_season_close_log)
+    await _season_close_tick()
+    now_lines = _season_close_log[before:] if len(_season_close_log) > before else _season_close_log[-3:]
+    body = "**This run**\n" + ("\n".join(now_lines) or "*(no output)*")
+    if earlier:
+        body += "\n\n**Earlier (since restart)**\n" + "\n".join(earlier[-8:])
+    await interaction.followup.send(body[:1990], ephemeral=True)
 
 
 @tree.command(name="seasons", description="Show the season calendar and what each digest resolves to (admins only)")
