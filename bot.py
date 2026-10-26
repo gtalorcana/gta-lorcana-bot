@@ -650,6 +650,9 @@ def _watch_key(event_id: int) -> str:
     return f"{_RPH_WATCH_KEY_PREFIX}{event_id}"
 
 
+_calendar_problems: list[str] = []   # from the last successful Seasons tab read
+
+
 async def _reload_season(loop) -> tuple[dict, list[str]]:
     """
     Reload Bot State and the Seasons calendar, and rebuild season.py from both.
@@ -665,6 +668,8 @@ async def _reload_season(loop) -> tuple[dict, list[str]]:
         print(f"  ⚠ Could not load season config: {e} — keeping the calendar already in memory")
         return {}, [f"Could not read the Seasons tab or Bot State: {e}"]
 
+    global _calendar_problems
+    _calendar_problems = problems
     season.init(state, calendar)
     return state, problems
 
@@ -2141,17 +2146,30 @@ async def _render_season_close(season_id: str, snap: dict, guild: discord.Guild,
         when = f" on {_short_date(entry['rolled_over'])}" if entry.get('rolled_over') else ""
         lines.append(f"**3. ✅ Rolled over to {to}**{when}")
     else:
-        def d(k):
-            return _short_date(nrow.get(k)) if nrow.get(k) else "**blank** ⚠️"
-        row_line = (f"{nxt} row: season {d('season_start')} → {d('season_end')} · "
-                    f"Set Champs {d('set_champs_start')} → {d('set_champs_end')}"
-                    if nrow else f"⚠️ No {nxt} row in the Seasons tab yet.")
+        def row_lines() -> list[str]:
+            """The next season's row, with each unusable date marked blank or ignored.
+            A filled-in date the calendar rejected is not blank, and saying so sends
+            the admin looking at the wrong cell — so the reason is shown under it."""
+            nrow = season.get_season(nxt) or {}
+            if not nrow:
+                return [f"⚠️ No {nxt} row in the Seasons tab yet."]
+            why = [p.split(": ", 1)[1] for p in _calendar_problems if p.startswith(f"{nxt}: ")]
+
+            def d(k):
+                if nrow.get(k):
+                    return _short_date(nrow[k])
+                label = 'set champs' if k.startswith('set_champs') else 'season'
+                return ("**ignored** ⚠️" if any(w.startswith(f"{label} ") for w in why)
+                        else "**blank** ⚠️")
+            return ([f"{nxt} row: season {d('season_start')} → {d('season_end')} · "
+                     f"Set Champs {d('set_champs_start')} → {d('set_champs_end')}"]
+                    + [f"⚠️ {w[0].upper()}{w[1:]}" for w in why])
         if season.CURRENT_SEASON != season_id:
             lines.append(f"**3. ⚠️ Roll over to {nxt}** — the current season is "
                          f"{season.CURRENT_SEASON}, not {season_id}; nothing to roll over from here.")
         elif not recorded1:
             lines.append(f"**3. 🔒 Roll over to {nxt}{nname}** — needs step 1 first.")
-            lines.append(row_line)
+            lines.extend(row_lines())
         else:
             plan, err = await _plan_rollover(loop, nxt)
             if plan:
@@ -2166,8 +2184,8 @@ async def _render_season_close(season_id: str, snap: dict, guild: discord.Guild,
                 button('rollover', f"Roll over to {nxt}", discord.ButtonStyle.danger)
             else:
                 lines.append(f"**3. ⏳ Roll over to {nxt}{nname}** — not ready")
-                lines.append(row_line)
-                lines.append("Fill the blanks in the Seasons tab, then press **Reload**.")
+                lines.extend(row_lines())   # after _plan_rollover's reload, so it is current
+                lines.append("Fix the row in the Seasons tab, then press **Reload**.")
         view.add_item(discord.ui.Button(
             label="Seasons tab", style=discord.ButtonStyle.link,
             url=f"https://docs.google.com/spreadsheets/d/{BOT_DATABASE_SPREADSHEET_ID}/edit"))
@@ -3540,19 +3558,17 @@ async def _plan_rollover(loop, new_season: str,
             f"{problem_note}"
         )
 
-    # Set Champs may end *after* the season end (e.g. S11: season ended Apr 24,
-    # set champs Apr 26). But it must start during the season.
+    # Each window is ordered on its own. The two are independent: the season
+    # window gates results reporting, the Set Champs window only scopes the
+    # Set Champs digest (S14: season ends Dec 18, Set Champs Jan 1 → Jan 24).
     ordered = (
         parsed["season_start"] <= parsed["season_end"]
-        and parsed["season_start"] <= parsed["set_champs_start"] <= parsed["set_champs_end"]
-        and parsed["set_champs_start"] <= parsed["season_end"]
+        and parsed["set_champs_start"] <= parsed["set_champs_end"]
     )
     if not ordered:
         return None, (
             f"⚠️ Date ordering invalid. Required: "
-            f"`season_start` ≤ `season_end`, "
-            f"`season_start` ≤ `set_champs_start` ≤ `set_champs_end`, and "
-            f"`set_champs_start` ≤ `season_end`. "
+            f"`season_start` ≤ `season_end` and `set_champs_start` ≤ `set_champs_end`. "
             f"Got start={resolved['season_start']}, end={resolved['season_end']}, "
             f"sc_start={resolved['set_champs_start']}, sc_end={resolved['set_champs_end']}."
         )

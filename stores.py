@@ -581,17 +581,10 @@ def load_season_calendar() -> tuple[list[dict], list[str]]:
             elif start and end and start > end:
                 _blank(label, f"ends ({end}) before it starts ({start})", s_key, e_key)
 
-        # Cross-window ordering, over the dates that are actually present. Set Champs
-        # must start during the season but may end after it (S11: season ended Apr 24,
-        # set champs Apr 26). Nothing is asserted between the prerelease and the
-        # season: S14's prerelease started the same day its season did.
-        sc_s = row['set_champs_start']
-        if sc_s and row['season_start'] and sc_s < row['season_start']:
-            _blank('set champs', f"starts ({sc_s}) before the season ({row['season_start']})",
-                   'set_champs_start', 'set_champs_end')
-        elif sc_s and row['season_end'] and sc_s > row['season_end']:
-            _blank('set champs', f"starts ({sc_s}) after the season ends ({row['season_end']})",
-                   'set_champs_start', 'set_champs_end')
+        # No ordering is asserted across windows. The season window gates results
+        # reporting and the Set Champs window only scopes the Set Champs digest, so
+        # Set Champs may run entirely after the season (S14: season ends Dec 18,
+        # Set Champs Jan 1). S14's prerelease also started the same day its season did.
 
         seen.add(season_id)
         rows.append(row)
