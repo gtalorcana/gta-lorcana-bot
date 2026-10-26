@@ -107,6 +107,9 @@ class GoogleSheetsApi:
 
         try:
             self.service = build("sheets", "v4", credentials=self.creds)
+            # Built once and reused. Every spreadsheets() call builds a fresh Resource
+            # whose generated method docstrings (prettyPrintSchema of batchUpdate) are
+            # ~19 MB, held in reference cycles that only a full gc pass frees.
             self.sheet = self.service.spreadsheets()
         except HttpError as err:
             raise
@@ -114,7 +117,7 @@ class GoogleSheetsApi:
     def get_values(self, spreadsheet_id, range_name):
         try:
             result = (
-                self.service.spreadsheets()
+                self.sheet
                 .values()
                 .get(spreadsheetId=spreadsheet_id, range=range_name)
                 .execute()
@@ -128,7 +131,7 @@ class GoogleSheetsApi:
     def clear_values(self, spreadsheet_id, range_name):
         try:
             result = (
-                self.service.spreadsheets()
+                self.sheet
                 .values()
                 .clear(
                     spreadsheetId=spreadsheet_id,
@@ -144,7 +147,7 @@ class GoogleSheetsApi:
         try:
             body = {"values": _values}
             result = (
-                self.service.spreadsheets()
+                self.sheet
                 .values()
                 .update(
                     spreadsheetId=spreadsheet_id,
@@ -170,7 +173,7 @@ class GoogleSheetsApi:
                 "data": value_ranges,
             }
             result = (
-                self.service.spreadsheets()
+                self.sheet
                 .values()
                 .batchUpdate(spreadsheetId=spreadsheet_id, body=body)
                 .execute()
@@ -191,7 +194,7 @@ class GoogleSheetsApi:
         if index is not None:
             properties["index"] = index
         try:
-            self.service.spreadsheets().batchUpdate(
+            self.sheet.batchUpdate(
                 spreadsheetId=spreadsheet_id,
                 body={"requests": [{"addSheet": {"properties": properties}}]},
             ).execute()
@@ -211,7 +214,7 @@ class GoogleSheetsApi:
 
         Silently does nothing if the tab is not found.
         """
-        meta = self.service.spreadsheets().get(
+        meta = self.sheet.get(
             spreadsheetId=spreadsheet_id, fields="sheets.properties"
         ).execute()
         sheet_id = next(
@@ -224,7 +227,7 @@ class GoogleSheetsApi:
             return
 
         try:
-            self.service.spreadsheets().batchUpdate(
+            self.sheet.batchUpdate(
                 spreadsheetId=spreadsheet_id,
                 body={"requests": [{
                     "repeatCell": {
@@ -250,7 +253,7 @@ class GoogleSheetsApi:
         try:
             body = {"values": _values}
             result = (
-                self.service.spreadsheets()
+                self.sheet
                 .values()
                 .append(
                     spreadsheetId=spreadsheet_id,
