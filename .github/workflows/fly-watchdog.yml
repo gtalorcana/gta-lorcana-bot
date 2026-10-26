@@ -1,0 +1,41 @@
+name: Fly watchdog
+
+# Fly stops restarting a crash-looping machine after its retry limit, and the
+# bot can't report its own death — on Oct 16 2026 it sat stopped for 10 days.
+# This starts any stopped machine. If the start doesn't hold, the job fails.
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Start stopped machines
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          stopped=$(flyctl machines list -a gta-lorcana-bot --json \
+            | jq -r '.[] | select(.state != "started") | .id')
+          if [ -z "$stopped" ]; then
+            echo "All machines running."
+            exit 0
+          fi
+          for id in $stopped; do
+            echo "::warning::Machine $id was stopped — starting it."
+            flyctl machine start "$id" -a gta-lorcana-bot
+          done
+          # A crash-looping bot comes up and dies within seconds; make sure it stayed up.
+          sleep 60
+          down=$(flyctl machines list -a gta-lorcana-bot --json \
+            | jq -r '.[] | select(.state != "started") | .id')
+          if [ -n "$down" ]; then
+            echo "::error::Machine(s) $down did not stay up after restart."
+            exit 1
+          fi
+          echo "Machines restarted and still running."

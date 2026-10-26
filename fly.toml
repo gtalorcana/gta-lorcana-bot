@@ -12,6 +12,13 @@ primary_region = "yyz"
 # No HTTP service — this is a Discord bot (outbound WebSocket only)
 # No ports, no health checks needed
 
+# Give up after 3 crash-restarts. A stopped machine is then brought back by
+# .github/workflows/fly-watchdog.yml, which checks every 30 minutes.
+[[restart]]
+  policy = "on-failure"
+  retries = 3
+  processes = ["app"]
+
 [[vm]]
   size = "shared-cpu-1x"
   memory = "512mb"
