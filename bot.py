@@ -1124,6 +1124,31 @@ async def process_results_reporting_thread(thread: discord.Thread) -> tuple[list
     return await _run_process_event_data(thread, rph_url)
 
 
+# The bot's own failure embeds in a results thread. Once the thread imports they
+# are wrong — they tell the player to fix a post that is fine, or ping admins for
+# a problem that's gone — so a success deletes them. Nothing else is touched.
+_STALE_RESULT_TITLES = {"⚠️ Validation Error", "❌ Processing Failed", "⏳ Processing Delayed"}
+
+
+async def _clear_stale_result_errors(thread: discord.Thread) -> None:
+    """Delete the bot's earlier failure embeds from a thread that just succeeded.
+    Best-effort: a failed delete is logged and never fails the import."""
+    deleted = 0
+    try:
+        async for msg in thread.history(limit=200):
+            if (msg.author.id == thread.guild.me.id and msg.embeds
+                    and msg.embeds[0].title in _STALE_RESULT_TITLES):
+                try:
+                    await msg.delete()
+                    deleted += 1
+                except Exception as e:
+                    print(f"  ⚠ Could not delete a stale error in '{thread.name}': {e}")
+    except Exception as e:
+        print(f"  ⚠ Could not read '{thread.name}' to clear stale errors: {e}")
+    if deleted:
+        print(f"  🧹 Cleared {deleted} stale error message(s) from '{thread.name}'")
+
+
 async def run_results_reporting_pipeline(
         thread: discord.Thread,
         starter_msg: discord.Message,
@@ -1141,7 +1166,8 @@ async def run_results_reporting_pipeline(
     Used by the startup recheck to decide whether to clear the crash-loop guard.
     """
     # Transient status messages sent during this run — deleted in finally.
-    # Success/error messages are NOT added here and are intentionally kept.
+    # Success/error messages are NOT added here; earlier errors are cleared on
+    # success by _clear_stale_result_errors.
     transient_msgs: list[discord.Message] = []
     success = False
 
@@ -1192,6 +1218,7 @@ async def run_results_reporting_pipeline(
             pass
         print(f"  ✓ Results processed OK: '{thread.name}'")
         success = True
+        await _clear_stale_result_errors(thread)
 
         # Trigger linking flow for any new Playhub IDs in this event
         try:
@@ -1311,6 +1338,7 @@ async def _schedule_auto_retry(
         except Exception:
             pass
         print(f"  ✓ Auto-retry {attempt} succeeded for '{thread.name}'")
+        await _clear_stale_result_errors(thread)
 
         try:
             loop = asyncio.get_running_loop()
