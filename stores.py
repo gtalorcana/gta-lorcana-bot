@@ -1252,6 +1252,10 @@ def create_season_sheets(new_season: str) -> list[str]:
     try:
         _gs.add_sheet(BOT_DATABASE_SPREADSHEET_ID, set_champs_title)
         created.append(set_champs_title)
+        # The daily refresh writes from A2 and never touches row 1, so the header
+        # is seeded once here or the tab never gets one (S13's didn't).
+        _gs.update_values(BOT_DATABASE_SPREADSHEET_ID, f"{set_champs_title}!A1",
+                          "USER_ENTERED", [_EVENT_DIGEST_HEADER])
     except _HttpError as e:
         if _is_already_exists(e):
             print(f"  Sheet '{set_champs_title}' already exists — skipping")
@@ -1565,9 +1569,17 @@ def refresh_set_champs() -> tuple[int, list]:
 
     rows = _event_digest_rows(filtered)
 
+    # Clear first: update_values only overwrites as many rows as it is given, so a
+    # refresh with fewer events (a cancellation) would leave the old tail behind.
+    _gs.clear_values(BOT_DATABASE_SPREADSHEET_ID, season.SET_CHAMPS_EVENTS_RANGE_NAME)
     _gs.update_values(BOT_DATABASE_SPREADSHEET_ID, season.SET_CHAMPS_EVENTS_RANGE_NAME, "USER_ENTERED", rows)
     print(f"  ✓ Set Champs sheet updated ({len(rows)} row(s))")
     return len(rows), rows
+
+
+# Header for the Set Champs sheet's row 1; the rows below it come from _event_digest_rows.
+_EVENT_DIGEST_HEADER = ["Date", "Time (Toronto)", "Store ID", "Store Name", "City",
+                        "Player Cap", "Format", "Event Name", "RPH Link"]
 
 
 def _event_digest_rows(events: list, with_region: bool = False) -> list:
