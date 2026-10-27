@@ -1,11 +1,14 @@
 import json
 import os
+import threading
 
+import google_auth_httplib2
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from googleapiclient.http import build_http
 
 # If modifying these scopes, delete the file token.json.
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
@@ -14,6 +17,7 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 class GoogleSheetsApi:
     def __init__(self):
         self.creds = None
+        self._local = threading.local()
 
         _dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         _token_path = os.path.join(_dir, "var", "token.json")
@@ -114,13 +118,27 @@ class GoogleSheetsApi:
         except HttpError as err:
             raise
 
+    def _http(self):
+        """
+        This thread's authorized connection. httplib2.Http is not thread-safe, and
+        the bot calls Sheets from up to five executor threads at once: sharing the
+        one inside self.service interleaved their TLS streams (SSLError
+        WRONG_VERSION_NUMBER, read timeouts) during the startup rush. Every
+        execute() passes one of these instead. build_http keeps the client's
+        default 60s socket timeout.
+        """
+        http = getattr(self._local, "http", None)
+        if http is None:
+            http = self._local.http = google_auth_httplib2.AuthorizedHttp(self.creds, http=build_http())
+        return http
+
     def get_values(self, spreadsheet_id, range_name):
         try:
             result = (
                 self.sheet
                 .values()
                 .get(spreadsheetId=spreadsheet_id, range=range_name)
-                .execute()
+                .execute(http=self._http())
             )
             rows = result.get("values", [])
             print(f"  {len(rows)} rows retrieved")
@@ -137,7 +155,7 @@ class GoogleSheetsApi:
                     spreadsheetId=spreadsheet_id,
                     range=range_name,
                 )
-                .execute()
+                .execute(http=self._http())
             )
             return result
         except HttpError as error:
@@ -155,7 +173,7 @@ class GoogleSheetsApi:
                     valueInputOption=value_input_option,
                     body=body,
                 )
-                .execute()
+                .execute(http=self._http())
             )
             print(f"  {result.get('updatedCells')} cells updated")
             return result
@@ -176,7 +194,7 @@ class GoogleSheetsApi:
                 self.sheet
                 .values()
                 .batchUpdate(spreadsheetId=spreadsheet_id, body=body)
-                .execute()
+                .execute(http=self._http())
             )
             print(f"  {result.get('totalUpdatedCells')} cells batch-updated")
             return result
@@ -197,7 +215,7 @@ class GoogleSheetsApi:
             self.sheet.batchUpdate(
                 spreadsheetId=spreadsheet_id,
                 body={"requests": [{"addSheet": {"properties": properties}}]},
-            ).execute()
+            ).execute(http=self._http())
             print(f"  Sheet '{title}' created")
         except HttpError as error:
             raise
@@ -216,7 +234,7 @@ class GoogleSheetsApi:
         """
         meta = self.sheet.get(
             spreadsheetId=spreadsheet_id, fields="sheets.properties"
-        ).execute()
+        ).execute(http=self._http())
         sheet_id = next(
             (s["properties"]["sheetId"] for s in meta["sheets"]
              if s["properties"]["title"] == sheet_title),
@@ -244,7 +262,7 @@ class GoogleSheetsApi:
                         "fields": "userEnteredFormat.numberFormat",
                     }
                 }]},
-            ).execute()
+            ).execute(http=self._http())
             print(f"  Date format applied to '{sheet_title}' column {column_index}")
         except HttpError as error:
             raise
@@ -261,7 +279,7 @@ class GoogleSheetsApi:
                     valueInputOption=value_input_option,
                     body=body,
                 )
-                .execute()
+                .execute(http=self._http())
             )
             print(f"  {result.get('updates').get('updatedCells')} cells appended")
             return result
