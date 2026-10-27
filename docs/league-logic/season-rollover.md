@@ -86,13 +86,6 @@ to fix it. They apply **in memory only** — the bot never writes to the Seasons
 or any reload including `/seasons`, reverts to the row. `/seasons` flags the current season as
 `override` while one is in effect. Edit the row to make a change stick.
 
-### Retired Bot State keys
-
-Rollover no longer writes `season_start_date`, `season_end_date`, `set_champs_start_date` or
-`set_champs_end_date`. They are left in place on purpose: they are the fallback for a season with
-no row in the tab, and erasing them in the same write that flips the pointer would leave neither
-source of truth. Delete them by hand once the tab has proven itself.
-
 ## `/archive-season` Command
 
 ```
@@ -112,23 +105,16 @@ What it does:
 
 ## How Season Config Works
 
-Season values are stored in the **Bot State sheet** and loaded at startup via `season.init(bot_state)`.
-All derived values (sheet names, range names, RPH datetime strings) live in `season.py` as mutable module globals.
+The season **pointer** (`season` in Bot State) says which season is current; its dates come from
+that season's row in the **Seasons** tab. Both are loaded at startup via `season.init(bot_state, calendar)`,
+and rollover changes only the pointer. All derived values (sheet names, range names, RPH datetime
+strings) live in `season.py` as mutable module globals.
 
 Consumers must use `import season; season.X` — not `from season import X` — so they get the live value
 at call time rather than a frozen import-time copy.
 
-Fallback values in `constants.py` are used when Bot State keys are absent (local dev, cold start).
+A current season with no row in the tab has blank windows — there is no fallback. The flat
+`season_start_date` / `set_champs_*_date` / `prerelease_*` Bot State keys that preceded the tab were
+removed after the S14 rollover.
 
-### Bot State keys
-
-| Key | Example value |
-|-----|---------------|
-| `season` | `S12` |
-| `season_start_date` | `2026-05-01` |
-| `season_end_date` | `2026-07-10` |
-| `set_champs_start_date` | `2026-06-21` |
-| `set_champs_end_date` | `2026-07-10` |
-
-> When entering dates manually into the Bot State sheet, prefix with a single apostrophe (`'2026-05-01`)
-> to prevent Google Sheets from converting the value to a date serial number.
+If `season` itself is absent from Bot State (local dev, cold start), `constants.CURRENT_SEASON` is used.

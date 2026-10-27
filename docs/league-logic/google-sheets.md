@@ -76,7 +76,8 @@ ISO. `M/D/YYYY` and `Mon D, YYYY` are also accepted; `D/M/YYYY` is refused on pu
 `03/04/2026` is unrecoverably ambiguous and a silently wrong season boundary is worse than a
 refused row.
 
-A missing tab is not fatal: the bot falls back to the legacy flat date keys below and warns.
+A missing tab is not fatal: the bot starts with every season window blank and warns. There is no
+other source of dates — the flat Bot State date keys were removed after the S14 rollover.
 
 ---
 
@@ -85,9 +86,6 @@ A missing tab is not fatal: the bot falls back to the legacy flat date keys belo
 | Key | Value | Purpose |
 |-----|-------|---------|
 | `season` | `S11` | Current season identifier |
-| `season_start_date` | `2026-02-13` | Season start date (used to filter RPH events) |
-| `season_end_date` | `2026-04-24` | Season end date |
-| `season_start_date` / `season_end_date` / `set_champs_*_date` / `prerelease_*` | | **Retired** — superseded by the Seasons tab. Still read as a fallback for one season when the current season has no row there |
 | `set_champs_msg_ids` / `prerelease_msg_ids` | `id\|id\|…` | Digest message IDs, header first, so the daily refresh edits in place |
 | `wtp_msg_0` / `wtp_msg_1` / `wtp_msg_2` | Discord message ID | Persists `#where-to-play` message IDs across restarts so the bot edits in-place rather than reposting |
 | `recheck:<thread_id>` | `1` | Crash-loop guard — set before a startup recheck attempt, cleared on success |

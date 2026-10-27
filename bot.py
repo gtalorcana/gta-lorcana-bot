@@ -3669,11 +3669,7 @@ async def _execute_rollover(loop, plan: _RolloverPlan) -> list[str]:
     except Exception as e:
         raise RuntimeError(f"❌ Failed to create sheet tabs: {e}") from e
 
-    # 2. Move the season pointer. Only the pointer: the dates live in the Seasons
-    #    tab now. The retired flat date keys are deliberately left alone rather than
-    #    deleted here — flipping the pointer and erasing the fallback in one write is
-    #    how you end up with neither source of truth. They are removed by hand once
-    #    the tab has proven itself.
+    # 2. Move the season pointer. Only the pointer: the dates live in the Seasons tab.
     try:
         def _update_state():
             # strict=True: read-then-write — see set_bot_state_key
@@ -4102,9 +4098,9 @@ async def seasons_command(interaction: discord.Interaction, reload: bool = True)
                                    f"{pre['prerelease_start']} → {pre['prerelease_end']}"
                                    if pre else "none open")]
 
-    if season.CALENDAR_SOURCE == 'bot_state':
-        lines += ["", f"⚠️ `{season.CURRENT_SEASON}` has no row in the Seasons tab — running on the "
-                      f"legacy Bot State date keys. Add the row."]
+    if season.CALENDAR_SOURCE == 'none':
+        lines += ["", f"⚠️ `{season.CURRENT_SEASON}` has no row in the Seasons tab — its windows are "
+                      f"blank and season-dependent tasks are off. Add the row."]
     elif season.CALENDAR_SOURCE == 'override':
         lines += ["", f"⚠️ `{season.CURRENT_SEASON}`'s dates were overridden on the command line and "
                       f"exist **in memory only** — a restart reverts to the Seasons tab."]

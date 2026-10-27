@@ -502,12 +502,11 @@ def load_season_calendar() -> tuple[list[dict], list[str]]:
 
     Raises on a genuine Sheets read failure, so callers keep whatever calendar they
     already hold in memory. Returning [] on an outage would blank every season
-    window at once — which, unlike the flat Bot State keys this replaces, also
-    switches off the results pipeline's date eligibility checks.
+    window at once, which also switches off the results pipeline's date
+    eligibility checks.
 
-    A *missing* tab is not a failure: it returns ([], [problem]) so a deployment
-    that runs before the tab exists falls back to the legacy flat keys instead of
-    refusing to start.
+    A *missing* tab is not a failure: it returns ([], [problem]) so the bot still
+    starts and reports it, with every season window blank.
 
     Rows are dropped, never half-applied: a row with an unreadable date or a
     one-sided window is reported and skipped, because a season with a start and no

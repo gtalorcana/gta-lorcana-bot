@@ -79,7 +79,7 @@ SET_CHAMPS_EVENTS_RANGE_NAME: str = None
 
 SEASONS: list[dict] = []        # all calendar rows
 CURRENT: dict | None = None     # the row for CURRENT_SEASON, if there is one
-CALENDAR_SOURCE: str = 'none'   # 'sheet' | 'bot_state' | 'none' — reported by /seasons
+CALENDAR_SOURCE: str = 'none'   # 'sheet' | 'override' | 'none' — reported by /seasons
 
 _KEEP = object()  # init(calendar=_KEEP): leave the loaded calendar as it is
 
@@ -172,30 +172,10 @@ def init(bot_state: dict, calendar=_KEEP) -> None:
         # from a command override and will not survive a restart.
         CALENDAR_SOURCE = CURRENT.get('source') or 'sheet'
     else:
-        # Legacy fallback: synthesize the current season from the flat Bot State keys
-        # the Seasons tab replaces, so this ships before the tab exists and can be
-        # rolled back to. Once a season has passed on the tab, delete this branch
-        # and the keys with it.
-        # TODO (after S14 ends): drop the flat-key fallback.
-        legacy = {
-            'season':           CURRENT_SEASON,
-            'set_name':         '',
-            'sheet_row':        None,
-            'source':           'bot_state',
-            'prerelease_start': bot_state.get('prerelease_start_date') or None,
-            'prerelease_end':   bot_state.get('prerelease_end_date')   or None,
-            'season_start':     bot_state.get('season_start_date')     or None,
-            'season_end':       bot_state.get('season_end_date')       or None,
-            'set_champs_start': bot_state.get('set_champs_start_date') or None,
-            'set_champs_end':   bot_state.get('set_champs_end_date')   or None,
-        }
-        if legacy['season_start'] or legacy['set_champs_start']:
-            CURRENT         = legacy
-            CALENDAR_SOURCE = 'bot_state'
-            print(f"  ⚠ {CURRENT_SEASON} has no row in the Seasons tab — using the legacy "
-                  f"Bot State date keys. Add the row to the tab.")
-        else:
-            CALENDAR_SOURCE = 'none'
+        # No row for the current season. There is no fallback: the flat Bot State
+        # date keys this tab replaced were removed after S14's rollover. Every
+        # window is then blank, and on_ready / /seasons say so.
+        CALENDAR_SOURCE = 'none'
 
     _c_row                = CURRENT or {}
     SEASON_START_DATE     = _c_row.get('season_start')     or None
