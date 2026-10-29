@@ -2524,14 +2524,6 @@ async def _season_close_action(interaction: discord.Interaction, season_id: str,
 _ETB_DISCOUNT_CODE    = "ETBGTALORCANA"
 _ETB_DISCOUNT_MIN_EVENTS = 3
 
-# TEMPORARY — dry-run testers. For these Discord IDs the whole flow runs, but
-# nothing is written: no Shopify whitelist, no approval row, no registry link.
-# Typing a Play Hub name forces the unlinked path (pick-yourself + mod check);
-# the 3-event minimum, already-approved and ownership checks are skipped so any
-# player can be picked. Remove once the flow has been walked through.
-_ETB_TEST_USER_IDS = {361716209324130305}
-_ETB_TEST_NOTE     = "🧪 **Test run — nothing is saved or activated.**\n"
-
 
 def _etb_code_message(email: str) -> str:
     """The approval DM. Shared by the instant and mod-confirmed paths."""
@@ -2546,7 +2538,7 @@ def _etb_code_message(email: str) -> str:
 
 async def _apply_etb_approval(discord_id: int, discord_display_name: str,
                               playhub_id: str, rph_username: str, email: str,
-                              count: int, customer_id, test: bool = False) -> str | None:
+                              count: int, customer_id) -> str | None:
     """
     The granting half of /etb-discount: Shopify whitelist, approval row,
     registry link.
@@ -2561,11 +2553,6 @@ async def _apply_etb_approval(discord_id: int, discord_display_name: str,
     a lie.
     """
     loop = asyncio.get_running_loop()
-
-    if test:
-        print(f"  🧪 /etb-discount test: would whitelist customer {customer_id}, record approval, "
-              f"and link {rph_username} ({playhub_id}) → discord {discord_id}")
-        return None
 
     if _shopify and _etb_price_rule_id and customer_id is not None:
         try:
@@ -2600,8 +2587,7 @@ async def _apply_etb_approval(discord_id: int, discord_display_name: str,
 
 async def _post_etb_approval_request(interaction: discord.Interaction,
                                      playhub_id: str, rph_username: str,
-                                     email: str, count: int, customer_id,
-                                     test: bool = False) -> bool:
+                                     email: str, count: int, customer_id) -> bool:
     """
     Ask the mods to vouch for an unlinked caller before anything is granted.
 
@@ -2623,7 +2609,7 @@ async def _post_etb_approval_request(interaction: discord.Interaction,
     _member, score = fuzzy_match_member(rph_username, [interaction.user])
 
     msg = await mod_ch.send(embed=make_embed(
-        title=("🧪 TEST — " if test else "") + "🔐 ETB Discount — Identity Check",
+        title="🔐 ETB Discount — Identity Check",
         description=(
             f"**Discord:** {interaction.user.mention} (`{interaction.user.display_name}`)\n"
             f"**Claims to be:** {rph_username} (Playhub `{playhub_id}`)\n"
@@ -2645,7 +2631,6 @@ async def _post_etb_approval_request(interaction: discord.Interaction,
         'email':        email,
         'count':        count,
         'customer_id':  customer_id,
-        'test':         test,
     }
     try:
         await asyncio.get_running_loop().run_in_executor(
@@ -2775,7 +2760,7 @@ async def _etb_resolve(req: dict, approve: bool, mod_ch) -> str:
     err = await _apply_etb_approval(
         req['discord_id'], req['discord_name'],
         req['playhub_id'], req['rph_username'], req['email'],
-        req['count'], req['customer_id'], test=req.get('test', False),
+        req['count'], req['customer_id'],
     )
     if err:
         if mod_ch:
@@ -2793,8 +2778,7 @@ async def _etb_resolve(req: dict, approve: bool, mod_ch) -> str:
     dm_ok = False
     if user:
         try:
-            await user.send((_ETB_TEST_NOTE if req.get('test') else "")
-                            + _etb_code_message(req['email']))
+            await user.send(_etb_code_message(req['email']))
             dm_ok = True
         except discord.Forbidden:
             pass
@@ -3007,10 +2991,6 @@ async def _etb_flow(interaction: discord.Interaction, email: str,
     """
     loop     = asyncio.get_running_loop()
     discord_id = str(interaction.user.id)
-    test       = interaction.user.id in _ETB_TEST_USER_IDS
-    if test:
-        await interaction.followup.send(_ETB_TEST_NOTE + "Running the full flow as a dry run.",
-                                        ephemeral=True)
 
     # ── Step 1: Resolve identity to a Playhub ID ─────────────────────────────────
     #
@@ -3029,8 +3009,6 @@ async def _etb_flow(interaction: discord.Interaction, email: str,
     except Exception as e:
         # Non-fatal — fall back to resolving by name below.
         print(f"  ⚠ /etb-discount registry lookup failed, falling back to name: {e}")
-    if test and (rph_username or picked_id):
-        known_id = None   # a typed name means "show me the unlinked path"
 
     claim_id = known_id or picked_id
     if not claim_id and not rph_username:
@@ -3092,7 +3070,7 @@ async def _etb_flow(interaction: discord.Interaction, email: str,
          if e['playhub_id'] and e['playhub_id'] == playhub_id and e['discord_id']),
         None,
     )
-    if owner and owner['discord_id'] != interaction.user.id and not test:
+    if owner and owner['discord_id'] != interaction.user.id:
         print(f"  ⚠ /etb-discount: {interaction.user} claimed playhub_id={playhub_id} "
               f"owned by discord {owner['discord_id']}")
         try:
@@ -3111,7 +3089,7 @@ async def _etb_flow(interaction: discord.Interaction, email: str,
         )
         return
 
-    if count < _ETB_DISCOUNT_MIN_EVENTS and not test:
+    if count < _ETB_DISCOUNT_MIN_EVENTS:
         await interaction.followup.send(
             f'❌ You need at least {_ETB_DISCOUNT_MIN_EVENTS} GTA Lorcana events this season to qualify.\n'
             f'We found {count} event(s) on your record for {season.CURRENT_SEASON}.\n'
@@ -3122,8 +3100,7 @@ async def _etb_flow(interaction: discord.Interaction, email: str,
 
     # ── Step 3: Already approved check (ETB Approvals sheet) ──
     try:
-        existing = (None if test else
-                    await loop.run_in_executor(None, get_etb_approval, discord_id))
+        existing = await loop.run_in_executor(None, get_etb_approval, discord_id)
     except Exception as e:
         print(f"  ✗ /etb-discount ETB approval lookup failed: {e}")
         await interaction.followup.send(
@@ -3167,7 +3144,7 @@ async def _etb_flow(interaction: discord.Interaction, email: str,
 
         # Step 5: already whitelisted in Shopify — recover Bot State and confirm
         try:
-            already = False if test else await loop.run_in_executor(
+            already = await loop.run_in_executor(
                 None, _shopify.is_whitelisted, _etb_price_rule_id, customer['id']
             )
         except Exception as e:
@@ -3219,7 +3196,7 @@ async def _etb_flow(interaction: discord.Interaction, email: str,
 
         posted = await _post_etb_approval_request(
             interaction, playhub_id, rph_username, email, count,
-            customer['id'] if customer else None, test=test,
+            customer['id'] if customer else None,
         )
         if posted:
             await interaction.followup.send(
@@ -3241,7 +3218,7 @@ async def _etb_flow(interaction: discord.Interaction, email: str,
     err = await _apply_etb_approval(
         interaction.user.id, interaction.user.display_name,
         playhub_id, rph_username, email, count,
-        customer['id'] if customer else None, test=test,
+        customer['id'] if customer else None,
     )
     if err:
         try:
