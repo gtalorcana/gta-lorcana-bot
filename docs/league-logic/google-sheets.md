@@ -18,7 +18,7 @@ Created by the season-close checklist's rollover. `Standings` and `Events` are w
 | Tab | Columns | Notes |
 |-----|---------|-------|
 | `S## Standings` | date, store, rank, display_name, record, match_points, playhub_id | A–G; one row per player per event |
-| `S## Results` | **Player ID**, Players, 1st…10th, Points, Events Attended, Last Event…, Ranking… | A–P; Player ID (col A) `VLOOKUP`ed from Standings (display_name → playhub_id), mirroring the name spill in col B |
+| `S## Results` | **Player ID**, Players, 1st…10th, Points, Events Attended, Last Event…, Report order… | A–P; Player ID (col A) `VLOOKUP`ed from Standings (display_name → playhub_id), mirroring the name spill in col B |
 | `S## Leaderboard` | Rank, **Player ID**, Name, Points, Events Attended | A–E; row 1 = header, A auto-sequences (1..N) off the spill, B–E spill from a mask formula at `B2` |
 
 > Recording Rare/Uncommon (season-close checklist) reads the Leaderboard by column position (`A2:E`) and matches players to the

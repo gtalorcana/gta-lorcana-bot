@@ -186,6 +186,11 @@ a design note below changes.
 - Results/Leaderboard formulas group by Playhub ID, never display name. Sheets' `FILTER` and
   `COUNTIF` are case-insensitive, so name grouping merged `HABIBI` with `Habibi` (two people,
   both credited both records) and split anyone who renamed mid-season
+- **Leaderboard tiebreakers** (the published #league-rules order): points, then the date the
+  score was reached (Results O), then the **Standings row** of that event (Results P). Events
+  are appended in report order and each event's rows in RPH rank order, so the row number is
+  "store reported first" across stores and "finished higher" within one. Deleting and
+  re-importing an event moves it to the end — it then counts as reported last
 - `SORTN`'s `sort_column` indexes the *filtered array*, not the source sheet. An out-of-range
   index silently disables the sort instead of erroring — that is how "best 10 results" ran as
   "first 10" for a whole season

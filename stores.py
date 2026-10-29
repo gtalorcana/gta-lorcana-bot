@@ -1111,7 +1111,7 @@ def create_season_sheets(new_season: str) -> list[str]:
                     "Player ID", "Players",
                     "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th",
                     "Points", "Events Attended",
-                    "Last Event of top 10 results", "Ranking of Last Event of top 10",
+                    "Last Event of top 10 results", "Report order of last counted event",
                 ]],
             },
             {
@@ -1161,13 +1161,18 @@ def create_season_sheets(new_season: str) -> list[str]:
                     ]],
                 },
                 {
-                    # Rank at that event. MIN collapses the case of two rows sharing a
-                    # date — returning the range bare put #REF! in every such cell.
+                    # Standings row of that event — the published tiebreakers 2–4 in
+                    # one key. Events are appended in the order they're reported, and
+                    # each event's rows in RPH's rank order (points, then OMW), so a
+                    # lower row means "store reported first" across stores and "finished
+                    # higher" within one. MAX: of two events on the same day, the score
+                    # was reached at the later one. Rank alone (the old key) let a 1st at
+                    # a later-reported store beat the rules, and fell back to name order.
                     "range":  f"{results_title}!P{r}",
                     "values": [[
-                        f'=IF($O{r}="","",LET(r,FILTER({std}!C$2:C,'
+                        f'=IF($O{r}="","",LET(x,FILTER(ROW({std}!A$2:A),'
                         f"{std}!I$2:I=$A{r},{std}!A$2:A=$O{r}),"
-                        f'IF(COUNT(r)=0,"",MIN(r))))'
+                        f'IF(COUNT(x)=0,"",MAX(x))))'
                     ]],
                 },
             ])
@@ -1188,8 +1193,8 @@ def create_season_sheets(new_season: str) -> list[str]:
             "values": [["=ARRAYFORMULA(IF(LEN(C2:C),SEQUENCE(ROWS(C2:C)),\"\"))"]],
         })
         # Ban-filter by Player ID (Results col A vs Ban List col A) — RPH IDs are
-        # stable, display names aren't. Sort by Points (col 13) with Last-Event/
-        # Ranking tiebreakers (15, 16), keep ID/Name/Points/Events (cols 1,2,13,14).
+        # stable, display names aren't. Sort by Points (col 13) with Last-Event/Report-order
+        # tiebreakers (15, 16), keep ID/Name/Points/Events (cols 1,2,13,14).
         seed_ranges.append({
             "range":  f"{leaderboard_title}!B2",
             "values": [[
