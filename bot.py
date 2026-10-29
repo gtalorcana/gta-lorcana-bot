@@ -2902,19 +2902,14 @@ async def etb_discount(interaction: discord.Interaction):
 
 
 @tree.command(name="etb-post", description="Post or refresh the #etb-discount how-to message and its button (mods only)")
-@app_commands.describe(channel="Post a one-off copy here instead, e.g. a test channel. Not tracked — "
-                               "re-running posts another")
-async def etb_post(interaction: discord.Interaction, channel: discord.TextChannel = None):
+async def etb_post(interaction: discord.Interaction):
     if not _is_admin(interaction):
         await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
         return
     await interaction.response.defer(ephemeral=True)
     loop = asyncio.get_running_loop()
 
-    # Only the real channel's message is tracked in Bot State; a copy elsewhere
-    # must not take over the key and orphan the live post.
-    tracked = channel is None or channel.id == ETB_DISCOUNT_CHANNEL_ID
-    channel = channel or get_channel_by_id(interaction.guild, ETB_DISCOUNT_CHANNEL_ID)
+    channel = get_channel_by_id(interaction.guild, ETB_DISCOUNT_CHANNEL_ID)
     if not channel:
         await interaction.followup.send(f"⚠️ Channel `{ETB_DISCOUNT_CHANNEL_ID}` not found.", ephemeral=True)
         return
@@ -2929,15 +2924,6 @@ async def etb_post(interaction: discord.Interaction, channel: discord.TextChanne
     view.add_item(_EtbApplyButton())
     # The text names the mods to contact — show the mentions, never ping them.
     quiet = discord.AllowedMentions.none()
-
-    if not tracked:
-        try:
-            await channel.send(text, view=view, allowed_mentions=quiet)
-        except discord.Forbidden:
-            await interaction.followup.send(_etb_post_forbidden(channel), ephemeral=True)
-            return
-        await interaction.followup.send(f"✅ Posted a copy in {channel.mention}.", ephemeral=True)
-        return
 
     try:
         state = await loop.run_in_executor(None, lambda: load_bot_state(strict=True))
