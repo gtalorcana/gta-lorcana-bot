@@ -2925,8 +2925,8 @@ async def _etb_flow(interaction: discord.Interaction, email: str,
                 f"🔎 We found **{count}** {season.CURRENT_SEASON} events for "
                 f"**{rph_username}** — nice work.\n\n"
                 f"Your Discord account isn't linked to a Playhub profile yet, so a "
-                f"mod needs to confirm it's you. You'll get a DM with the code as "
-                f"soon as they do.",
+                f"mod needs to confirm it's you. You'll get a DM confirming your "
+                f"approval as soon as they do.",
                 ephemeral=True,
             )
         else:

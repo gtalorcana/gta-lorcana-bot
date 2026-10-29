@@ -5,7 +5,7 @@ Unlock an exclusive discount at enterthebattlefield.ca by verifying your GTA Lor
 The code only works once your account is approved — the bot activates it for you.
 
 **Eligibility:**
-Attend **3 or more GTA Lorcana events** this season on Ravensburger Play Hub.
+Attend **3 or more GTA Lorcana events** this season on Ravensburger Play Hub — see <#1253958098062803095>.
 
 **How to apply:**
 1. Create an account at [enterthebattlefield.ca](https://enterthebattlefield.ca/) if you don't have one yet
@@ -16,6 +16,6 @@ Attend **3 or more GTA Lorcana events** this season on Ravensburger Play Hub.
 ✅ *Your Discord is already linked to your Play Hub profile* — approval is instant
 🔎 *Not linked yet* — a mod confirms it's you first, then the bot DMs you once you're approved. You only wait once
 
-_Approval is tied to your Discord account — you only need to do this once._
+_The discount is attached to your enterthebattlefield.ca account (the email you enter) — you only need to apply once._
 
 Questions? Message <@361716209324130305> / <@904550642213875723>
