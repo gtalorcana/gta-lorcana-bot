@@ -9,12 +9,12 @@ Attend **3 or more GTA Lorcana events** this season on Ravensburger Play Hub.
 
 **How to apply:**
 1. Create an account at [enterthebattlefield.ca](https://enterthebattlefield.ca/) if you don't have one yet
-2. Allow DMs from server members — the bot sends your code by DM
+2. Allow DMs from server members — that's how the bot tells you you're approved
 3. Press **Get my ETB discount** below and fill in the form
 
 **What happens next:**
 ✅ *Your Discord is already linked to your Play Hub profile* — approval is instant
-🔎 *Not linked yet* — a mod confirms it's you first, then the bot DMs you the code. You only wait once
+🔎 *Not linked yet* — a mod confirms it's you first, then the bot DMs you once you're approved. You only wait once
 
 _Approval is tied to your Discord account — you only need to do this once._
 
