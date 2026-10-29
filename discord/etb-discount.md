@@ -1,11 +1,11 @@
 🏪 **ETB Discount**
-Unlock an exclusive discount at enterthebattlefield.ca by verifying your GTA Lorcana competitive history.
+Unlock an exclusive discount at enterthebattlefield.ca for playing in the GTA Lorcana league.
 
 **Discount code:** `ETBGTALORCANA`
 The code only works once your account is approved — the bot activates it for you.
 
 **Eligibility:**
-Attend **3 or more GTA Lorcana events** this season on Ravensburger Play Hub — see <#1253958098062803095>.
+**3 or more events** this season — check your count in <#1253958098062803095>.
 
 **How to apply:**
 1. Create an account at [enterthebattlefield.ca](https://enterthebattlefield.ca/) if you don't have one yet
