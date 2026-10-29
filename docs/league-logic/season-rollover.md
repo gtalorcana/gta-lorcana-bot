@@ -25,81 +25,44 @@ The next season's dates come **only** from the Seasons tab; the checklist links 
 and is never touched again. Steps can finish out of order — the invitational usually lands after
 the rollover, so the checklist stays open into the next season.
 
-Every step checks what it *produced*, so `/season-rollover` and `/archive-season` tick it too. State lives in one
-Bot State key per season, `season_close:S##` (JSON: `msg_id`, the step markers, `closed`).
-Buttons are admin-only (`ADMIN_USER_IDS`) and route by custom_id, so they survive restarts.
+Every step checks what it *produced* — registry stamps, the season pointer, the Archive sheet —
+or a marker the step writes. State lives in one Bot State key per season, `season_close:S##`
+(JSON: `msg_id`, the step markers, `closed`). Buttons are admin-only (`ADMIN_USER_IDS`) and route
+by custom_id, so they survive restarts. `/season-close` posts or refreshes the checklist on demand.
+
+The checklist is the only way to record, roll over and archive — the `/record-*`,
+`/season-rollover` and `/archive-season` commands were removed in Oct 2026.
 
 **Why the markers exist:** registry role columns keep the *earliest* season. If every S13 earner
 already held their role from S12, recording S13 changes no cell, and the registry alone cannot
-tell "recorded, nothing new" from "never recorded". The record steps write the
-marker, and `/season-rollover`'s guard accepts it — so that case doesn't need `force`.
+tell "recorded, nothing new" from "never recorded". The record step writes the marker either
+way, and the rollover guard accepts it.
 
-## End-of-Season Checklist (manual)
+## Before the season ends
 
-1. Fill the new season's row in the **Seasons** tab — season start/end and Set Champs
-   start/end. Check it with `/seasons`
-2. Press **Record & assign roles** on the checklist — it records final Uncommon/Rare from
-   the leaderboard and grants the Discord roles. (Recording is checklist-only; the slash
-   commands were removed.)
-3. Run `/archive-season S##` to copy the season's tabs to the Archive spreadsheet
-4. Verify the archive looks correct
-5. Run `/season-rollover S##` — it reads the dates from that row
-6. Manually delete the old season's tabs from the League sheet when ready
+Fill the next season's row in the **Seasons** tab — season start/end and Set Champs start/end —
+and check it with `/seasons`. The checklist links the tab and has a **Reload** button.
 
-> **Recording must come before rollover**, or the finished season is easy never to record.
->
-> `/season-rollover` enforces this: it refuses if no registry row carries the outgoing
-> season in columns I/J. Pass `force: true` to override, e.g. for a season that genuinely
-> had no earners.
+> **Recording must come before rollover**, or the finished season is easy never to record. The
+> Roll over button only appears once step 1 is recorded, and is re-checked at click time.
 
-## `/season-rollover` Command
+## Roll over (step 3)
 
-```
-/season-rollover new_season [start_date] [end_date] [set_champs_start] [set_champs_end] [force]
-```
-
-Example:
-```
-/season-rollover S14
-```
-
-What it does:
 - Re-reads the Seasons tab, so a row edited moments earlier is picked up without a restart
-- Resolves the new season's dates from its row, and **refuses, naming the empty cells**, if any
-  of the four are missing. A future season normally has its Set Champs dates blank until they
-  are announced — filling them in is the point of this step
-- Creates five tabs: `S14 Standings`, `S14 Events`, `S14 Leaderboard`, `S14 Results` (in the League spreadsheet), and `S14 Set Champs` (in the Bot Database spreadsheet)
-- Writes column headers into the `Results` tab
-- Writes **only** `season` to Bot State — the dates live in the Seasons tab
-- Calls `season.init()` in memory — no redeploy needed
-- Warns if the outgoing season's Set Champs window is still open, because the Set Champs digest
-  and its sheet follow `CURRENT_SEASON` and will stop refreshing the outgoing tab
+- Refuses, naming the empty cells, if any of the next season's four dates are missing
+- Creates five tabs: `S14 Standings`, `S14 Events`, `S14 Leaderboard`, `S14 Results` (League
+  spreadsheet) and `S14 Set Champs` (Bot Database spreadsheet), with the Results headers and
+  formulas seeded. Tabs that already exist are skipped, so it is safe to re-run
+- Writes **only** `season` to Bot State — the dates live in the Seasons tab — and calls
+  `season.init()` in memory, so no redeploy is needed
+- Warns if the outgoing season's Set Champs window is still open: the Set Champs digest and its
+  sheet follow `CURRENT_SEASON` and stop refreshing the outgoing tab
 
-Tabs that already exist are silently skipped (safe to re-run if something fails partway).
+## Archive (step 4)
 
-### Date overrides
-
-The four date arguments override the tab row for the case where it is wrong and there is no time
-to fix it. They apply **in memory only** — the bot never writes to the Seasons tab — so a restart,
-or any reload including `/seasons`, reverts to the row. `/seasons` flags the current season as
-`override` while one is in effect. Edit the row to make a change stick.
-
-## `/archive-season` Command
-
-```
-/archive-season season_name
-```
-
-Example:
-```
-/archive-season S11
-```
-
-What it does:
-- Reads all four season tabs from the League spreadsheet (`Standings`, `Events`, `Leaderboard`, `Results`)
-- Creates matching tabs in the Archive spreadsheet and writes the data
-- If a tab already exists in the archive, data is overwritten (safe to re-run)
-- League sheet tabs are left intact — delete them manually when ready
+- Copies the season's four League tabs (`Standings`, `Events`, `Leaderboard`, `Results`) to the
+  Archive spreadsheet, overwriting a tab that already exists there (safe to re-run)
+- Leaves the League sheet tabs intact — delete them by hand once you've checked the archive
 
 ## How Season Config Works
 

@@ -2,10 +2,6 @@
 GTA Lorcana — Discord Bot
 =========================
 Features:
-  - /schedule        — shows upcoming events
-  - /watch-rph-event — subscribe to DM alerts when a spot opens at a full event
-  - /unwatch-rph-event — unsubscribe from a watched event
-  - /list-watches    — see all currently watched events
   - /etb-discount     — opens the ETB discount form (also a button in #etb-discount)
   - /etb-post          — post or refresh the #etb-discount how-to message (admins only)
   - /help            — list all commands
@@ -58,7 +54,7 @@ from typing import Callable
 
 from clients import gs as _gs, rph_api as _rph_api
 from results import process_event_data, remove_event_data
-from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, load_season_config, refresh_set_champs, fetch_prereleases, fetch_ccqs, set_bot_state_key, delete_bot_state_key, fetch_event_status, create_season_sheets, archive_season_data, get_etb_approval, append_etb_approval, lookup_player_standings, get_current_display_names
+from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, load_season_config, refresh_set_champs, fetch_prereleases, fetch_ccqs, set_bot_state_key, delete_bot_state_key, create_season_sheets, archive_season_data, get_etb_approval, append_etb_approval, lookup_player_standings, get_current_display_names
 
 from constants import (
     DISCORD_BOT_TOKEN,
@@ -76,7 +72,6 @@ from constants import (
     RPH_RETRY_DELAY,
     RPH_RETRY_ATTEMPTS,
     ADMIN_USER_IDS,
-    UPCOMING_EVENTS_JSON_URL,
     WHERE_TO_PLAY_POST_DAY,
     WHERE_TO_PLAY_POST_HOUR_ET,
     COMMON_ROLE_ID,
@@ -638,15 +633,8 @@ async def event_digests_daily():
 
 
 # ═══════════════════════════════════════════════════════════════
-# RPH EVENT WATCHER
+# SEASON CONFIG
 # ═══════════════════════════════════════════════════════════════
-
-_RPH_WATCH_KEY_PREFIX = "rph_watch:"
-
-
-def _watch_key(event_id: int) -> str:
-    return f"{_RPH_WATCH_KEY_PREFIX}{event_id}"
-
 
 _calendar_problems: list[str] = []   # from the last successful Seasons tab read
 
@@ -670,255 +658,6 @@ async def _reload_season(loop) -> tuple[dict, list[str]]:
     _calendar_problems = problems
     season.init(state, calendar)
     return state, problems
-
-
-async def _try_delete_state_key(loop, key: str, what: str) -> bool:
-    """
-    Delete a Bot State key, logging instead of raising on failure.
-
-    For background-task cleanup only. delete_bot_state_key reads the tab with
-    strict=True, so a Sheets outage raises — and an exception escaping a
-    tasks.loop body kills that loop until the next restart.
-    """
-    try:
-        await loop.run_in_executor(None, delete_bot_state_key, key)
-        return True
-    except Exception as e:
-        print(f"  ⚠ Could not remove {what} ({key}): {e} — will retry next tick")
-        return False
-
-
-def _load_watches(state: dict) -> dict[str, dict]:
-    """Return all active rph_watch entries from bot state as {key: data}."""
-    return {
-        k: json.loads(v)
-        for k, v in state.items()
-        if k.startswith(_RPH_WATCH_KEY_PREFIX)
-    }
-
-
-@tasks.loop(minutes=15)
-async def rph_watcher():
-    """
-    Every 15 minutes: check each watched RPH event for open spots.
-    DMs all subscribers if spots are available.
-    Cleans up expired watches automatically.
-    """
-    loop = asyncio.get_running_loop()
-    try:
-        state = await loop.run_in_executor(None, load_bot_state)
-    except Exception as e:
-        print(f"  ⚠ rph_watcher: could not load bot state: {e}")
-        return
-
-    watches = _load_watches(state)
-    if not watches:
-        return
-
-    today = _now_et().date().isoformat()
-
-    for key, watch in watches.items():
-        event_id  = int(key.removeprefix(_RPH_WATCH_KEY_PREFIX))
-        end_date  = watch.get('end_date', '')
-        name      = watch.get('name', f'Event {event_id}')
-        subs      = watch.get('subscribers', [])
-
-        # Auto-expire past end_date. Cleanup failures are logged and retried on the
-        # next tick rather than raised: an unhandled exception in a tasks.loop body
-        # stops the loop for good, and a stale watch is a far smaller problem than a
-        # dead watcher.
-        if end_date and today > end_date:
-            print(f"  🗑 rph_watcher: {name} (id={event_id}) past end_date {end_date} — removing")
-            await _try_delete_state_key(loop, key, f"expired watch {event_id}")
-            continue
-
-        if not subs:
-            await _try_delete_state_key(loop, key, f"empty watch {event_id}")
-            continue
-
-        # Fetch live event status
-        status = await loop.run_in_executor(None, fetch_event_status, event_id)
-        if status is None:
-            print(f"  ⚠ rph_watcher: could not fetch status for {name} (id={event_id})")
-            continue
-
-        available = status['available']
-        print(f"  👁 rph_watcher: {name} — {status['registered']}/{status['capacity']} "
-              f"({'OPEN' if available else 'FULL'})")
-
-        if available:
-            cap_str = f"{status['registered']}/{status['capacity']}" if status['capacity'] else str(status['registered'])
-            dm_msg  = (
-                f"🎟️ **Spot available at {name}!**\n"
-                f"📅 {status['start_date']}\n"
-                f"👥 Registered: {cap_str}\n"
-                f"🔗 {status['url']}"
-            )
-            for uid in subs:
-                try:
-                    user = await bot.fetch_user(int(uid))
-                    await user.send(dm_msg)
-                except Exception as e:
-                    print(f"  ⚠ rph_watcher: could not DM user {uid}: {e}")
-
-        gc.collect()  # TODO: remove when upgraded to 1GB RAM — belt-and-suspenders after each RPH fetch
-
-
-@tree.command(name="watch-rph-event", description="Get DMs when a spot opens at a full RPH event")
-@app_commands.describe(
-    event_id="RPH event ID (from the event URL)",
-    end_date="Stop watching after this date (YYYY-MM-DD)",
-)
-async def watch_rph_event(
-    interaction: discord.Interaction,
-    event_id: int,
-    end_date: str,
-):
-    await interaction.response.defer(ephemeral=True)
-    loop = asyncio.get_running_loop()
-
-    # Validate end_date format
-    try:
-        date.fromisoformat(end_date)
-    except ValueError:
-        await interaction.followup.send("❌ Invalid end_date — use YYYY-MM-DD format.", ephemeral=True)
-        return
-
-    # Load current state for this watch key
-    try:
-        state = await loop.run_in_executor(None, load_bot_state)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Could not load bot state: {e}", ephemeral=True)
-        return
-
-    key       = _watch_key(event_id)
-    uid       = str(interaction.user.id)
-    watch     = json.loads(state[key]) if key in state else {}
-    subs      = watch.get('subscribers', [])
-
-    if uid in subs:
-        await interaction.followup.send(
-            f"ℹ️ You're already watching **{watch.get('name', f'Event {event_id}')}**.",
-            ephemeral=True
-        )
-        return
-
-    # Fetch event to validate the ID and get a name if not provided
-    status = await loop.run_in_executor(None, fetch_event_status, event_id)
-    if status is None:
-        await interaction.followup.send(
-            f"❌ Could not find RPH event `{event_id}`. Double-check the ID.",
-            ephemeral=True
-        )
-        return
-
-    event_name = status['name']
-    subs.append(uid)
-    watch = {
-        'name':       event_name,
-        'end_date':   end_date,
-        'subscribers': subs,
-    }
-
-    try:
-        await loop.run_in_executor(None, set_bot_state_key, key, json.dumps(watch))
-    except Exception as e:
-        await interaction.followup.send(f"❌ Could not save watch: {e}", ephemeral=True)
-        return
-
-    cap_str = (f"{status['registered']}/{status['capacity']}"
-               if status['capacity'] else f"{status['registered']} registered")
-    avail_str = "✅ Spots are open right now!" if status['available'] else f"🔴 Currently full ({cap_str})"
-
-    await interaction.followup.send(
-        f"✅ Watching **{event_name}** (id={event_id}) until {end_date}.\n"
-        f"{avail_str}\n"
-        f"I'll DM you every 15 min while spots are open.",
-        ephemeral=True
-    )
-
-
-@tree.command(name="unwatch-rph-event", description="Stop watching an RPH event for open spots")
-@app_commands.describe(event_id="RPH event ID to stop watching")
-async def unwatch_rph_event(interaction: discord.Interaction, event_id: int):
-    await interaction.response.defer(ephemeral=True)
-    loop = asyncio.get_running_loop()
-
-    try:
-        state = await loop.run_in_executor(None, load_bot_state)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Could not load bot state: {e}", ephemeral=True)
-        return
-
-    key = _watch_key(event_id)
-    if key not in state:
-        await interaction.followup.send(f"ℹ️ No active watch found for event `{event_id}`.", ephemeral=True)
-        return
-
-    watch = json.loads(state[key])
-    uid   = str(interaction.user.id)
-    subs  = watch.get('subscribers', [])
-
-    if uid not in subs:
-        await interaction.followup.send(
-            f"ℹ️ You're not subscribed to **{watch.get('name', f'Event {event_id}')}**.",
-            ephemeral=True
-        )
-        return
-
-    subs.remove(uid)
-
-    try:
-        if subs:
-            watch['subscribers'] = subs
-            await loop.run_in_executor(None, set_bot_state_key, key, json.dumps(watch))
-        else:
-            # Last subscriber — remove the whole key
-            await loop.run_in_executor(None, delete_bot_state_key, key)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Could not update the watch: {e}", ephemeral=True)
-        return
-
-    await interaction.followup.send(
-        f"✅ Stopped watching **{watch.get('name', f'Event {event_id}')}**.",
-        ephemeral=True
-    )
-
-
-@tree.command(name="list-watches", description="Show all currently watched RPH events")
-async def list_watches(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    loop = asyncio.get_running_loop()
-
-    try:
-        state = await loop.run_in_executor(None, load_bot_state)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Could not load bot state: {e}", ephemeral=True)
-        return
-
-    watches = _load_watches(state)
-    uid     = str(interaction.user.id)
-
-    if not watches:
-        await interaction.followup.send("ℹ️ No events are currently being watched.", ephemeral=True)
-        return
-
-    lines = []
-    for key, watch in watches.items():
-        event_id   = key.removeprefix(_RPH_WATCH_KEY_PREFIX)
-        subs       = watch.get('subscribers', [])
-        you        = " *(you're subscribed)*" if uid in subs else ""
-        sub_str    = f"{len(subs)} subscriber" + ("s" if len(subs) != 1 else "")
-        lines.append(
-            f"• **{watch.get('name', f'Event {event_id}')}** (id={event_id}) "
-            f"— until {watch.get('end_date', '?')} "
-            f"— {sub_str}{you}"
-        )
-
-    await interaction.followup.send(
-        "👁️ **Active RPH event watches:**\n" + "\n".join(lines),
-        ephemeral=True
-    )
 
 
 @bot.event
@@ -1003,9 +742,6 @@ async def on_ready():
             state = "active" if spec.active(today) else "idle"
             print(f"  ♻ {spec.label} digest scheduled for "
                   f"{_DIGEST_HOUR_ET}:{spec.minute:02d} ET ({state})")
-    if not rph_watcher.is_running():
-        rph_watcher.start()
-        print(f"  ♻ RPH event watcher started (polls every 15 min)")
     if not season_close_daily.is_running():
         season_close_daily.start()
         print(f"  ♻ Season-close checklist scheduled for {_DIGEST_HOUR_ET}:20 ET")
@@ -3233,80 +2969,6 @@ async def _etb_flow(interaction: discord.Interaction, email: str,
         await interaction.followup.send(_etb_code_message(email), ephemeral=True)
 
 
-# ── /schedule ─────────────────────────────────────────────────
-# Events are read from data/upcoming_events.json in the website repo.
-# To add or update events, edit that file directly in GitHub.
-# Future enhancement: /addevent bot command to write to upcoming_events.json via the Worker.
-
-@tree.command(name="schedule", description="Show upcoming GTA Lorcana events")
-async def schedule(interaction: discord.Interaction):
-    await interaction.response.defer()
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(UPCOMING_EVENTS_JSON_URL) as resp:
-                if resp.status != 200:
-                    await interaction.followup.send(
-                        embed=make_embed(
-                            title="📅 Upcoming Events",
-                            description=f"Could not load events right now — check `{_ch('announcements')}` for the latest.",
-                            colour=discord.Colour.red()
-                        )
-                    )
-                    return
-                events = await resp.json(content_type=None)
-    except Exception as e:
-        print(f"  ✗ Failed to fetch upcoming_events.json: {e}")
-        await interaction.followup.send(
-            embed=make_embed(
-                title="📅 Upcoming Events",
-                description=f"Could not load events right now — check `{_ch('announcements')}` for the latest.",
-                colour=discord.Colour.red()
-            )
-        )
-        return
-
-    today = datetime.now(timezone.utc).date()
-    upcoming = [
-        e for e in events
-        if e.get("date") and datetime.strptime(e["date"], "%Y-%m-%d").date() >= today
-    ]
-    upcoming.sort(key=lambda e: e["date"])
-
-    embed = make_embed(title="📅 Upcoming Events", description="")
-
-    if not upcoming:
-        embed.description = "No upcoming events — check back soon!"
-    else:
-        type_icons = {
-            "Tournament": "🏆",
-            "Casual": "🎴",
-            "Draft": "✨",
-        }
-        for e in upcoming:
-            icon = type_icons.get(e.get("type", ""), "📅")
-            date_str = datetime.strptime(e["date"], "%Y-%m-%d").strftime("%a %b %d").replace(" 0", " ")
-            name = e.get("name", "Unnamed Event")
-            location = e.get("location", "TBA")
-            url = e.get("url", "")
-
-            value = f"{icon} {e.get('type', '')} · {location}"
-            if url:
-                value += f"\n[RSVP here]({url})"
-
-            embed.add_field(name=f"**{date_str}** — {name}", value=value, inline=False)
-
-    embed.add_field(
-        name="Full details",
-        value=f"Check `{_ch('announcements')}` or visit the GTA Lorcana website.",
-        inline=False
-    )
-    await interaction.followup.send(embed=embed)
-
-
-
-
-
 # ── /recheck ──────────────────────────────────────────────────
 
 async def _find_and_reprocess_missed_threads(
@@ -3972,11 +3634,11 @@ async def _record_invitational(guild: discord.Guild, channel, season_label: str,
     return True
 
 
-# ── /season-rollover ──────────────────────────────────────────
+# ── Season rollover (season-close checklist) ──────────────────────────────────────────
 #
-# Split into plan → guard → execute so the season-close checklist previews and
-# runs exactly what the command does. Two copies of these checks would drift,
-# and every one of them exists because a rollover once went wrong without it.
+# Split into plan → guard → execute so the season-close checklist can preview a
+# rollover before running it. Every one of these checks exists because a
+# rollover once went wrong without it.
 
 # The tabs create_season_sheets makes — shown in the checklist's preview.
 _SEASON_TAB_SUFFIXES = ("Standings", "Events", "Leaderboard", "Results", "Set Champs")
@@ -4095,8 +3757,8 @@ async def _outgoing_roles_recorded(loop, outgoing: str) -> tuple[bool, str]:
         return False, (
             f"❌ **No {outgoing} roles are recorded in the Player Registry.**\n\n"
             f"Press **Record & assign roles** on the {outgoing} season-close "
-            f"checklist first, or pass `force: true` if {outgoing} genuinely had "
-            f"no earners."
+            f"checklist first — it marks the season recorded even if nobody earned "
+            f"a role."
         )
     return True, f"{recorded} {outgoing} role record(s) found"
 
@@ -4144,134 +3806,6 @@ async def _execute_rollover(loop, plan: _RolloverPlan) -> list[str]:
         await _season_close_mark(plan.outgoing, rolled_over=_now_et().date().isoformat(),
                                  rolled_to=new_season)
     return created
-
-
-@tree.command(name="season-rollover", description="Roll over to a new season: creates sheet tabs and reloads config (admins only)")
-@app_commands.describe(
-    new_season="New season identifier, e.g. S12",
-    start_date="Override the Seasons tab's season start (YYYY-MM-DD)",
-    end_date="Override the Seasons tab's season end (YYYY-MM-DD)",
-    set_champs_start="Override the Seasons tab's Set Champs start (YYYY-MM-DD)",
-    set_champs_end="Override the Seasons tab's Set Champs end (YYYY-MM-DD)",
-    force="Skip the check that the outgoing season's roles were recorded",
-)
-async def season_rollover(
-    interaction: discord.Interaction,
-    new_season: str,
-    start_date: str = "",
-    end_date: str = "",
-    set_champs_start: str = "",
-    set_champs_end: str = "",
-    force: bool = False,
-):
-    """
-    Flip the scoring season to new_season.
-
-    Dates come from that season's row in the Seasons tab. The four date arguments
-    are overrides for the rare case where the row is wrong and there is no time to
-    fix it — they apply *in memory only*, because the tab is operator-owned and the
-    bot does not write to it, so a restart reverts to the row.
-    """
-    if not _is_admin(interaction):
-        await interaction.response.send_message("⚠️ Admins only.", ephemeral=True)
-        return
-
-    await interaction.response.defer(ephemeral=True)
-    loop = asyncio.get_running_loop()
-
-    plan, err = await _plan_rollover(loop, new_season, {
-        'season_start': start_date, 'season_end': end_date,
-        'set_champs_start': set_champs_start, 'set_champs_end': set_champs_end,
-    })
-    if not plan:
-        if err.startswith("❌") and "not ready" in err:
-            err += ("\nYou can also pass them as arguments, but that applies in memory only — "
-                    "a restart reverts to the tab.")
-        await interaction.followup.send(err, ephemeral=True)
-        return
-
-    outgoing = plan.outgoing
-    if not force and outgoing and outgoing != new_season:
-        ok, detail = await _outgoing_roles_recorded(loop, outgoing)
-        if not ok:
-            await interaction.followup.send(
-                detail + f"\n\nIf you're sure, re-run with `force: true`.", ephemeral=True
-            )
-            return
-        print(f"  ✓ season-rollover: {detail} — proceeding")
-
-    try:
-        created = await _execute_rollover(loop, plan)
-    except RuntimeError as e:
-        await interaction.followup.send(str(e), ephemeral=True)
-        return
-    await _refresh_season_close_quietly(outgoing)
-
-    resolved = plan.resolved
-    tab_lines = "\n".join(f"  • {t}" for t in created) if created else "  (all tabs already existed)"
-    skipped = 4 - len(created)
-    skip_note = f"\n⚠️ {skipped} tab(s) already existed and were skipped." if skipped else ""
-    # Both remaining steps read the outgoing season, not CURRENT_SEASON, so
-    # they are still safe to run now — but nothing prompts for them otherwise.
-    todo = (f"\n\n**Still to do for {outgoing}:**\n"
-            f"  • `/assign-roles-from-registry` — grant the roles just recorded\n"
-            f"  • `/archive-season {outgoing}` — copy the tabs to the Archive sheet"
-            ) if outgoing and outgoing != new_season else ""
-
-    override_note = ""
-    if plan.overridden:
-        fields = ", ".join(f"`{k}`" for k in plan.overridden)
-        override_note = (f"\n\n⚠️ **Overridden in memory only:** {fields}. A restart — or any reload, "
-                         f"including `/seasons` — reverts to the Seasons tab. Edit the "
-                         f"`{new_season}` row there to make this stick.")
-
-    sc_note = "".join(f"\n\n{w}" for w in plan.warnings)
-
-    await interaction.followup.send(
-        f"✅ **Season rolled over to {new_season}**\n\n"
-        f"**New tabs created in League sheet:**\n{tab_lines}{skip_note}\n\n"
-        f"**Season window:** {resolved['season_start']} → {resolved['season_end']}\n"
-        f"**Set Champs:** {resolved['set_champs_start']} → {resolved['set_champs_end']}\n"
-        f"**Dates from:** {'the Seasons tab' if not plan.overridden else 'the Seasons tab + overrides'}"
-        f"{override_note}{sc_note}{todo}",
-        ephemeral=True,
-    )
-
-
-# ── /archive-season ───────────────────────────────────────────
-@tree.command(name="archive-season", description="Copy a completed season's tabs from the League sheet to the Archive spreadsheet (admins only)")
-@app_commands.describe(season_name="Season to archive, e.g. S11")
-async def archive_season(interaction: discord.Interaction, season_name: str):
-    if not _is_admin(interaction):
-        await interaction.response.send_message("⚠️ Admins only.", ephemeral=True)
-        return
-
-    await interaction.response.defer(ephemeral=True)
-
-    loop = asyncio.get_running_loop()
-    try:
-        archived = await loop.run_in_executor(None, archive_season_data, season_name)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Archive failed: {e}", ephemeral=True)
-        return
-
-    if not archived:
-        await interaction.followup.send(
-            f"⚠️ No data was archived for **{season_name}** — all tabs were empty or missing.",
-            ephemeral=True,
-        )
-        return
-
-    await _season_close_mark(season_name, archived=_now_et().date().isoformat())
-    await _refresh_season_close_quietly(season_name)
-
-    tab_lines = "\n".join(f"  • {t}" for t in archived)
-    await interaction.followup.send(
-        f"✅ **{season_name} archived** ({len(archived)} tab(s))\n\n{tab_lines}\n\n"
-        f"Data has been copied to the Archive spreadsheet. "
-        f"The League sheet tabs are unchanged — delete them manually when ready.",
-        ephemeral=True,
-    )
 
 
 # ── /assign-roles-from-registry ───────────────────────────────
@@ -4434,10 +3968,6 @@ async def help_command(interaction: discord.Interaction):
         title="GTA Lorcana Bot — Commands",
         description="**Everyone**"
     )
-    embed.add_field(name="/schedule", value="Show upcoming events", inline=False)
-    embed.add_field(name="/watch-rph-event", value="Subscribe to DM alerts when a spot opens at a full RPH event", inline=False)
-    embed.add_field(name="/unwatch-rph-event", value="Unsubscribe from a watched event", inline=False)
-    embed.add_field(name="/list-watches", value="Show all active event watches", inline=False)
     embed.add_field(name="/etb-discount", value="Verify your GTA Lorcana event attendance to unlock the Enter the Battlefield community discount", inline=False)
     embed.add_field(name="🧵 Results Threads",
                     value=f"New threads in `{_ch('results_reporting')}` are processed automatically. Edit to retry on bad URL.",
@@ -4451,8 +3981,6 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="/tidy-registry", value="Remove blank rows and sort the Player Registry by rarity", inline=False)
     embed.add_field(name="/assign-roles-from-registry", value="Assign every Discord rarity role the registry records — safe to re-run", inline=False)
     embed.add_field(name="/where-to-play", value="Manually push the Where to Play post", inline=False)
-    embed.add_field(name="/season-rollover", value="Create new season sheet tabs, update Bot State, and reload season config in memory", inline=False)
-    embed.add_field(name="/archive-season", value="Copy a completed season's tabs from the League sheet to the Archive spreadsheet", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 

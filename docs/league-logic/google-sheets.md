@@ -6,13 +6,13 @@
 |------------|---------|
 | League Sheet | Standings, events, leaderboard, and Set Champs — one set of tabs per season |
 | Bot Database Sheet | Store classifications, debug data, overrides, bot state, player registry, **season calendar** |
-| Archive Sheet | Historical seasons (read-only after archiving via `/archive-season`) |
+| Archive Sheet | Historical seasons (read-only after the season-close checklist archives a season) |
 
 ---
 
 ## League Sheet Tabs (per season)
 
-Created by `/season-rollover`. `Standings` and `Events` are written by the results pipeline;
+Created by the season-close checklist's rollover. `Standings` and `Events` are written by the results pipeline;
 `Results` and `Leaderboard` are formula-driven (seeded once, then dragged down by the operator).
 
 | Tab | Columns | Notes |
@@ -27,7 +27,7 @@ Created by `/season-rollover`. `Standings` and `Events` are written by the resul
 
 **`Ban List`** — a persistent (non-season) tab in the League sheet. Banned players are listed by
 **Playhub ID in column A** (col B is a free-text name for reference). The Leaderboard formula
-excludes any Results row whose Player ID matches `Ban List!A2:A`. `/season-rollover` recreates the
+excludes any Results row whose Player ID matches `Ban List!A2:A`. Rollover recreates the
 tab (empty) if it's ever missing, since a broken reference would `#REF!` the whole Leaderboard.
 
 ---
@@ -89,7 +89,6 @@ other source of dates — the flat Bot State date keys were removed after the S1
 | `set_champs_msg_ids` / `prerelease_msg_ids` | `id\|id\|…` | Digest message IDs, header first, so the daily refresh edits in place |
 | `wtp_msg_0` / `wtp_msg_1` / `wtp_msg_2` | Discord message ID | Persists `#where-to-play` message IDs across restarts so the bot edits in-place rather than reposting |
 | `recheck:<thread_id>` | `1` | Crash-loop guard — set before a startup recheck attempt, cleared on success |
-| `rph_watch:<event_id>` | JSON `{name, end_date, subscribers: [user_id, ...]}` | Active event spot watchers — one key per watched event |
 
 > When entering dates manually, prefix with `'` (e.g. `'2026-02-13`) to prevent Google Sheets from converting to a date serial number.
 

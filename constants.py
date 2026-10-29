@@ -58,10 +58,6 @@ SHOPIFY_STORE_DOMAIN = os.getenv("SHOPIFY_STORE_DOMAIN", "enter-the-battlefield.
 RPH_RETRY_ATTEMPTS = int(os.getenv("RPH_RETRY_ATTEMPTS", 2))
 RPH_RETRY_DELAY    = int(os.getenv("RPH_RETRY_DELAY", 300))
 
-# Get events.json from Github
-GITHUB_OWNER = "gtalorcana"
-GITHUB_REPO  = "gtalorcana.ca"
-UPCOMING_EVENTS_JSON_URL   = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/main/data/upcoming_events.json"
 
 # League Constants — fallback values used by season.py
 # These are overridden at runtime by Bot State values via season.init()

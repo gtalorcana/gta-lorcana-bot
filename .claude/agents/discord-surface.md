@@ -17,11 +17,10 @@ roles posts), `docs/discord-surface/commands.md`, `docs/discord-surface/design-n
 | Area | Symbols |
 |---|---|
 | Bot setup & errors | `GtaLorcanaBot`, `on_app_command_error`, `_is_admin`, `_ch`, `make_embed`, `get_channel_by_id` |
-| Scheduled tasks | `keepalive` (30m), `where_to_play_weekly` (1m tick, posts Sun 11PM ET), `event_digests_daily` (1m tick; one digest per minute from `DIGEST_HOUR_ET`), `rph_watcher` (15m) |
+| Scheduled tasks | `keepalive` (30m), `where_to_play_weekly` (1m tick, posts Sun 11PM ET), `event_digests_daily` (1m tick; one digest per minute from `DIGEST_HOUR_ET`) |
 | Where-to-play | `_build_where_to_play_messages`, `_post_where_to_play`, `_grouped_by_day`, `_fmt`, `_last_sunday` |
 | Adding a digest | A row in `_DIGESTS` — never another `@tasks.loop`. Give it a distinct `minute` so its RPH fetch never overlaps another's |
 | Event digests | `_DIGESTS` (the spec table), `_DigestSpec`, `_run_digest`, `event_digests_daily`, `_build_event_digest_messages`, `_post_event_digest` |
-| Event watcher | `watch_rph_event`, `unwatch_rph_event`, `list_watches`, `_watch_key`, `_load_watches` |
 | Results threads | `on_thread_create`, `on_message`, `on_message_edit`, `on_message_delete`, `on_thread_delete`, `process_results_reporting_thread`, `run_results_reporting_pipeline`, `_schedule_auto_retry` |
 | Linking & roles | `_post_linking_suggestions`, `_post_link_suggestion`, `_LinkButton`, `_LinkPicker`, `_apply_link_action`, `_assign_recorded_roles`, `_fmt_roles`, `on_member_join`, `_restore_roles_on_rejoin`, `_suggest_for_new_member` |
 | ETB discount | `_EtbApplyButton` (on the bot-posted #etb-discount message, text in `discord/etb-discount.md`, refreshed by `/etb-post`), `etb_discount` (opens the same form), `_EtbModal`, `_EtbPickView`, `_etb_flow`, `_post_etb_approval_request`, `_EtbButton`, `_etb_decide`, `_etb_resolve`, `_apply_etb_approval`, `_etb_code_message` |

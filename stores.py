@@ -68,7 +68,7 @@ def _fetch_current_season_events() -> list:
     the season start so that streaks spanning a season boundary are preserved.
     """
     if not season.SEASON_START_DATE or not season.SEASON_END_DT:
-        raise RuntimeError("Season dates not configured — run /season-rollover to set them in Bot State.")
+        raise RuntimeError("Season dates not configured — add this season's row to the Seasons tab.")
     lookback_date = (date.fromisoformat(season.SEASON_START_DATE)
                      - timedelta(weeks=WHERE_TO_PLAY_MIN_CONSECUTIVE_WEEKS))
     start_dt = season._start_of_day_utc(lookback_date.isoformat())
@@ -1429,50 +1429,6 @@ def get_expected_stores_for_date(target_date: date, store_analysis: dict = None)
 
     print(f"  ✓ {len(expected)} event type(s) expected on {target_day_name} ({target_date})")
     return expected
-
-
-def fetch_event_status(event_id: int) -> dict | None:
-    """
-    Fetch live status for a single RPH event by ID.
-    Returns a dict with availability info, or None on failure.
-
-    Does NOT filter by country/player_count — works for future events too.
-
-    Returns:
-        {
-            'event_id':    int,
-            'name':        str,
-            'registered':  int,
-            'capacity':    int,
-            'available':   bool,   # registered < capacity AND queue_status == ACCEPTING_SIGNUPS
-            'queue_status': str,
-            'start_date':  str,    # e.g. "2026-03-29"
-            'url':         str,
-        }
-    """
-    try:
-        event = _rph_api.fetch_event_by_id(event_id)
-        if not event:
-            return None
-        registered = event.get('registered_user_count', 0)
-        capacity   = event.get('capacity', 0)
-        queue      = event.get('queue_status', '')
-        start_raw  = event.get('start_datetime', '')
-        start_date = start_raw[:10] if start_raw else ''
-        available  = (capacity == 0 or registered < capacity) and queue == 'ACCEPTING_SIGNUPS'
-        return {
-            'event_id':    event_id,
-            'name':        event.get('name', f'Event {event_id}'),
-            'registered':  registered,
-            'capacity':    capacity,
-            'available':   available,
-            'queue_status': queue,
-            'start_date':  start_date,
-            'url':         f"https://tcg.ravensburgerplay.com/events/{event_id}",
-        }
-    except Exception as e:
-        print(f"  ⚠ fetch_event_status({event_id}): {e}")
-        return None
 
 
 # ── Set Championships ─────────────────────────────────────────────────────────

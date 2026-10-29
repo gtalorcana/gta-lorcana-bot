@@ -12,7 +12,7 @@
 ## Season Config (`season.py`)
 
 Season values (dates, sheet names, range names) live in `season.py` as mutable module globals.
-`season.init(bot_state)` is called at startup and by `/season-rollover` to rebuild all derived values.
+`season.init(bot_state)` is called at startup and by the season-close checklist's rollover to rebuild all derived values.
 
 All consumers must use `import season; season.X` — not `from season import X` — to get the live
 call-time value rather than a frozen import-time copy.

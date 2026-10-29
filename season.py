@@ -106,7 +106,7 @@ def set_champs_window() -> tuple[str, str] | None:
     Pinned to CURRENT_SEASON rather than "whichever Set Champs window is open",
     because the sheet these events are written to is SET_CHAMPS_EVENTS_RANGE_NAME,
     which is derived from CURRENT_SEASON. Rolling over mid-Set-Champs therefore
-    freezes the outgoing season's tab — /season-rollover warns when it would.
+    freezes the outgoing season's tab — the checklist's rollover warns when it would.
     """
     if not (SET_CHAMPS_START_DATE and SET_CHAMPS_END_DATE):
         return None

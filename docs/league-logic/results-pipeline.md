@@ -91,21 +91,3 @@ python scripts/rph_get_set_championship_events.py
 ```
 
 Set `WRITE_TO_SHEET = True` in the script once the output looks correct. Set `SHOW_ALL = True` to dump every event in the window with its category and name, to sanity-check the keyword.
-
----
-
-## RPH Event Watcher
-
-Users can subscribe to DM alerts for any RPH event that is full or filling up.
-
-**Commands:**
-- `/watch-rph-event event_id:413990 end_date:2026-03-29` — subscribe; bot confirms current registration status immediately
-- `/unwatch-rph-event event_id:413990` — unsubscribe (other subscribers unaffected)
-- `/list-watches` — see all active watches on the server
-
-Every 15 minutes, `rph_watcher` fetches each watched event from RPH and DMs all subscribers if `registered_user_count < capacity` and `queue_status == ACCEPTING_SIGNUPS`. Watches expire automatically after `end_date`.
-
-**Finding the event ID:** it's the number at the end of the RPH event URL:
-`https://tcg.ravensburgerplay.com/events/`**`413990`**
-
-**Bot State:** each watch is stored as `rph_watch:<event_id>` → `{"name": "...", "end_date": "YYYY-MM-DD", "subscribers": [user_id, ...]}`.
