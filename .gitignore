@@ -214,3 +214,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Claude Code personal settings (may hold a GH_TOKEN)
+.claude/settings.local.json
