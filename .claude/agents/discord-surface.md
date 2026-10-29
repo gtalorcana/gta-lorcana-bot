@@ -24,7 +24,7 @@ roles posts), `docs/discord-surface/commands.md`, `docs/discord-surface/design-n
 | Event watcher | `watch_rph_event`, `unwatch_rph_event`, `list_watches`, `_watch_key`, `_load_watches` |
 | Results threads | `on_thread_create`, `on_message`, `on_message_edit`, `on_message_delete`, `on_thread_delete`, `process_results_reporting_thread`, `run_results_reporting_pipeline`, `_schedule_auto_retry` |
 | Linking & roles | `_post_linking_suggestions`, `_post_link_suggestion`, `_LinkButton`, `_LinkPicker`, `_apply_link_action`, `_assign_recorded_roles`, `_fmt_roles`, `on_member_join`, `_restore_roles_on_rejoin`, `_suggest_for_new_member` |
-| ETB discount | `etb_discount`, `_post_etb_approval_request`, `_EtbButton`, `_etb_decide`, `_etb_resolve`, `_apply_etb_approval`, `_etb_code_message` |
+| ETB discount | `_EtbApplyButton` (on the bot-posted #etb-discount message, text in `discord/etb-discount.md`, refreshed by `/etb-post`), `etb_discount` (opens the same form), `_EtbModal`, `_EtbPickView`, `_etb_flow`, `_post_etb_approval_request`, `_EtbButton`, `_etb_decide`, `_etb_resolve`, `_apply_etb_approval`, `_etb_code_message` |
 | Invitational | `_post_invitational_preview`, `_InvitationalButton`, `_invitational_finishers`, `_record_invitational` |
 
 ## Rules that bite

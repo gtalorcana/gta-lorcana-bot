@@ -16,5 +16,6 @@ COPY constants.py .
 COPY season.py .
 COPY util/ ./util/
 COPY scripts/ ./scripts/
+COPY discord/etb-discount.md ./discord/
 
 CMD ["python", "bot.py"]

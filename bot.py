@@ -6,7 +6,8 @@ Features:
   - /watch-rph-event — subscribe to DM alerts when a spot opens at a full event
   - /unwatch-rph-event — unsubscribe from a watched event
   - /list-watches    — see all currently watched events
-  - /etb-discount     — verify GTA event attendance and unlock ETB community discount
+  - /etb-discount     — opens the ETB discount form (also a button in #etb-discount)
+  - /etb-post          — post or refresh the #etb-discount how-to message (admins only)
   - /help            — list all commands
   - /recheck         — reprocess missed results threads (admins only)
   - /link            — manually link a Discord member to a Playhub ID (admins only)
@@ -66,6 +67,7 @@ from constants import (
     CHANNELS,
     MOD_CHANNEL_ID,
     SEASON_CLOSE_CHANNEL_ID,
+    ETB_DISCOUNT_CHANNEL_ID,
     SET_CHAMPS_CHANNEL_ID,
     PRERELEASE_CHANNEL_ID,
     CCQ_CHANNEL_ID,
@@ -103,6 +105,7 @@ from roles import (
     batch_upsert_player_roles,
     compact_and_sort_registry,
     _merge_duplicate_rows,
+    _similarity,
     compute_earned_roles,
     RARITY_ROLE_IDS,
     RARITY_ROLE_NAMES,
@@ -120,7 +123,7 @@ class GtaLorcanaBot(commands.Bot):
         # Every button routes by custom_id, so clicks on a message posted
         # before a restart still land.
         self.add_dynamic_items(_SeasonCloseButton, _InvitationalButton,
-                               _LinkButton, _LinkPicker, _EtbButton)
+                               _LinkButton, _LinkPicker, _EtbButton, _EtbApplyButton)
         if os.getenv("SYNC_COMMANDS_ONLY") == "1":
             guild = discord.Object(id=int(DISCORD_GUILD_ID))
             print(f"  SYNC_COMMANDS_ONLY mode — guild_id={DISCORD_GUILD_ID}, commands registered={len(self.tree.get_commands())}")
@@ -2738,8 +2741,7 @@ async def _etb_resolve(req: dict, approve: bool, mod_ch) -> str:
                     f"❌ Your ETB discount request for **{req['rph_username']}** "
                     f"wasn't approved.\n\n"
                     f"If that's genuinely your Playhub profile, ask a mod to link "
-                    f"your Discord account with `/link`, then run `/etb-discount` "
-                    f"again."
+                    f"your Discord account, then apply again in #etb-discount."
                 )
             except discord.Forbidden:
                 pass
@@ -2767,8 +2769,7 @@ async def _etb_resolve(req: dict, approve: bool, mod_ch) -> str:
                 description=(
                     f"Shopify whitelist failed for <@{req['discord_id']}> "
                     f"(**{req['rph_username']}**).\n`{err}`\n\n"
-                    f"Nothing was linked or granted — they'll need to run "
-                    f"`/etb-discount` again."
+                    f"Nothing was linked or granted — they'll need to apply again."
                 ),
                 colour=discord.Colour.red()
             ))
@@ -2799,13 +2800,172 @@ async def _etb_resolve(req: dict, approve: bool, mod_ch) -> str:
     return "✅ Approved"
 
 
+# ── Applying: button / command → form → (pick yourself) → checks ──────────
+#
+# The #etb-discount how-to is a bot-posted message (text in discord/etb-discount.md,
+# ID in Bot State under etb_post_msg_id) carrying a "Get my ETB discount" button.
+# The button and /etb-discount both open the same form, so there is no command
+# syntax to get wrong. A Play Hub name that doesn't resolve to exactly one player
+# — a typo, or two players sharing it — gets a pick-yourself menu of this
+# season's players rather than a refusal.
+
+_ETB_POST_KEY   = "etb_post_msg_id"
+_ETB_POST_FILE  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "discord", "etb-discount.md")
+_ETB_PICK_LIMIT = 10   # pick-yourself options shown for a name that matched nothing
+
+
+class _EtbApplyButton(discord.ui.DynamicItem[discord.ui.Button], template=r'etb:apply'):
+    """The button on the #etb-discount post. Routed by custom_id."""
+
+    def __init__(self):
+        super().__init__(discord.ui.Button(label="Get my ETB discount", emoji="🏪",
+                                           style=discord.ButtonStyle.primary,
+                                           custom_id="etb:apply"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction,
+                             item: discord.ui.Button, match: re.Match, /):
+        return cls()
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(_EtbModal())
+
+
+class _EtbModal(discord.ui.Modal, title="ETB Community Discount"):
+    email = discord.ui.TextInput(
+        label="Email at enterthebattlefield.ca",
+        placeholder="you@example.com",
+        max_length=254,
+    )
+    rph_username = discord.ui.TextInput(
+        label="Play Hub name (blank if already linked)",
+        placeholder="As shown on tcg.ravensburgerplay.com",
+        required=False,
+        max_length=100,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await _etb_flow(interaction, self.email.value.strip(),
+                        self.rph_username.value.strip() or None)
+
+
+class _EtbPickView(discord.ui.View):
+    """
+    Pick-yourself menu for a Play Hub name that didn't resolve to one player.
+
+    In-memory with a timeout: it's an ephemeral reply to one person, so a restart
+    costs them a re-run, nothing more. Picking still goes through the mod identity
+    check for an unlinked caller — choosing a name proves no more than typing it.
+    """
+
+    def __init__(self, owner_id: int, email: str, options: list[tuple[str, str]]):
+        super().__init__(timeout=600)
+        self.owner_id = owner_id
+        self.email    = email
+        select = discord.ui.Select(
+            placeholder="Which one is you?",
+            options=[discord.SelectOption(label=f"{name} ({pid})"[:100], value=pid)
+                     for pid, name in options],
+        )
+        select.callback = self._picked
+        self.add_item(select)
+
+    async def _picked(self, interaction: discord.Interaction):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("That menu isn't yours.", ephemeral=True)
+            return
+        pid = interaction.data['values'][0]
+        await interaction.response.edit_message(content="🔎 Checking…", view=None)
+        await _etb_flow(interaction, self.email, picked_id=pid)
+
+
+def _etb_pick_options(name: str | None, candidate_ids: set[str]) -> list[tuple[str, str]]:
+    """
+    [(playhub_id, name)] to offer as pick-yourself choices: every player sharing
+    the name if it matched several, else this season's closest names.
+    """
+    names = get_current_display_names()
+    if candidate_ids:
+        return [(pid, names.get(pid, name or pid)) for pid in sorted(candidate_ids)]
+    if not name:
+        return []
+    scored = [(pid, n, _similarity(name, n)) for pid, n in names.items()]
+    scored = [s for s in scored if s[2] >= FUZZY_LOW_CONFIDENCE]
+    scored.sort(key=lambda s: s[2], reverse=True)
+    return [(pid, n) for pid, n, _ in scored[:_ETB_PICK_LIMIT]]
+
+
 @tree.command(name="etb-discount", description="Unlock the Enter the Battlefield community discount by verifying your GTA Lorcana event attendance")
-@app_commands.describe(
-    rph_username="Your RPH display name (as shown on tcg.ravensburgerplay.com)",
-    email="Your email address registered at enterthebattlefield.ca",
-)
-async def etb_discount(interaction: discord.Interaction, rph_username: str, email: str):
+async def etb_discount(interaction: discord.Interaction):
+    await interaction.response.send_modal(_EtbModal())
+
+
+@tree.command(name="etb-post", description="Post or refresh the #etb-discount how-to message and its button (mods only)")
+async def etb_post(interaction: discord.Interaction):
+    if not _is_admin(interaction):
+        await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=True)
+    loop = asyncio.get_running_loop()
+
+    channel = get_channel_by_id(interaction.guild, ETB_DISCOUNT_CHANNEL_ID)
+    if not channel:
+        await interaction.followup.send(f"⚠️ Channel `{ETB_DISCOUNT_CHANNEL_ID}` not found.", ephemeral=True)
+        return
+    try:
+        with open(_ETB_POST_FILE, encoding="utf-8") as f:
+            text = f.read().strip()
+    except OSError as e:
+        await interaction.followup.send(f"❌ Couldn't read the post text: `{e}`", ephemeral=True)
+        return
+
+    view = discord.ui.View(timeout=None)
+    view.add_item(_EtbApplyButton())
+    # The text names the mods to contact — show the mentions, never ping them.
+    quiet = discord.AllowedMentions.none()
+
+    try:
+        state = await loop.run_in_executor(None, lambda: load_bot_state(strict=True))
+    except Exception as e:
+        # Posting blind could duplicate the message — same rule as the digests.
+        await interaction.followup.send(f"❌ Couldn't read Bot State: `{e}`", ephemeral=True)
+        return
+
+    old_id = state.get(_ETB_POST_KEY, '')
+    if old_id.isdigit():
+        try:
+            msg = await channel.fetch_message(int(old_id))
+            await msg.edit(content=text, view=view, allowed_mentions=quiet)
+            await interaction.followup.send(f"✅ Updated the post in {channel.mention}.", ephemeral=True)
+            return
+        except discord.NotFound:
+            pass  # deleted — post a fresh one below
+
+    msg = await channel.send(text, view=view, allowed_mentions=quiet)
+    try:
+        await loop.run_in_executor(None, set_bot_state_key, _ETB_POST_KEY, str(msg.id))
+    except Exception as e:
+        print(f"  ⚠ /etb-post: couldn't save the message ID: {e}")
+        await interaction.followup.send(
+            f"⚠️ Posted in {channel.mention}, but couldn't save its ID (`{e}`) — the next "
+            f"`/etb-post` will post again instead of updating. Delete the extra one if so.",
+            ephemeral=True)
+        return
+    await interaction.followup.send(
+        f"✅ Posted in {channel.mention}. Delete any older how-to message there by hand.",
+        ephemeral=True)
+
+
+async def _etb_flow(interaction: discord.Interaction, email: str,
+                    rph_username: str | None = None, picked_id: str | None = None):
+    """
+    Everything after the form. The interaction has already been responded to —
+    every reply here is an ephemeral followup.
+
+    picked_id: the Playhub ID chosen from the pick-yourself menu. It stands in for
+    the typed name, not for a link: an unlinked caller still needs a mod.
+    """
     loop     = asyncio.get_running_loop()
     discord_id = str(interaction.user.id)
 
@@ -2827,9 +2987,18 @@ async def etb_discount(interaction: discord.Interaction, rph_username: str, emai
         # Non-fatal — fall back to resolving by name below.
         print(f"  ⚠ /etb-discount registry lookup failed, falling back to name: {e}")
 
+    claim_id = known_id or picked_id
+    if not claim_id and not rph_username:
+        await interaction.followup.send(
+            "Your Discord account isn't linked to a Play Hub profile yet, so we need "
+            "your **Play Hub name** — apply again and fill in that box too.",
+            ephemeral=True,
+        )
+        return
+
     try:
         lookup = await loop.run_in_executor(
-            None, lookup_player_standings, rph_username, known_id
+            None, lookup_player_standings, rph_username, claim_id
         )
     except Exception as e:
         print(f"  ✗ /etb-discount standings lookup failed: {e}")
@@ -2839,21 +3008,38 @@ async def etb_discount(interaction: discord.Interaction, rph_username: str, emai
         )
         return
 
-    # Two players have competed under this name — refuse rather than pick one.
-    if len(lookup['candidate_ids']) > 1:
-        print(f"  ⚠ /etb-discount ambiguous name {rph_username!r} → {sorted(lookup['candidate_ids'])}")
-        await interaction.followup.send(
-            f"⚠️ More than one player has competed under the name **{rph_username}** "
-            f"this season, so we can't tell which record is yours.\n"
-            f"Please ask a mod to link your account with `/link` and try again.",
-            ephemeral=True,
-        )
+    # The name matched no one (usually a typo) or several players: let them pick
+    # themselves rather than refuse or guess.
+    if not lookup['playhub_id']:
+        try:
+            options = await loop.run_in_executor(
+                None, _etb_pick_options, rph_username, lookup['candidate_ids'])
+        except Exception as e:
+            print(f"  ⚠ /etb-discount pick options failed: {e}")
+            options = []
+        if options:
+            shared = len(lookup['candidate_ids']) > 1
+            await interaction.followup.send(
+                (f"More than one player has used **{rph_username}** this season — "
+                 if shared else
+                 f"We couldn't find **{rph_username}** exactly in {season.CURRENT_SEASON} results — ")
+                + "pick yourself:",
+                view=_EtbPickView(interaction.user.id, email, options),
+                ephemeral=True,
+            )
+        else:
+            await interaction.followup.send(
+                f"❌ We couldn't find a player named **{rph_username}** in "
+                f"{season.CURRENT_SEASON} results.\n"
+                f"Check the spelling against your name on tcg.ravensburgerplay.com.",
+                ephemeral=True,
+            )
         return
 
     playhub_id   = lookup['playhub_id']
     count        = lookup['count']
     # Canonical name from standings beats whatever was typed.
-    rph_username = lookup['display_name'] or rph_username
+    rph_username = lookup['display_name'] or rph_username or playhub_id
 
     # This Playhub ID already belongs to someone else's Discord account.
     owner = next(
@@ -2876,18 +3062,6 @@ async def etb_discount(interaction: discord.Interaction, rph_username: str, emai
         await interaction.followup.send(
             f"⚠️ **{rph_username}** is already linked to a different Discord account.\n"
             f"If that's you, ask a mod to sort it out — we've flagged it for review.",
-            ephemeral=True,
-        )
-        return
-
-    # Nothing matched the name at all — almost always a typo, so say so rather
-    # than reporting "0 events" and leaving them to guess.
-    if not playhub_id:
-        await interaction.followup.send(
-            f"❌ We couldn't find a player named **{rph_username}** in "
-            f"{season.CURRENT_SEASON} results.\n"
-            f"Check the spelling against your name on tcg.ravensburgerplay.com — "
-            f"it has to match exactly.",
             ephemeral=True,
         )
         return
@@ -2940,7 +3114,7 @@ async def etb_discount(interaction: discord.Interaction, rph_username: str, emai
         if customer is None:
             await interaction.followup.send(
                 f'❌ That email isn\'t registered at enterthebattlefield.ca.\n'
-                f'Create an account at enterthebattlefield.ca first, then run /etb-discount again.',
+                f'Create an account at enterthebattlefield.ca first, then apply again.',
                 ephemeral=True,
             )
             return
@@ -4264,6 +4438,7 @@ async def help_command(interaction: discord.Interaction):
                     value=f"Reprocess any missed threads in `{_ch('results_reporting')}`",
                     inline=False)
     embed.add_field(name="/link", value="Manually link a Discord member to a Playhub ID", inline=False)
+    embed.add_field(name="/etb-post", value="Post or refresh the #etb-discount how-to message and its button", inline=False)
     embed.add_field(name="/tidy-registry", value="Remove blank rows and sort the Player Registry by rarity", inline=False)
     embed.add_field(name="/assign-roles-from-registry", value="Assign every Discord rarity role the registry records — safe to re-run", inline=False)
     embed.add_field(name="/where-to-play", value="Manually push the Where to Play post", inline=False)
