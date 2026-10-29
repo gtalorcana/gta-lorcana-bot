@@ -74,58 +74,8 @@ a design note below changes.
 
 ## TODO
 
-- **Update league-rules Discord post on season rollover**: the season/invitational block in
-  #league-rules (message 1303018759379746900) is edited by hand each season. It was posted from
-  Ryan's own account, and Discord only lets the author edit — so the bot must post its own copy
-  once (Ryan deletes his), store `league_rules_msg_id` in Bot State, and edit it at rollover.
-  Plain message, not an embed. Fill from the Seasons tab: season + set name (A–B), start/end
-  (E–F), Invitational Date (I, blank → "Date TBA", time fixed at 12:00 PM) and Invitational Venue
-  (J). Venue is a column, not odd/even maths — the pattern has broken before. Fixed text lives in
-  a template (base it on the live message; `discord/league-rules.md` is stale at S10). An edit
-  failure warns on the checklist, never blocks rollover.
-
-- **Invitational invites in Discord (replaces the Google Forms RSVP)**: today Ryan sends a Forms
-  RSVP and hands the responses to Alex (staff/judge); not everyone sees it or answers in time.
-  - **When:** after the *results season* ends (`season_end`), not the end of the set. Started by
-    hand: a **Send invites** button on the season-close checklist previews the top 32 and sends
-    nothing until confirmed — room to fix a bugged entry first. Ties need no handling (the
-    leaderboard's tiebreakers already make rank unique)
-  - **Channel:** one per season, consistent name (e.g. `#s14-top-32-invites`), visible to the
-    invitees + staff (Ryan, Kris, Alex) + the bot. Ryan and Kris are often in the 32 themselves, so
-    never derive anything from the member count — the invite list is exactly 32 *players*.
-    Access is a per-member channel overwrite — no per-season role. Notify by mentioning invitees
-    by name in the post (replacements get their own mention); no `@everyone`, so the bot never
-    needs Mention Everyone
-  - **Live roster message** in the channel, edited in place: all 32 with ✅ accepted / ❌ declined /
-    ⏳ pending (+ deadline, as a Discord `<t:…:R>` timestamp) / 🕓 deferred, and a separate list of
-    qualifiers **not on Discord** (unlinked in the Player Registry) so staff can reach them
-  - **RSVP by button** instead of the form; a button acts only for the member who presses it.
-    State lives in a new **`S## Invitational`** tab in the League sheet, *not* new columns on the
-    Leaderboard — the Leaderboard re-sorts on every results change and hand-typed columns beside
-    it drift onto the wrong rows. The top 32 are snapshotted into it at Send invites (one row per
-    Playhub ID: rank, name, Discord ID, status, deadline, responded at); replacements are new rows
-  - **Deadlines the bot enforces:** 48 hours, then auto-decline. Deadlines live in the sheet, not
-    memory, so a restart keeps them. If the bot was down when a deadline passed, extend it 24h and
-    note it — never mass-decline on catch-up (it once sat stopped for 10 days)
-  - **Defer:** "I've seen it, give me another day". Each press adds 24h to the deadline, at most 3
-    presses — shown only in the last 24h, so a player has to keep coming back rather than banking
-    all three at once
-  - **Reminder:** one DM, only to anyone still pending with ~24h left. The channel mention is the
-    main notification; prompt responders are never DMed. Show "DM failed" on the roster
-  - **Decline / withdraw:** Decline asks for confirmation (the spot goes immediately). A decline or
-    auto-decline invites the next leaderboard player at once. Accepted players can **Withdraw**
-    themselves, which also frees the spot. Undoing a decline is staff-only (a staff command can set
-    any status) — whether the player re-enters depends on whether the replacement already went
-    out. Qualifiers not on Discord are recorded by staff and never auto-declined
-  - **Access removal:** a decliner loses channel access 24h after declining, so staff can undo
-  - **Cut-off:** invites keep going out until the day before the invitational (Seasons col I); a late
-    replacement's deadline is capped at 9 PM the night before. Buy-in is paid on the day — not tracked
-  - **Rules text:** #league-rules says "three days to confirm" — reword to 48h + defer
-  - **Bot permissions:** needs Manage Channels and channel permission overwrites (not held today)
-  - **Test** in a dummy channel with Ryan and the bot, deadlines in minutes, and a fake #2 (alt
-    account, or an unlinked player to exercise the not-on-Discord path) to see a replacement
-  - Ryan will move this and the league-rules item to GitHub issues once `gh` is logged in as
-    gtalorcana
+To-dos live in GitHub issues (`gh issue list`), not here. `gh` acts as gtalorcana in this repo
+via `GH_TOKEN` in `.claude/settings.local.json` (untracked; the repo is public).
 
 ---
 
