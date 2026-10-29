@@ -10,8 +10,6 @@ Features:
   - /help            — list all commands
   - /recheck         — reprocess missed results threads (admins only)
   - /link            — manually link a Discord member to a Playhub ID (admins only)
-  - /record-rare-and-uncommon        — record Rare/Uncommon from the leaderboard (admins only)
-  - /record-legendary-and-super-rare — record Legendary/Super Rare from an invitational (admins only)
   - /assign-roles-from-registry      — assign every rarity role the registry records (admins only)
   - /where-to-play     — manually push the where-to-play post (admins only)
   - /set-champs      — manually refresh and post the Set Champs update (admins only)
@@ -20,7 +18,8 @@ Features:
   - /ccqs            — manually refresh and post the CCQ update (admins only)
   - event_digests_daily — refreshes the Set Champs and prerelease digests each morning
   - season_close_daily — posts/refreshes the end-of-season checklist in the mod channel
-  - on_member_join   — auto-assigns Common rarity role to new members
+  - on_member_join   — Common for everyone; restores a returning member's roles,
+                       or suggests a link if they match an unlinked player
   - where_to_play_weekly — refreshes #where-to-play every Sunday evening
 
 Requirements:
@@ -94,6 +93,9 @@ import season
 from util.shopify_api_utils import ShopifyApi as _ShopifyApi
 from roles import (
     fuzzy_match_member,
+    fuzzy_top_members,
+    suggestion_state,
+    mark_link_suggestion,
     get_unlinked_players,
     get_player_registry,
     link_player,
@@ -115,9 +117,10 @@ intents.members = True  # on_member_join event
 
 class GtaLorcanaBot(commands.Bot):
     async def setup_hook(self):
-        # Season-close checklist buttons route by custom_id, so clicks on a
-        # checklist posted before a restart still land.
-        self.add_dynamic_items(_SeasonCloseButton)
+        # Every button routes by custom_id, so clicks on a message posted
+        # before a restart still land.
+        self.add_dynamic_items(_SeasonCloseButton, _InvitationalButton,
+                               _LinkButton, _LinkPicker, _EtbButton)
         if os.getenv("SYNC_COMMANDS_ONLY") == "1":
             guild = discord.Object(id=int(DISCORD_GUILD_ID))
             print(f"  SYNC_COMMANDS_ONLY mode — guild_id={DISCORD_GUILD_ID}, commands registered={len(self.tree.get_commands())}")
@@ -378,14 +381,6 @@ async def _post_where_to_play(channel, messages: list[str], loop) -> None:
             state.pop(f'wtp_msg_{i}', None)
         save_bot_state(state)
     await loop.run_in_executor(None, _save_wtp_ids)
-
-# Pending mod-channel reaction prompts keyed by message ID.
-# link suggestions: playhub_id, display_name, discord_id, discord_name
-_pending_link_suggestions: dict[int, dict] = {}
-# invitational assignments: legendary/super_rare candidate lists, event_name
-_pending_invitational_assignments: dict[int, dict] = {}
-# etb approvals: discord_id, playhub_id, rph_username, email, count, customer_id
-_pending_etb_approvals: dict[int, dict] = {}
 
 @tasks.loop(minutes=1)
 async def where_to_play_weekly():
@@ -1225,7 +1220,8 @@ async def run_results_reporting_pipeline(
             loop = asyncio.get_running_loop()
             new_players = await loop.run_in_executor(None, get_unlinked_players, standing_rows or [])
             if new_players:
-                asyncio.create_task(_post_linking_suggestions(thread.guild, new_players))
+                asyncio.create_task(_post_linking_suggestions(
+                    thread.guild, new_players, f"From **{thread.name}**"))
         except Exception as link_err:
             print(f"  ⚠ Linking flow failed after results import: {link_err}")
 
@@ -1344,7 +1340,8 @@ async def _schedule_auto_retry(
             loop = asyncio.get_running_loop()
             new_players = await loop.run_in_executor(None, get_unlinked_players, standing_rows or [])
             if new_players:
-                asyncio.create_task(_post_linking_suggestions(thread.guild, new_players))
+                asyncio.create_task(_post_linking_suggestions(
+                    thread.guild, new_players, f"From **{thread.name}**"))
         except Exception as link_err:
             print(f"  ⚠ Linking flow failed after auto-retry: {link_err}")
 
@@ -1439,10 +1436,14 @@ async def on_thread_delete(thread: discord.Thread):
 
 @bot.event
 async def on_member_join(member: discord.Member):
-    """Auto-assign Common rarity role to every new member."""
-    if not COMMON_ROLE_ID:
+    """
+    Common for everyone. A returning linked member gets their earned roles back;
+    anyone else is checked against the unlinked players, since a player skipped
+    for want of a matching member may be exactly who just joined.
+    """
+    if member.bot:
         return
-    common_role = member.guild.get_role(COMMON_ROLE_ID)
+    common_role = member.guild.get_role(COMMON_ROLE_ID) if COMMON_ROLE_ID else None
     if common_role and common_role not in member.roles:
         try:
             await member.add_roles(common_role, reason="auto-assign Common on join")
@@ -1450,76 +1451,298 @@ async def on_member_join(member: discord.Member):
         except discord.HTTPException as e:
             print(f"  ⚠ Failed to assign Common role to {member.display_name}: {e}")
 
+    try:
+        if not await _restore_roles_on_rejoin(member):
+            await _suggest_for_new_member(member)
+    except Exception as e:
+        print(f"  ⚠ on_member_join registry check failed for {member.display_name}: {e}")
+
 
 # ═══════════════════════════════════════════════════════════════
-# PLAYER LINKING — fuzzy match helpers and reaction handler
+# PLAYER LINKING — suggestion messages with buttons
 # ═══════════════════════════════════════════════════════════════
+#
+# Each unlinked player gets one mod-channel message: a button per close Discord
+# match, a member picker for anyone else, and Skip. The buttons are DynamicItems
+# routed by custom_id — lk:<playhub id>:<discord id | skip> and lks:<playhub id>
+# — so they keep working across restarts with nothing held in memory, and every
+# click re-reads the registry, so a stale message can't undo a link made since.
+#
+# A player is suggested once, not after every event: registry column F holds the
+# open message's ID or the Skip (roles.suggestion_state). A suggestion whose
+# message was deleted is posted again, and a member who joins is checked against
+# everyone still unlinked — skipped players included, since the right member may
+# simply not have been on the server yet.
 
-async def _post_linking_suggestions(guild: discord.Guild, new_players: list[tuple[str, str]]):
-    """
-    For each (playhub_id, display_name) not yet in player_mapping:
-      - High confidence (≥75%) → post ✅/❌ reaction prompt to mod channel
-      - Low confidence (50–74%) → post notice, require /link
-      - No match → post unmatched notice, require /link
-    """
-    if not MOD_CHANNEL_ID:
-        print("  ⚠ MOD_CHANNEL_ID not set — skipping linking suggestions")
-        return
-    mod_ch = get_channel_by_id(guild, MOD_CHANNEL_ID)
+_link_busy: set[str] = set()   # Playhub IDs with a link click in flight
+
+
+async def _message_exists(channel, message_id: int) -> bool:
+    """False only when Discord says the message is gone; any other error counts as present."""
+    try:
+        await channel.fetch_message(message_id)
+        return True
+    except discord.NotFound:
+        return False
+    except discord.HTTPException:
+        return True
+
+
+async def _post_linking_suggestions(guild: discord.Guild, new_players: list[tuple[str, str]],
+                                    context: str = ""):
+    """Post a suggestion for each (playhub_id, display_name) not already suggested or skipped."""
+    mod_ch = get_channel_by_id(guild, MOD_CHANNEL_ID) if MOD_CHANNEL_ID else None
     if not mod_ch:
         print("  ⚠ Mod channel not found — skipping linking suggestions")
         return
-
+    loop = asyncio.get_running_loop()
+    try:
+        registry = await loop.run_in_executor(None, get_player_registry)
+    except Exception as e:
+        # Nothing is lost: the players come round again at their next event.
+        print(f"  ⚠ Linking suggestions skipped — registry read failed: {e}")
+        return
+    by_pid  = {r['playhub_id']: r for r in registry if r['playhub_id']}
     members = [m for m in guild.members if not m.bot]
 
     for playhub_id, display_name in new_players:
-        best_member, score = fuzzy_match_member(display_name, members)
+        state, msg_id = suggestion_state(by_pid.get(playhub_id))
+        if state == 'skipped':
+            continue
+        if state == 'suggested' and msg_id and await _message_exists(mod_ch, msg_id):
+            continue
+        await _post_link_suggestion(mod_ch, playhub_id, display_name,
+                                    fuzzy_top_members(display_name, members), context)
 
-        if score >= FUZZY_HIGH_CONFIDENCE:
-            embed = make_embed(
-                title="🔗 Suggested Player Link",
-                description=(
-                    f"**Playhub:** {display_name} (ID: `{playhub_id}`)\n"
-                    f"**Discord:** {best_member.mention} (`{best_member.display_name}`)\n"
-                    f"**Confidence:** {score:.0%}\n\n"
-                    f"React ✅ to confirm or ❌ to skip."
-                ),
-                colour=discord.Colour.yellow()
-            )
-            msg = await mod_ch.send(embed=embed)
-            await msg.add_reaction("✅")
-            await msg.add_reaction("❌")
-            _pending_link_suggestions[msg.id] = {
-                'playhub_id':   playhub_id,
-                'display_name': display_name,
-                'discord_id':   best_member.id,
-                'discord_name': best_member.display_name,
-            }
 
-        elif score >= FUZZY_LOW_CONFIDENCE and best_member:
-            embed = make_embed(
-                title="🔗 Low-Confidence Match",
-                description=(
-                    f"**Playhub:** {display_name} (ID: `{playhub_id}`)\n"
-                    f"**Closest Discord match:** {best_member.mention} "
-                    f"(`{best_member.display_name}`) — {score:.0%}\n\n"
-                    f"Use `/link @member {playhub_id}` to confirm manually."
-                ),
-                colour=discord.Colour.orange()
-            )
-            await mod_ch.send(embed=embed)
+async def _post_link_suggestion(mod_ch, playhub_id: str, name: str,
+                                matches: list[tuple], context: str = "") -> None:
+    """Post one player's suggestion and record it in the registry. matches: [(member, score)]."""
+    lines = [f"**Playhub:** {name} (ID `{playhub_id}`)"]
+    if context:
+        lines.append(context)
+    if matches:
+        lines.append("**Closest Discord matches:** "
+                     + " · ".join(f"{m.mention} {score:.0%}" for m, score in matches))
+    else:
+        lines.append("No close Discord match.")
+    lines.append("\nPick a match, choose anyone else from the menu, or Skip.")
 
-        else:
-            embed = make_embed(
-                title="❓ Unmatched Player",
-                description=(
-                    f"**Playhub:** {display_name} (ID: `{playhub_id}`)\n"
-                    f"No confident Discord match found.\n\n"
-                    f"Use `/link @member {playhub_id}` to link manually."
-                ),
-                colour=discord.Colour.red()
-            )
-            await mod_ch.send(embed=embed)
+    msg = await mod_ch.send(
+        embed=make_embed(title="🔗 Unlinked Player", description="\n".join(lines),
+                         colour=discord.Colour.yellow() if matches else discord.Colour.orange()),
+        view=_link_view(playhub_id, matches),
+    )
+    loop = asyncio.get_running_loop()
+    try:
+        async with _sheet_lock:
+            await loop.run_in_executor(None, mark_link_suggestion,
+                                       playhub_id, name, f"suggested:{msg.id}")
+    except Exception as e:
+        # The message still works; the player may just be suggested again next event.
+        print(f"  ⚠ Link suggestion for {name}: registry write failed: {e}")
+
+
+def _link_view(playhub_id: str, matches: list[tuple]) -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    for member, _score in matches:
+        view.add_item(_LinkButton(playhub_id, str(member.id),
+                                  f"Link {member.display_name}"[:80], discord.ButtonStyle.success))
+    view.add_item(_LinkButton(playhub_id, 'skip', "Skip", discord.ButtonStyle.secondary))
+    view.add_item(_LinkPicker(playhub_id))
+    return view
+
+
+class _LinkButton(discord.ui.DynamicItem[discord.ui.Button],
+                  template=r'lk:(?P<pid>\d+):(?P<target>\d+|skip)'):
+    """A one-click link to a suggested member, or Skip. Routed by custom_id."""
+
+    def __init__(self, playhub_id: str, target: str, label: str = "…",
+                 style: discord.ButtonStyle = discord.ButtonStyle.secondary):
+        super().__init__(discord.ui.Button(label=label, style=style,
+                                           custom_id=f"lk:{playhub_id}:{target}"))
+        self.playhub_id = playhub_id
+        self.target     = target
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction,
+                             item: discord.ui.Button, match: re.Match, /):
+        return cls(match['pid'], match['target'], item.label, item.style)
+
+    async def callback(self, interaction: discord.Interaction):
+        await _link_action(interaction, self.playhub_id,
+                           None if self.target == 'skip' else int(self.target))
+
+
+class _LinkPicker(discord.ui.DynamicItem[discord.ui.UserSelect], template=r'lks:(?P<pid>\d+)'):
+    """Member picker, for linking to someone who isn't among the suggested matches."""
+
+    def __init__(self, playhub_id: str):
+        super().__init__(discord.ui.UserSelect(placeholder="Link to someone else…",
+                                               custom_id=f"lks:{playhub_id}"))
+        self.playhub_id = playhub_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction,
+                             item: discord.ui.UserSelect, match: re.Match, /):
+        return cls(match['pid'])
+
+    async def callback(self, interaction: discord.Interaction):
+        await _link_action(interaction, self.playhub_id, self.item.values[0].id)
+
+
+async def _link_action(interaction: discord.Interaction, playhub_id: str,
+                       discord_id: int | None) -> None:
+    """A click on a suggestion: link playhub_id to discord_id, or Skip when None."""
+    if not _is_admin(interaction):
+        await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
+        return
+    # Two mods clicking at once must not link the player twice, or to two people.
+    if playhub_id in _link_busy:
+        await interaction.response.send_message("⏳ Still working on the last click.", ephemeral=True)
+        return
+
+    _link_busy.add(playhub_id)
+    try:
+        await interaction.response.defer()
+        try:
+            reply = await _apply_link_action(interaction, playhub_id, discord_id)
+        except Exception as e:
+            print(f"  ✗ link button {playhub_id} failed:\n{traceback.format_exc()}")
+            reply = f"❌ Link failed: `{type(e).__name__}: {e}`"
+    finally:
+        _link_busy.discard(playhub_id)
+    if reply:
+        await interaction.followup.send(reply, ephemeral=True)
+
+
+def _suggestion_name(message: discord.Message, playhub_id: str) -> str:
+    """The Playhub name shown on a suggestion message — for a row the registry lost."""
+    desc = message.embeds[0].description if message.embeds else ""
+    m = re.search(r"\*\*Playhub:\*\* (.+) \(ID `", desc or "")
+    return m.group(1) if m else f"Playhub {playhub_id}"
+
+
+async def _close_link_suggestion(interaction: discord.Interaction, name: str,
+                                 playhub_id: str, outcome: str,
+                                 colour: discord.Colour) -> None:
+    """Shrink a handled suggestion to its outcome and drop its buttons."""
+    await interaction.message.edit(
+        embed=make_embed(title=f"🔗 {name}", description=f"Playhub `{playhub_id}` — {outcome}",
+                         colour=colour),
+        view=None,
+    )
+
+
+async def _apply_link_action(interaction: discord.Interaction, playhub_id: str,
+                             discord_id: int | None) -> str | None:
+    """Returns an ephemeral reply for the clicker, or None when the message says it all."""
+    loop  = asyncio.get_running_loop()
+    guild = interaction.guild
+    mod   = interaction.user
+
+    registry = await loop.run_in_executor(None, get_player_registry)
+    row  = next((e for e in registry if e['playhub_id'] == playhub_id), None)
+    name = (row['playhub_name'] if row else '') or _suggestion_name(interaction.message, playhub_id)
+
+    # Linked since the message went up — by /link, a newer suggestion, or a click.
+    if row and row['discord_id']:
+        await _close_link_suggestion(interaction, name, playhub_id,
+                                     f"already linked to <@{row['discord_id']}>.",
+                                     discord.Colour.green())
+        return None
+
+    if discord_id is None:
+        async with _sheet_lock:
+            await loop.run_in_executor(None, mark_link_suggestion, playhub_id, name,
+                                       f"skipped:{mod.display_name}")
+        await _close_link_suggestion(
+            interaction, name, playhub_id,
+            f"⏭ skipped by {mod.mention}. Not suggested again unless a matching member joins.",
+            discord.Colour.light_grey())
+        return None
+
+    member = guild.get_member(discord_id) if guild else None
+    if not member:
+        return "⚠️ That member isn't in the server any more."
+    if member.bot:
+        return "⚠️ That's a bot — pick a person."
+
+    async with _sheet_lock:
+        role_seasons = await loop.run_in_executor(
+            None, link_player, member.id, member.display_name,
+            f"button:{mod.display_name}", playhub_id, name,
+        )
+    added, _failed = await _assign_recorded_roles(guild, member, role_seasons, "link-button")
+    roles_str = f"\nRoles assigned: {_fmt_roles(added)}" if added else ""
+    await _close_link_suggestion(interaction, name, playhub_id,
+                                 f"✅ linked to {member.mention} by {mod.mention}.{roles_str}",
+                                 discord.Colour.green())
+    return None
+
+
+async def _restore_roles_on_rejoin(member: discord.Member) -> bool:
+    """
+    Give a returning member the rarity roles their registry rows record.
+    Returns True if they're linked — they need no suggestion then.
+    """
+    loop = asyncio.get_running_loop()
+    registry = await loop.run_in_executor(None, get_player_registry)
+    rows = [r for r in registry if r['discord_id'] == member.id]
+    if not rows:
+        return False
+
+    # Earliest season per role across the member's rows (one per Playhub ID).
+    recorded: dict[int, str] = {}
+    for r in rows:
+        for rid, key in _REGISTRY_ROLE_KEYS:
+            if r[key] and (rid not in recorded or _season_num(r[key]) < _season_num(recorded[rid])):
+                recorded[rid] = r[key]
+
+    added, failed = await _assign_recorded_roles(member.guild, member, recorded, "rejoin-restore")
+    mod_ch = get_channel_by_id(member.guild, MOD_CHANNEL_ID) if MOD_CHANNEL_ID else None
+    if mod_ch and (added or failed):
+        await mod_ch.send(embed=make_embed(
+            title="♻ Roles Restored on Rejoin",
+            description=(f"{member.mention}: {_fmt_roles(added) or 'nothing new'}"
+                         + (f"\n{len(failed)} role(s) failed — run `/assign-roles-from-registry`."
+                            if failed else "")),
+            colour=discord.Colour.green(),
+        ))
+    return True
+
+
+async def _suggest_for_new_member(member: discord.Member) -> None:
+    """Suggest the unlinked player whose Playhub name best matches a member who just joined."""
+    loop = asyncio.get_running_loop()
+    registry = await loop.run_in_executor(None, get_player_registry)
+    best, best_score = None, 0.0
+    for r in registry:
+        if r['discord_id'] or not r['playhub_id']:
+            continue
+        _m, score = fuzzy_match_member(r['playhub_name'], [member])
+        if score > best_score:
+            best, best_score = r, score
+    # A high bar: names are short, so nearly every newcomer clears the low one
+    # against someone on the whole unlinked list, and every join would post.
+    if not best or best_score < FUZZY_HIGH_CONFIDENCE:
+        return
+
+    mod_ch = get_channel_by_id(member.guild, MOD_CHANNEL_ID) if MOD_CHANNEL_ID else None
+    if not mod_ch:
+        return
+    # Replace an open suggestion rather than leave two up for the same player.
+    _state, old_id = suggestion_state(best)
+    if old_id:
+        try:
+            await (await mod_ch.fetch_message(old_id)).delete()
+        except discord.HTTPException:
+            pass
+
+    others  = [m for m in member.guild.members if not m.bot and m.id != member.id]
+    matches = [(member, best_score)] + fuzzy_top_members(best['playhub_name'], others, n=2)
+    await _post_link_suggestion(mod_ch, best['playhub_id'], best['playhub_name'], matches,
+                                f"🆕 {member.mention} just joined the server.")
 
 
 async def _assign_recorded_roles(guild: discord.Guild,
@@ -1530,8 +1753,8 @@ async def _assign_recorded_roles(guild: discord.Guild,
     Grant `member` every rarity role in role_seasons they don't already hold.
 
     The single implementation of "make Discord match what the registry records".
-    /assign-roles-from-registry calls it for every row; /link and the ✅
-    fuzzy-confirm call it for one member so a freshly linked player gets their
+    /assign-roles-from-registry calls it for every row; /link, the
+    suggestion buttons and a rejoin call it for one member so a freshly linked player gets their
     roles immediately. Recording what a player earned is a separate step — this
     only applies it.
 
@@ -1568,211 +1791,6 @@ async def _assign_recorded_roles(guild: discord.Guild,
 def _fmt_roles(pairs: list) -> str:
     """Render [(role_id, season)] as 'Rare (S7), Uncommon (S8)'."""
     return ", ".join(f"**{RARITY_ROLE_NAMES.get(rid, str(rid))}** ({s})" for rid, s in pairs)
-
-
-@bot.event
-async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
-    """Handle ✅/❌ reactions on pending link suggestions and invitational assignments."""
-    if payload.user_id == bot.user.id:
-        return
-
-    emoji = str(payload.emoji)
-    if emoji not in ("✅", "❌"):
-        return
-
-    guild   = bot.get_guild(payload.guild_id)
-    mod_ch  = guild.get_channel(payload.channel_id) if guild else None
-    loop    = asyncio.get_running_loop()
-
-    # ── Link suggestion confirmation ───────────────────────────
-    if payload.message_id in _pending_link_suggestions:
-        suggestion = _pending_link_suggestions.pop(payload.message_id)
-
-        if emoji == "✅":
-            role_seasons = await loop.run_in_executor(
-                None, link_player,
-                suggestion['discord_id'], suggestion['discord_name'],
-                'fuzzy-confirmed',
-                suggestion['playhub_id'], suggestion['display_name'],
-            )
-            # Apply whatever the registry already records for them.
-            added, _failed = await _assign_recorded_roles(
-                guild,
-                guild.get_member(suggestion['discord_id']) if guild else None,
-                role_seasons,
-                "fuzzy-link-confirmed",
-            )
-            if mod_ch:
-                roles_str = f"\nRoles assigned: {_fmt_roles(added)}" if added else ""
-                await mod_ch.send(embed=make_embed(
-                    title="✅ Link Confirmed",
-                    description=(
-                        f"**{suggestion['display_name']}** (Playhub `{suggestion['playhub_id']}`)"
-                        f" → <@{suggestion['discord_id']}>{roles_str}"
-                    ),
-                    colour=discord.Colour.green()
-                ))
-        else:
-            if mod_ch:
-                await mod_ch.send(embed=make_embed(
-                    title="❌ Link Skipped",
-                    description=(
-                        f"Skipped **{suggestion['display_name']}** "
-                        f"(Playhub `{suggestion['playhub_id']}`). "
-                        f"Use `/link` to resolve manually."
-                    ),
-                    colour=discord.Colour.red()
-                ))
-
-    # ── ETB discount approval ──────────────────────────────────
-    elif payload.message_id in _pending_etb_approvals:
-        req = _pending_etb_approvals.pop(payload.message_id)
-        try:
-            user = bot.get_user(req['discord_id']) or await bot.fetch_user(req['discord_id'])
-        except Exception:
-            user = None
-
-        if emoji == "✅":
-            err = await _apply_etb_approval(
-                req['discord_id'], req['discord_name'],
-                req['playhub_id'], req['rph_username'], req['email'],
-                req['count'], req['customer_id'],
-            )
-            if err:
-                if mod_ch:
-                    await mod_ch.send(embed=make_embed(
-                        title="⚠️ ETB Approval Failed",
-                        description=(
-                            f"Shopify whitelist failed for <@{req['discord_id']}> "
-                            f"(**{req['rph_username']}**).\n`{err}`\n\n"
-                            f"Nothing was linked or granted — they'll need to run "
-                            f"`/etb-discount` again."
-                        ),
-                        colour=discord.Colour.red()
-                    ))
-                return
-
-            dm_ok = False
-            if user:
-                try:
-                    await user.send(_etb_code_message(req['email']))
-                    dm_ok = True
-                except discord.Forbidden:
-                    pass
-
-            if mod_ch:
-                await mod_ch.send(embed=make_embed(
-                    title="✅ ETB Discount Approved",
-                    description=(
-                        f"**{req['rph_username']}** (Playhub `{req['playhub_id']}`) "
-                        f"→ <@{req['discord_id']}>\n"
-                        f"Linked, whitelisted, and "
-                        + ("DM'd the code."
-                           if dm_ok else
-                           "**DM failed** — their DMs are closed, so the code needs "
-                           "passing on by hand.")
-                    ),
-                    colour=discord.Colour.green()
-                ))
-        else:
-            if user:
-                try:
-                    await user.send(
-                        f"❌ Your ETB discount request for **{req['rph_username']}** "
-                        f"wasn't approved.\n\n"
-                        f"If that's genuinely your Playhub profile, ask a mod to link "
-                        f"your Discord account with `/link`, then run `/etb-discount` "
-                        f"again."
-                    )
-                except discord.Forbidden:
-                    pass
-            if mod_ch:
-                await mod_ch.send(embed=make_embed(
-                    title="❌ ETB Discount Denied",
-                    description=(
-                        f"Denied <@{req['discord_id']}>'s claim on "
-                        f"**{req['rph_username']}** (Playhub `{req['playhub_id']}`). "
-                        f"Nothing was linked or granted."
-                    ),
-                    colour=discord.Colour.red()
-                ))
-
-    # ── Invitational assignment confirmation ───────────────────
-    elif payload.message_id in _pending_invitational_assignments:
-        assignment = _pending_invitational_assignments.pop(payload.message_id)
-
-        if emoji == "✅":
-            # Records only — the Discord roles are granted by
-            # /assign-roles-from-registry, which reads columns G–J back out.
-            # Unlinked finishers are recorded too, so their role lands as soon
-            # as they are linked. prefer_earliest because a backfilled event can
-            # predate what is already in the sheet.
-            season_label = assignment['season']
-            all_candidates = []
-            if assignment['legendary']:
-                pid, name, member = assignment['legendary']
-                all_candidates.append((pid, name, member, LEGENDARY_ROLE_ID, "Legendary"))
-            for pid, name, member in assignment['super_rare']:
-                all_candidates.append((pid, name, member, SUPER_RARE_ROLE_ID, "Super Rare"))
-
-            earners = [
-                (name, {role_id: season_label}, pid or None)
-                for pid, name, _member, role_id, _role_name in all_candidates
-            ]
-            try:
-                await loop.run_in_executor(
-                    None, lambda: batch_upsert_player_roles(earners, prefer_earliest=True)
-                )
-            except Exception as e:
-                print(f"  ✗ record-legendary-and-super-rare: registry write failed: {e}")
-                if mod_ch:
-                    await mod_ch.send(embed=make_embed(
-                        title="❌ Recording Failed",
-                        description=(f"Nothing was written for **{assignment['event_name']}**: `{e}`\n"
-                                     f"Re-run the command to retry — recording is idempotent."),
-                        colour=discord.Colour.red()
-                    ))
-                return
-
-            # Marked whether or not any cell changed — see _record_rare_and_uncommon.
-            await _season_close_mark(season_label,
-                                     invitational=_now_et().date().isoformat(),
-                                     invitational_n=len(all_candidates))
-
-            assign_note = "\n\nRun `/assign-roles-from-registry` to grant the Discord roles."
-            if assignment.get('assign') and guild:
-                try:
-                    registry = await loop.run_in_executor(None, get_player_registry)
-                    assigned, failed, _gone, _unlinked = await _assign_all_from_registry(
-                        guild, registry, payload.channel_id)
-                    assign_note = (f"\n\n{len(assigned)} Discord role(s) granted"
-                                   + (f", {len(failed)} failed" if failed else "") + ".")
-                except Exception as e:
-                    print(f"  ✗ invitational: role assignment failed: {e}")
-                    assign_note = (f"\n\n⚠️ Recorded, but granting roles failed: `{e}` — "
-                                   f"run `/assign-roles-from-registry`.")
-
-            recorded = [f"**{name}** → {role_name}"
-                        + ("" if member else " *(unlinked)*")
-                        for _pid, name, member, _rid, role_name in all_candidates]
-            unlinked_n = sum(1 for _p, _n, m, _r, _rn in all_candidates if not m)
-            if mod_ch:
-                await mod_ch.send(embed=make_embed(
-                    title=f"🏆 Recorded as {season_label} — {assignment['event_name']}",
-                    description="\n".join(recorded)
-                                + (f"\n\n{unlinked_n} finisher(s) not yet linked — their role lands on link."
-                                   if unlinked_n else "")
-                                + assign_note,
-                    colour=discord.Colour.gold()
-                ))
-            await _refresh_season_close_quietly(season_label)
-        else:
-            if mod_ch:
-                await mod_ch.send(embed=make_embed(
-                    title="❌ Recording Cancelled",
-                    description=f"Nothing was recorded for **{assignment['event_name']}**.",
-                    colour=discord.Colour.red()
-                ))
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -2062,8 +2080,7 @@ class _InvitationalUrlModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
         reply = await _post_invitational_preview(
-            interaction.guild, self.url.value, self.season_id, assign=True,
-            channel_id=SEASON_CLOSE_CHANNEL_ID,
+            interaction.guild, self.url.value, self.season_id,
         )
         await interaction.followup.send(reply, ephemeral=True)
 
@@ -2598,15 +2615,12 @@ async def _post_etb_approval_request(interaction: discord.Interaction,
             f"**Name similarity:** {score:.0%}\n\n"
             f"This Discord account isn't linked to a Playhub ID yet. Approving "
             f"links it **and** grants the discount — so the linked player's "
-            f"earned roles become theirs.\n\n"
-            f"React ✅ to approve or ❌ to deny."
+            f"earned roles become theirs."
         ),
         colour=discord.Colour.yellow(),
-    ))
-    await msg.add_reaction("✅")
-    await msg.add_reaction("❌")
+    ), view=_etb_view())
 
-    _pending_etb_approvals[msg.id] = {
+    req = {
         'discord_id':   interaction.user.id,
         'discord_name': interaction.user.display_name,
         'playhub_id':   playhub_id,
@@ -2615,7 +2629,174 @@ async def _post_etb_approval_request(interaction: discord.Interaction,
         'count':        count,
         'customer_id':  customer_id,
     }
+    try:
+        await asyncio.get_running_loop().run_in_executor(
+            None, set_bot_state_key, f"{_ETB_PENDING_PREFIX}{msg.id}", json.dumps(req))
+    except Exception as e:
+        # Buttons with no request behind them would only tell the mod "already
+        # handled" — take the prompt down and let the caller retry.
+        print(f"  ✗ /etb-discount: couldn't save the pending request: {e}")
+        try:
+            await msg.delete()
+        except discord.HTTPException:
+            pass
+        return False
     return True
+
+
+# The pending request lives in Bot State under etb_pending:<message id>, so the
+# buttons work across restarts. One custom_id for every prompt — the message ID
+# says which request a click is for.
+_ETB_PENDING_PREFIX = "etb_pending:"
+_etb_busy: set[int] = set()   # prompt message IDs with a click in flight
+
+
+def _etb_view() -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    view.add_item(_EtbButton('approve', "Approve", discord.ButtonStyle.success))
+    view.add_item(_EtbButton('deny', "Deny", discord.ButtonStyle.danger))
+    return view
+
+
+class _EtbButton(discord.ui.DynamicItem[discord.ui.Button],
+                 template=r'etb:(?P<action>approve|deny)'):
+    """Approve / Deny on an ETB identity check. Routed by custom_id."""
+
+    def __init__(self, action: str, label: str = "…",
+                 style: discord.ButtonStyle = discord.ButtonStyle.secondary):
+        super().__init__(discord.ui.Button(label=label, style=style, custom_id=f"etb:{action}"))
+        self.action = action
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction,
+                             item: discord.ui.Button, match: re.Match, /):
+        return cls(match['action'], item.label, item.style)
+
+    async def callback(self, interaction: discord.Interaction):
+        await _etb_decide(interaction, self.action == 'approve')
+
+
+def _etb_pending_requests(state: dict) -> dict[int, dict]:
+    """{prompt message id: request} for every open ETB identity check in Bot State."""
+    out = {}
+    for key, raw in state.items():
+        if not key.startswith(_ETB_PENDING_PREFIX):
+            continue
+        try:
+            out[int(key[len(_ETB_PENDING_PREFIX):])] = json.loads(raw)
+        except (ValueError, TypeError):
+            print(f"  ⚠ Ignoring unreadable Bot State key {key}")
+    return out
+
+
+async def _etb_decide(interaction: discord.Interaction, approve: bool) -> None:
+    if not _is_admin(interaction):
+        await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
+        return
+    msg_id = interaction.message.id
+    if msg_id in _etb_busy:
+        await interaction.response.send_message("⏳ Still working on the last click.", ephemeral=True)
+        return
+
+    _etb_busy.add(msg_id)
+    try:
+        await interaction.response.defer()
+        loop = asyncio.get_running_loop()
+        key  = f"{_ETB_PENDING_PREFIX}{msg_id}"
+        state = await loop.run_in_executor(None, lambda: load_bot_state(strict=True))
+        req   = _etb_pending_requests(state).get(msg_id)
+        if req is None:
+            await interaction.message.edit(view=None)
+            await interaction.followup.send("This request was already handled.", ephemeral=True)
+            return
+        # Claimed before acting, so a later click finds nothing to grant twice.
+        await loop.run_in_executor(None, delete_bot_state_key, key)
+        verdict = await _etb_resolve(req, approve, interaction.channel)
+        embed = interaction.message.embeds[0] if interaction.message.embeds else None
+        if embed:
+            embed.add_field(name="Decision",
+                            value=f"{verdict} by {interaction.user.mention}", inline=False)
+        await interaction.message.edit(embed=embed, view=None)
+    except Exception as e:
+        print(f"  ✗ ETB decision failed:\n{traceback.format_exc()}")
+        await interaction.followup.send(f"❌ Failed: `{type(e).__name__}: {e}`", ephemeral=True)
+    finally:
+        _etb_busy.discard(msg_id)
+
+
+async def _etb_resolve(req: dict, approve: bool, mod_ch) -> str:
+    """Grant or deny one ETB request, tell the caller, and log it. Returns the verdict."""
+    try:
+        user = bot.get_user(req['discord_id']) or await bot.fetch_user(req['discord_id'])
+    except Exception:
+        user = None
+
+    if not approve:
+        if user:
+            try:
+                await user.send(
+                    f"❌ Your ETB discount request for **{req['rph_username']}** "
+                    f"wasn't approved.\n\n"
+                    f"If that's genuinely your Playhub profile, ask a mod to link "
+                    f"your Discord account with `/link`, then run `/etb-discount` "
+                    f"again."
+                )
+            except discord.Forbidden:
+                pass
+        if mod_ch:
+            await mod_ch.send(embed=make_embed(
+                title="❌ ETB Discount Denied",
+                description=(
+                    f"Denied <@{req['discord_id']}>'s claim on "
+                    f"**{req['rph_username']}** (Playhub `{req['playhub_id']}`). "
+                    f"Nothing was linked or granted."
+                ),
+                colour=discord.Colour.red()
+            ))
+        return "❌ Denied"
+
+    err = await _apply_etb_approval(
+        req['discord_id'], req['discord_name'],
+        req['playhub_id'], req['rph_username'], req['email'],
+        req['count'], req['customer_id'],
+    )
+    if err:
+        if mod_ch:
+            await mod_ch.send(embed=make_embed(
+                title="⚠️ ETB Approval Failed",
+                description=(
+                    f"Shopify whitelist failed for <@{req['discord_id']}> "
+                    f"(**{req['rph_username']}**).\n`{err}`\n\n"
+                    f"Nothing was linked or granted — they'll need to run "
+                    f"`/etb-discount` again."
+                ),
+                colour=discord.Colour.red()
+            ))
+        return "⚠️ Approved, but Shopify failed"
+
+    dm_ok = False
+    if user:
+        try:
+            await user.send(_etb_code_message(req['email']))
+            dm_ok = True
+        except discord.Forbidden:
+            pass
+
+    if mod_ch:
+        await mod_ch.send(embed=make_embed(
+            title="✅ ETB Discount Approved",
+            description=(
+                f"**{req['rph_username']}** (Playhub `{req['playhub_id']}`) "
+                f"→ <@{req['discord_id']}>\n"
+                f"Linked, whitelisted, and "
+                + ("DM'd the code."
+                   if dm_ok else
+                   "**DM failed** — their DMs are closed, so the code needs "
+                   "passing on by hand.")
+            ),
+            colour=discord.Colour.green()
+        ))
+    return "✅ Approved"
 
 
 @tree.command(name="etb-discount", description="Unlock the Enter the Battlefield community discount by verifying your GTA Lorcana event attendance")
@@ -2804,7 +2985,11 @@ async def etb_discount(interaction: discord.Interaction, rph_username: str, emai
     # Anyone else has offered nothing but a public display name, and that must
     # buy neither the discount nor a registry link.
     if not known_id:
-        if any(r['discord_id'] == interaction.user.id for r in _pending_etb_approvals.values()):
+        try:
+            open_requests = _etb_pending_requests(await loop.run_in_executor(None, load_bot_state))
+        except Exception:
+            open_requests = {}
+        if any(r.get('discord_id') == interaction.user.id for r in open_requests.values()):
             await interaction.followup.send(
                 "🕓 You already have a request waiting on a mod — hang tight, "
                 "you'll get a DM as soon as it's reviewed.",
@@ -3225,11 +3410,11 @@ async def link_command(interaction: discord.Interaction, member: discord.Member,
         ))
 
 
-# ── /record-rare-and-uncommon ─────────────────────────────────
+# ── Rare / Uncommon recording (season-close checklist) ────────
 #
-# Records only — it writes the season into registry columns I and J and stops
-# there. Granting the Discord roles is /assign-roles-from-registry, so the
-# registry stays the single source of truth for who has earned what.
+# Recording writes the season into registry columns I and J; granting the
+# Discord roles is _assign_all_from_registry, run straight after by the same
+# button. The registry stays the single source of truth for who has earned what.
 def _rare_uncommon_earners(season_id: str) -> list[dict]:
     """
     Rare/Uncommon earners from a season's leaderboard: [{'id', 'name', 'roles'}].
@@ -3274,10 +3459,10 @@ def _rare_uncommon_earners(season_id: str) -> list[dict]:
 
 
 async def _record_rare_and_uncommon(guild: discord.Guild, season_id: str, loop,
-                                    channel_id: int = MOD_CHANNEL_ID) -> dict:
+                                    channel_id: int = SEASON_CLOSE_CHANNEL_ID) -> dict:
     """
     Record a season's Rare/Uncommon earners into the registry and mark the season
-    recorded. Shared by the slash command and the season-close checklist.
+    recorded. Run by the season-close checklist's Record & assign button.
 
     Records only — granting the Discord roles is _assign_all_from_registry.
     Returns {'recorded': n, 'unlinked': [names], 'merged': n}. Raises on a failed
@@ -3358,96 +3543,27 @@ async def _record_rare_and_uncommon(guild: discord.Guild, season_id: str, loop,
     return {'recorded': len(earners_meta), 'unlinked': unlinked, 'merged': merged}
 
 
-@tree.command(name="record-rare-and-uncommon",
-              description="Record Rare/Uncommon earned this season into the Player Registry (mods only)")
-async def record_rare_and_uncommon(interaction: discord.Interaction):
-    if not _is_admin(interaction):
-        await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
-        return
-
-    await interaction.response.defer(ephemeral=True)
-    loop = asyncio.get_running_loop()
-    season_id = season.CURRENT_SEASON
-
-    try:
-        result = await _record_rare_and_uncommon(interaction.guild, season_id, loop)
-    except Exception as e:
-        print(f"  ✗ record-rare-and-uncommon: failed: {e}")
-        await interaction.followup.send(
-            f"❌ Recording failed — the registry is unchanged: `{e}`", ephemeral=True
-        )
-        return
-
-    await _refresh_season_close_quietly(season_id)
-
-    if not result['recorded']:
-        await interaction.followup.send(
-            f"✅ No players earned roles in {season_id} — marked as recorded.", ephemeral=True
-        )
-        return
-
-    summary = f"✅ Recorded {result['recorded']} player(s) for {season_id}"
-    if result['unlinked']:
-        summary += f", {len(result['unlinked'])} not yet linked"
-    if result['merged']:
-        summary += f", {result['merged']} duplicate registry row(s) merged"
-    await interaction.followup.send(
-        summary + ".\n\nNow run `/assign-roles-from-registry` to grant the Discord roles.",
-        ephemeral=True,
-    )
-
-
-# ── /record-legendary-and-super-rare ──────────────────────────
-@tree.command(name="record-legendary-and-super-rare",
-              description="Record Legendary/Super Rare from an invitational into the Player Registry (mods only)")
-@app_commands.describe(event_url="RPH event URL or bare event ID",
-                       season_label="Season to record in the registry, e.g. S11 (default: current season)")
-async def invitational_roles(interaction: discord.Interaction, event_url: str, season_label: str = None):
-    if not _is_admin(interaction):
-        await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
-        return
-
-    # Backfilling an old invitational must record the season the event belongs
-    # to, not the season it is being replayed in.
-    if season_label:
-        season_label = season_label.strip().upper()
-        if not re.fullmatch(r"S\d+", season_label):
-            await interaction.response.send_message(
-                f"⚠️ `{season_label}` isn't a valid season — use the form `S11`.", ephemeral=True
-            )
-            return
-    else:
-        season_label = season.CURRENT_SEASON
-
-    await interaction.response.defer(ephemeral=True)
-    reply = await _post_invitational_preview(interaction.guild, event_url, season_label)
-    await interaction.followup.send(reply, ephemeral=True)
-
-
-async def _post_invitational_preview(guild: discord.Guild, event_url: str,
-                                     season_label: str, assign: bool = False,
-                                     channel_id: int = MOD_CHANNEL_ID) -> str:
+async def _invitational_finishers(guild: discord.Guild, event_id: str) -> tuple[dict | None, str]:
     """
-    Fetch an invitational's final standings and post the ✅/❌ recording prompt to
-    the mod channel. Shared by /record-legendary-and-super-rare and the
-    season-close checklist; returns the ephemeral reply for whoever asked.
+    An invitational's winner and ranks 2–8, resolved to Discord members.
+    Returns ({'event_name', 'legendary', 'super_rare', 'registry'}, '') or (None, error).
 
-    assign: also grant the Discord roles on ✅. The checklist sets it, because its
-    step is "record and assign"; the slash command keeps the two separate.
+    The preview and the Confirm click both call this, so the click records what
+    the event and registry say at that moment — nothing is carried in memory
+    between them, and a finisher linked in the meantime is recorded as linked.
+    legendary is (playhub_id, name, member | None) or None; super_rare a list of them.
     """
-    event_id = event_url.strip().rstrip("/").split("/")[-1]
-
     loop = asyncio.get_running_loop()
     try:
         event = await loop.run_in_executor(None, _rph_api.get_event_by_id, event_id)
     except Exception as e:
-        return f"❌ Failed to fetch event: {e}"
+        return None, f"❌ Failed to fetch event: {e}"
 
     if not event:
-        return f"❌ No event found for ID `{event_id}`."
+        return None, f"❌ No event found for ID `{event_id}`."
 
     if not event.get('tournament_phases') or not event['tournament_phases'][-1].get('rounds'):
-        return "❌ Event has no tournament rounds."
+        return None, "❌ Event has no tournament rounds."
 
     last_round_id = event['tournament_phases'][-1]['rounds'][-1]['id']
     try:
@@ -3455,7 +3571,7 @@ async def _post_invitational_preview(guild: discord.Guild, event_url: str,
             None, _rph_api.get_standings_from_tournament_round_id, str(last_round_id)
         )
     except Exception as e:
-        return f"❌ Failed to fetch standings: {e}"
+        return None, f"❌ Failed to fetch standings: {e}"
 
     standings.sort(key=lambda s: s['rank'])
     registry_list      = await loop.run_in_executor(None, get_player_registry)
@@ -3470,13 +3586,32 @@ async def _post_invitational_preview(guild: discord.Guild, event_url: str,
 
     rank1 = next((s for s in standings if s['rank'] == 1), None)
     top8  = [s for s in standings if 2 <= s['rank'] <= 8]
+    return {
+        'event_name': event.get('name', f"Event {event_id}"),
+        'legendary':  resolve(rank1) if rank1 else None,
+        'super_rare': [resolve(s) for s in top8],
+        'registry':   registry_list,
+    }, ''
 
-    legendary_entry = resolve(rank1) if rank1 else None
-    sr_entries      = [resolve(s) for s in top8]
 
-    event_name = event.get('name', f"Event {event_id}")
+async def _post_invitational_preview(guild: discord.Guild, event_url: str,
+                                     season_label: str,
+                                     channel_id: int = SEASON_CLOSE_CHANNEL_ID) -> str:
+    """
+    Fetch an invitational's final standings and post the Confirm / Cancel prompt.
+    Called from the season-close checklist; returns the ephemeral reply for
+    whoever asked. Confirming records the roles and grants them on Discord.
+    """
+    event_id = event_url.strip().rstrip("/").split("/")[-1]
+    if not event_id.isdigit():
+        return f"❌ `{event_id}` isn't an RPH event ID — paste the event's URL."
+
+    found, err = await _invitational_finishers(guild, event_id)
+    if not found:
+        return err
+
     seq_label  = _season_num(season_label)
-    reg_by_pid = {r['playhub_id']: r for r in registry_list if r['playhub_id']}
+    reg_by_pid = {r['playhub_id']: r for r in found['registry'] if r['playhub_id']}
 
     def change(pid, key):
         # Before → after, the same progression the season-close checklist shows.
@@ -3485,11 +3620,11 @@ async def _post_invitational_preview(guild: discord.Guild, event_url: str,
         return _progression(before, new) if new else f"already {_RARITY_LABEL[key]}"
 
     lines = []
-    if legendary_entry:
-        pid, name, member = legendary_entry
-        mention = member.mention if member else f"**{name}** *(unlinked — use /link first)*"
+    if found['legendary']:
+        pid, name, member = found['legendary']
+        mention = member.mention if member else f"**{name}** *(unlinked — link them first)*"
         lines.append(f"🏆 **Legendary** → {mention} — {change(pid, 'legendary')}")
-    for i, (pid, name, member) in enumerate(sr_entries, 2):
+    for i, (pid, name, member) in enumerate(found['super_rare'], 2):
         mention = member.mention if member else f"**{name}** *(unlinked)*"
         lines.append(f"⭐ **Super Rare** (rank {i}) → {mention} — {change(pid, 'super_rare')}")
 
@@ -3497,32 +3632,161 @@ async def _post_invitational_preview(guild: discord.Guild, event_url: str,
     if not mod_ch:
         return f"⚠️ Channel `{channel_id}` not found."
 
-    roles_note = ("\nApproving also grants the Discord roles." if assign else
-                  "\nDiscord roles are granted separately by `/assign-roles-from-registry`.")
     embed = make_embed(
-        title=f"🏆 Invitational Results — {event_name}",
+        title=f"🏆 Invitational Results — {found['event_name']}",
         description="\n".join(lines)
-                    + f"\n\nWill record these as **{season_label}** in the Player Registry."
-                    + roles_note
-                    + "\n\nReact ✅ to confirm or ❌ to cancel.",
+                    + f"\n\nWill record these as **{season_label}** in the Player Registry"
+                    + " and grant the Discord roles.",
         colour=discord.Colour.gold()
     )
     try:
-        msg = await mod_ch.send(embed=embed)
+        await mod_ch.send(embed=embed, view=_invitational_view(season_label, event_id))
     except discord.Forbidden:
         return (f"❌ Bot lacks permission to send messages in {mod_ch.mention} (ID: `{channel_id}`). "
                 f"Check channel permissions.")
-
-    await msg.add_reaction("✅")
-    await msg.add_reaction("❌")
-    _pending_invitational_assignments[msg.id] = {
-        'event_name': event_name,
-        'season':     season_label,
-        'legendary':  legendary_entry,
-        'super_rare': sr_entries,
-        'assign':     assign,
-    }
     return f"Check {mod_ch.mention} to confirm."
+
+
+def _invitational_view(season_label: str, event_id: str) -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    view.add_item(_InvitationalButton(season_label, event_id, 'ok', "Confirm",
+                                      discord.ButtonStyle.success))
+    view.add_item(_InvitationalButton(season_label, event_id, 'cancel', "Cancel",
+                                      discord.ButtonStyle.secondary))
+    return view
+
+
+class _InvitationalButton(discord.ui.DynamicItem[discord.ui.Button],
+                          template=r'inv:(?P<season>S\d+):(?P<event>\d+):(?P<action>ok|cancel)'):
+    """Confirm / Cancel on an invitational preview. Routed by custom_id."""
+
+    def __init__(self, season_label: str, event_id: str, action: str, label: str = "…",
+                 style: discord.ButtonStyle = discord.ButtonStyle.secondary):
+        super().__init__(discord.ui.Button(label=label, style=style,
+                                           custom_id=f"inv:{season_label}:{event_id}:{action}"))
+        self.season_label = season_label
+        self.event_id     = event_id
+        self.action       = action
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction,
+                             item: discord.ui.Button, match: re.Match, /):
+        return cls(match['season'], match['event'], match['action'], item.label, item.style)
+
+    async def callback(self, interaction: discord.Interaction):
+        await _invitational_action(interaction, self.season_label, self.event_id,
+                                   self.action == 'ok')
+
+
+_invitational_busy: set[str] = set()   # "<season>:<event id>" with a click in flight
+
+
+async def _invitational_action(interaction: discord.Interaction, season_label: str,
+                               event_id: str, confirm: bool) -> None:
+    if interaction.user.id not in ADMIN_USER_IDS:
+        await interaction.response.send_message("⚠️ Admins only.", ephemeral=True)
+        return
+    busy_key = f"{season_label}:{event_id}"
+    if busy_key in _invitational_busy:
+        await interaction.response.send_message("⏳ Still working on the last click.", ephemeral=True)
+        return
+
+    _invitational_busy.add(busy_key)
+    try:
+        await interaction.response.defer()
+        embed = interaction.message.embeds[0] if interaction.message.embeds else None
+
+        if not confirm:
+            if embed:
+                embed.add_field(name="Cancelled", value=f"by {interaction.user.mention} — nothing recorded",
+                                inline=False)
+            await interaction.message.edit(embed=embed, view=None)
+            return
+
+        found, err = await _invitational_finishers(interaction.guild, event_id)
+        if not found:
+            await interaction.followup.send(f"{err}\nNothing was recorded — press Confirm to retry.",
+                                            ephemeral=True)
+            return
+        if await _record_invitational(interaction.guild, interaction.channel, season_label, found):
+            if embed:
+                embed.add_field(name="Confirmed", value=f"by {interaction.user.mention}", inline=False)
+            await interaction.message.edit(embed=embed, view=None)
+    except Exception as e:
+        print(f"  ✗ invitational {busy_key} failed:\n{traceback.format_exc()}")
+        await interaction.followup.send(f"❌ Failed: `{type(e).__name__}: {e}`", ephemeral=True)
+    finally:
+        _invitational_busy.discard(busy_key)
+
+
+async def _record_invitational(guild: discord.Guild, channel, season_label: str,
+                               found: dict) -> bool:
+    """
+    Record an invitational's Legendary / Super Rare and grant the Discord roles.
+    Returns False if the registry write failed — nothing is recorded then.
+
+    Unlinked finishers are recorded too, so their role lands as soon as they are
+    linked. prefer_earliest because a backfilled event can predate what is
+    already in the sheet.
+    """
+    loop = asyncio.get_running_loop()
+    all_candidates = []
+    if found['legendary']:
+        pid, name, member = found['legendary']
+        all_candidates.append((pid, name, member, LEGENDARY_ROLE_ID, "Legendary"))
+    for pid, name, member in found['super_rare']:
+        all_candidates.append((pid, name, member, SUPER_RARE_ROLE_ID, "Super Rare"))
+
+    earners = [
+        (name, {role_id: season_label}, pid or None)
+        for pid, name, _member, role_id, _role_name in all_candidates
+    ]
+    try:
+        await loop.run_in_executor(
+            None, lambda: batch_upsert_player_roles(earners, prefer_earliest=True)
+        )
+    except Exception as e:
+        print(f"  ✗ invitational: registry write failed: {e}")
+        if channel:
+            await channel.send(embed=make_embed(
+                title="❌ Recording Failed",
+                description=(f"Nothing was written for **{found['event_name']}**: `{e}`\n"
+                             f"Press Confirm again to retry — recording is idempotent."),
+                colour=discord.Colour.red()
+            ))
+        return False
+
+    # Marked whether or not any cell changed — see _record_rare_and_uncommon.
+    await _season_close_mark(season_label,
+                             invitational=_now_et().date().isoformat(),
+                             invitational_n=len(all_candidates))
+
+    try:
+        registry = await loop.run_in_executor(None, get_player_registry)
+        assigned, failed, _gone, _unlinked = await _assign_all_from_registry(
+            guild, registry, channel.id if channel else SEASON_CLOSE_CHANNEL_ID)
+        assign_note = (f"\n\n{len(assigned)} Discord role(s) granted"
+                       + (f", {len(failed)} failed" if failed else "") + ".")
+    except Exception as e:
+        print(f"  ✗ invitational: role assignment failed: {e}")
+        assign_note = (f"\n\n⚠️ Recorded, but granting roles failed: `{e}` — "
+                       f"run `/assign-roles-from-registry`.")
+
+    recorded = [f"**{name}** → {role_name}"
+                + ("" if member else " *(unlinked)*")
+                for _pid, name, member, _rid, role_name in all_candidates]
+    unlinked_n = sum(1 for _p, _n, m, _r, _rn in all_candidates if not m)
+    if channel:
+        await channel.send(embed=make_embed(
+            title=f"🏆 Recorded as {season_label} — {found['event_name']}",
+            description="\n".join(recorded)
+                        + (f"\n\n{unlinked_n} finisher(s) not yet linked — their role lands on link."
+                           if unlinked_n else "")
+                        + assign_note,
+            colour=discord.Colour.gold()
+        ))
+    await _refresh_season_close_quietly(season_label)
+    return True
 
 
 # ── /season-rollover ──────────────────────────────────────────
@@ -3621,10 +3885,9 @@ async def _outgoing_roles_recorded(loop, outgoing: str) -> tuple[bool, str]:
     """
     Has the outgoing season's Rare/Uncommon been recorded? Returns (ok, message).
 
-    /record-rare-and-uncommon reads the leaderboard for CURRENT_SEASON and
-    stamps CURRENT_SEASON. Run after rollover it reads the *new* season's
-    empty leaderboard, finds nobody, and reports success — so the finished
-    season is silently never recorded. Nothing else would notice.
+    Rollover is the point of no return for recording: the current-season
+    leaderboard and every sheet name move to the new season, so a finished
+    season left unrecorded is easy never to notice.
 
     Either the registry carries the season in columns I/J, or the season-close
     marker says it was recorded. The marker is what covers a season whose
@@ -3648,9 +3911,9 @@ async def _outgoing_roles_recorded(loop, outgoing: str) -> tuple[bool, str]:
     if recorded == 0:
         return False, (
             f"❌ **No {outgoing} roles are recorded in the Player Registry.**\n\n"
-            f"Run `/record-rare-and-uncommon` first — it reads the "
-            f"`{outgoing} Leaderboard`, and once the season rolls over it will "
-            f"read the new season's empty one instead, losing {outgoing} for good."
+            f"Press **Record & assign roles** on the {outgoing} season-close "
+            f"checklist first, or pass `force: true` if {outgoing} genuinely had "
+            f"no earners."
         )
     return True, f"{recorded} {outgoing} role record(s) found"
 
@@ -4002,8 +4265,6 @@ async def help_command(interaction: discord.Interaction):
                     inline=False)
     embed.add_field(name="/link", value="Manually link a Discord member to a Playhub ID", inline=False)
     embed.add_field(name="/tidy-registry", value="Remove blank rows and sort the Player Registry by rarity", inline=False)
-    embed.add_field(name="/record-rare-and-uncommon", value="Record Rare/Uncommon earned this season into the Player Registry", inline=False)
-    embed.add_field(name="/record-legendary-and-super-rare", value="Record Legendary/Super Rare from an invitational into the Player Registry", inline=False)
     embed.add_field(name="/assign-roles-from-registry", value="Assign every Discord rarity role the registry records — safe to re-run", inline=False)
     embed.add_field(name="/where-to-play", value="Manually push the Where to Play post", inline=False)
     embed.add_field(name="/season-rollover", value="Create new season sheet tabs, update Bot State, and reload season config in memory", inline=False)

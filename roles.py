@@ -14,7 +14,10 @@ Registry columns (A–J, data starts row 2):
   G: Legendary     H: Super Rare  I: Rare  J: Uncommon
 
 Standing row columns (index): date(0) | store(1) | rank(2) | display_name(3) |
-                                record(4) | match_points(5) | playhub_id(6)
+                                win(4) | loss(5) | draw(6) | points(7) | playhub_id(8)
+
+Column F of a row with no Discord ID records where its link suggestion stands —
+see the "Link suggestions" section.
 """
 
 from difflib import SequenceMatcher
@@ -49,8 +52,8 @@ RARITY_ROLE_NAMES = {
     LEGENDARY_ROLE_ID:  "Legendary",
 }
 
-FUZZY_HIGH_CONFIDENCE = 0.75   # auto-suggest with ✅/❌ reaction prompt
-FUZZY_LOW_CONFIDENCE  = 0.50   # surface for manual /link, no reaction prompt
+FUZZY_HIGH_CONFIDENCE = 0.75   # a member who joins is suggested for an unlinked player
+FUZZY_LOW_CONFIDENCE  = 0.50   # a member is offered as a one-click link button
 
 UNCOMMON_EVENT_THRESHOLD = 10  # distinct events to earn Uncommon
 RARE_RANK_THRESHOLD      = 32  # leaderboard rank to earn Rare
@@ -626,6 +629,65 @@ def get_unlinked_players(standing_rows: list[list]) -> list[tuple[str, str]]:
     return result
 
 
+# ── Link suggestions ───────────────────────────────────────────────────────────
+#
+# An unlinked player is suggested once, not after every event they play. Column F
+# (Link Method) of their row, while column C is blank, says where that stands:
+#   suggested:<message_id>  a suggestion is open in the mod channel
+#   skipped:<mod name>      a mod pressed Skip — don't suggest again
+# Linking overwrites F with the link method, which clears it.
+
+_SUGGESTED = 'suggested:'
+_SKIPPED   = 'skipped:'
+
+
+def suggestion_state(entry: dict | None) -> tuple[str | None, int | None]:
+    """('suggested', message_id) | ('skipped', None) | (None, None) for a registry row."""
+    method = entry['link_method'] if entry and not entry['discord_id'] else ''
+    if method.startswith(_SKIPPED):
+        return 'skipped', None
+    if method.startswith(_SUGGESTED):
+        tail = method[len(_SUGGESTED):]
+        return 'suggested', int(tail) if tail.isdigit() else None
+    return None, None
+
+
+def mark_link_suggestion(playhub_id: str, playhub_name: str, state: str) -> bool:
+    """
+    Record a suggestion state ('suggested:<msg id>' or 'skipped:<mod>') in column F
+    of playhub_id's row, writing a new row if there is none.
+
+    Returns False and writes nothing if the row is already linked — a link made
+    meanwhile must not be overwritten by a stale suggestion.
+    """
+    data = _gs.get_values(BOT_DATABASE_SPREADSHEET_ID, PLAYER_REGISTRY_RANGE_NAME)
+    rows = data.get('values', [])
+    now  = datetime.now(timezone.utc).isoformat()
+
+    for i, row in enumerate(rows):
+        padded = list(row) + [''] * (10 - len(row))
+        if padded[1].strip() != str(playhub_id):
+            continue
+        if padded[2].strip():
+            return False
+        padded[4], padded[5] = now, state
+        if not padded[0].strip():
+            padded[0] = playhub_name  # get_player_registry skips rows with a blank A
+        sheet_row = i + 2
+        break
+    else:
+        padded    = [playhub_name, str(playhub_id), '', '', now, state, '', '', '', '']
+        sheet_row = _next_free_sheet_row(rows)
+
+    _gs.update_values(
+        BOT_DATABASE_SPREADSHEET_ID,
+        f"{PLAYER_REGISTRY_SHEET_NAME}!A{sheet_row}:J{sheet_row}",
+        'USER_ENTERED',
+        [padded],
+    )
+    return True
+
+
 # ── Fuzzy Matching ─────────────────────────────────────────────────────────────
 
 def _season_num(s: str) -> int:
@@ -658,6 +720,21 @@ def fuzzy_match_member(name: str, members) -> tuple:
                 best_score  = score
                 best_member = member
     return best_member, best_score
+
+
+def fuzzy_top_members(name: str, members, n: int = 3,
+                      min_score: float = FUZZY_LOW_CONFIDENCE) -> list[tuple]:
+    """The n best (member, score) matches for a Playhub name, best first, above min_score."""
+    scored = []
+    for member in members:
+        candidates = [member.display_name]
+        if getattr(member, 'global_name', None):
+            candidates.append(member.global_name)
+        score = max(_similarity(name, c) for c in candidates)
+        if score >= min_score:
+            scored.append((member, score))
+    scored.sort(key=lambda ms: ms[1], reverse=True)
+    return scored[:n]
 
 
 # ── Role Calculation ───────────────────────────────────────────────────────────

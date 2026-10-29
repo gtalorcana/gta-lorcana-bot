@@ -162,9 +162,13 @@ a design note below changes.
 - Roles never auto-downgrade — every path that grants them is additive only
 - Registry role columns (G–J) hold the **earliest** season earned: a blank cell takes the new
   value, a populated one is replaced only by an earlier season (numeric compare, so S9 < S10)
-- Recording and assigning are separate. `/record-rare-and-uncommon` and
-  `/record-legendary-and-super-rare` write the registry; `/assign-roles-from-registry` reads it
-  back and makes Discord match. The registry is the single source of truth
+- Recording and assigning are separate. The season-close checklist's record steps write the
+  registry; `_assign_all_from_registry` (also `/assign-roles-from-registry`) reads it back and
+  makes Discord match. The registry is the single source of truth
+- **Mod prompts are buttons, never reactions.** Link suggestions, ETB identity checks and
+  invitational previews are `DynamicItem`s routed by `custom_id` and registered in `setup_hook`,
+  so a click after a restart still lands. Nothing pending is held in memory: what a click needs is
+  in the custom_id, the registry (link suggestions, col F), or Bot State (`etb_pending:<msg id>`)
 - Playhub ID is the identity key everywhere; display names are a fallback for pre-S12 rows only.
   A row matched by ID has its name refreshed if RPH has renamed the player
 - Never use the Sheets `values.append` API on the Player Registry — it picks its own anchor

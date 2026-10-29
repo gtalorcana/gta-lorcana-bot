@@ -25,30 +25,28 @@ The next season's dates come **only** from the Seasons tab; the checklist links 
 and is never touched again. Steps can finish out of order — the invitational usually lands after
 the rollover, so the checklist stays open into the next season.
 
-Every step checks what it *produced*, so the slash commands below tick it too. State lives in one
+Every step checks what it *produced*, so `/season-rollover` and `/archive-season` tick it too. State lives in one
 Bot State key per season, `season_close:S##` (JSON: `msg_id`, the step markers, `closed`).
 Buttons are admin-only (`ADMIN_USER_IDS`) and route by custom_id, so they survive restarts.
 
 **Why the markers exist:** registry role columns keep the *earliest* season. If every S13 earner
 already held their role from S12, recording S13 changes no cell, and the registry alone cannot
-tell "recorded, nothing new" from "never recorded". The record steps (button or slash) write the
-marker either way, and `/season-rollover`'s guard accepts it — so that case no longer needs `force`.
+tell "recorded, nothing new" from "never recorded". The record steps write the
+marker, and `/season-rollover`'s guard accepts it — so that case doesn't need `force`.
 
 ## End-of-Season Checklist (manual)
 
 1. Fill the new season's row in the **Seasons** tab — season start/end and Set Champs
    start/end. Check it with `/seasons`
-2. Run `/record-rare-and-uncommon` to record final Uncommon/Rare from the leaderboard,
-   then `/assign-roles-from-registry` to assign the Discord roles
+2. Press **Record & assign roles** on the checklist — it records final Uncommon/Rare from
+   the leaderboard and grants the Discord roles. (Recording is checklist-only; the slash
+   commands were removed.)
 3. Run `/archive-season S##` to copy the season's tabs to the Archive spreadsheet
 4. Verify the archive looks correct
 5. Run `/season-rollover S##` — it reads the dates from that row
 6. Manually delete the old season's tabs from the League sheet when ready
 
-> **Recording must come before rollover.** `/record-rare-and-uncommon` reads the leaderboard
-> for `CURRENT_SEASON` and stamps `CURRENT_SEASON`. Run after rollover, it reads the *new*
-> season's empty leaderboard, finds nobody, and reports success — the finished season is
-> silently never recorded.
+> **Recording must come before rollover**, or the finished season is easy never to record.
 >
 > `/season-rollover` enforces this: it refuses if no registry row carries the outgoing
 > season in columns I/J. Pass `force: true` to override, e.g. for a season that genuinely

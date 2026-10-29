@@ -14,19 +14,17 @@ Members earn rarity roles based on league participation. Roles are additive — 
 
 ## How It Works
 
-**Recording and awarding are separate.** Two commands decide what a player has earned and write it to the registry; a third reads the registry back and makes Discord match. The registry is the single source of truth — Discord is downstream of it, never the other way round.
+**Recording and awarding are separate.** The season-close checklist's record steps decide what a player has earned and write it to the registry; assigning reads the registry back and makes Discord match. The registry is the single source of truth — Discord is downstream of it, never the other way round.
 
-1. **Linking.** Every time results are processed, the bot fuzzy-matches any new Playhub players against Discord members and posts suggestions to the mod channel. Mods react ✅/❌ to confirm or skip each match.
+1. **Linking.** Every time results are processed, each unlinked player gets one suggestion in the mod channel: a button per close Discord match (top 3, ≥50%), a member picker for anyone else, and Skip. Linking grants the roles the registry records straight away. A player is suggested **once** — column F of their registry row holds `suggested:<message id>` or `skipped:<mod>` — and re-posted only if that message was deleted. When someone joins the server they are checked against every unlinked player (skipped ones included) and suggested at ≥75%; a returning *linked* member gets their earned roles back instead.
 
-2. **Record Rare/Uncommon** — `/record-rare-and-uncommon`, at season end. Reads the `Leaderboard` tab and writes the season into columns I/J for everyone at rank ≤ 32 or with 10+ events. Matches the registry by **Playhub ID** (the `Player ID` column), falling back to display name only when the ID is blank, so a player who renamed on RPH since linking is still found. Grants no Discord roles.
+2. **Record Rare/Uncommon** — the checklist's **Record & assign roles** button, at season end. Reads the `Leaderboard` tab and writes the season into columns I/J for everyone at rank ≤ 32 or with 10+ events. Matches the registry by **Playhub ID** (the `Player ID` column), falling back to display name only when the ID is blank, so a player who renamed on RPH since linking is still found. Grants no Discord roles.
 
-3. **Record Legendary/Super Rare** — `/record-legendary-and-super-rare <event_url> [season]`, after an invitational. Previews the eight finishers for ✅, then writes columns G/H. All eight are recorded, including anyone not yet linked. Grants no Discord roles.
-
-   `season` defaults to the current season. Pass it explicitly when backfilling an older invitational (e.g. `/record-legendary-and-super-rare <url> S11`) so the finish is recorded against the season it belongs to. Backfills are safe in any order: a recorded season is only replaced by an *earlier* one, never a later one.
+3. **Record Legendary/Super Rare** — the checklist's **Submit invitational URL** button, after an invitational. Previews the eight finishers with Confirm / Cancel; Confirm re-fetches the standings, writes columns G/H for all eight (including anyone not yet linked) and grants the Discord roles. A recorded season is only replaced by an *earlier* one, never a later one.
 
 4. **Assign** — `/assign-roles-from-registry`. Walks every registry row holding a Discord ID and grants any rarity role recorded in G–J that the member is missing.
 
-   Additive only, never removes, so it is idempotent and safe to re-run at any time. That also makes it the repair path: if someone loses a role by leaving and rejoining, by manual removal, or because an `add_roles` call failed, this restores it. Nothing else in the bot does.
+   Additive only, never removes, so it is idempotent and safe to re-run at any time. That also makes it the repair path after a hand edit to the registry, a manual removal, or a failed `add_roles` call. A member who leaves and rejoins gets their roles back automatically on join.
 
 Anyone recorded but not yet linked simply waits — `link_player` reads G–J when they are eventually linked and grants what it finds.
 

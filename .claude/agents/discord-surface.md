@@ -23,8 +23,9 @@ roles posts), `docs/discord-surface/commands.md`, `docs/discord-surface/design-n
 | Event digests | `_DIGESTS` (the spec table), `_DigestSpec`, `_run_digest`, `event_digests_daily`, `_build_event_digest_messages`, `_post_event_digest` |
 | Event watcher | `watch_rph_event`, `unwatch_rph_event`, `list_watches`, `_watch_key`, `_load_watches` |
 | Results threads | `on_thread_create`, `on_message`, `on_message_edit`, `on_message_delete`, `on_thread_delete`, `process_results_reporting_thread`, `run_results_reporting_pipeline`, `_schedule_auto_retry` |
-| Linking & roles | `_post_linking_suggestions`, `on_raw_reaction_add`, `_assign_recorded_roles`, `_fmt_roles`, `on_member_join` |
-| ETB discount | `etb_discount`, `_post_etb_approval_request`, `_apply_etb_approval`, `_etb_code_message` |
+| Linking & roles | `_post_linking_suggestions`, `_post_link_suggestion`, `_LinkButton`, `_LinkPicker`, `_apply_link_action`, `_assign_recorded_roles`, `_fmt_roles`, `on_member_join`, `_restore_roles_on_rejoin`, `_suggest_for_new_member` |
+| ETB discount | `etb_discount`, `_post_etb_approval_request`, `_EtbButton`, `_etb_decide`, `_etb_resolve`, `_apply_etb_approval`, `_etb_code_message` |
+| Invitational | `_post_invitational_preview`, `_InvitationalButton`, `_invitational_finishers`, `_record_invitational` |
 
 ## Rules that bite
 
@@ -32,7 +33,7 @@ roles posts), `docs/discord-surface/commands.md`, `docs/discord-surface/design-n
 - Don't add role gates in code. Command visibility is managed in **Server Settings → Integrations → GTA Lorcana Bot**. `_is_admin` / `ADMIN_USER_IDS` is the in-code backstop, and `ADMIN_USER_IDS` is a **list, not a set** — it is indexed for pings as well as tested with `in`.
 - The `#where-to-play` post is **edited in place**, not reposted. Message IDs persist in Bot State as `wtp_msg_0/1/2`. Changing the number of messages the builder emits orphans or strands those keys — handle both directions.
 - Scheduled tasks tick every minute and self-check the clock; they are not `@tasks.loop(hours=...)`. Keep the ET timezone handling (`_now_et`) — the host runs UTC.
-- Reaction flows key off `on_raw_reaction_add` (raw, so it survives restarts and uncached messages). Any new ✅/❌ flow must be re-derivable from the message content after a restart — nothing is held in memory.
+- **Mod prompts are buttons, never reactions.** Each is a `discord.ui.DynamicItem` routed by `custom_id` and registered in `setup_hook`, so clicks survive restarts. Nothing pending is held in memory — put what a click needs in the custom_id, the registry, or Bot State, and re-read it at click time. Guard each with a busy set so a double-click can't act twice, and drop the buttons (`view=None`) once handled. The ⏳/✅/❌ on results threads are status markers, not prompts — they stay reactions.
 - **Never introduce a blocking dialog-style flow** that waits on a user without a timeout; the bot is single-process on one Fly machine.
 - Startup rechecks unprocessed `#results-reporting` threads from the last 3 days. A `recheck:<thread_id>` Bot State key is written *before* the attempt and cleared on success, so a poisonous thread is retried exactly once and then gets ❌ + an admin ping. Don't "fix" that guard into a retry loop — it is the crash-loop prevention.
 - Results errors are user-recoverable by design: validation failure posts feedback and waits, and `on_message_edit` re-triggers. API failure auto-retries `RPH_RETRY_ATTEMPTS` times, `RPH_RETRY_DELAY` apart, then pings every admin.
