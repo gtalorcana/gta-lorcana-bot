@@ -24,9 +24,13 @@ The GTA Lorcana Bot has been running quietly — here's what it actually does:
 
 **#results-reporting** — standings pulled and logged automatically after events
 
-**#gta-set-championships** — auto-populated starting two weeks before set champs season
+**#gta-set-championships** — every Set Championship in the area, refreshed daily through the season
 
-**#playhub-watcher** *(beta)* — monitors events for open spots. Get notified when space opens up in a watched event (yes, this means you, Montreal CCQ)
+**#gta-prereleases** — local prereleases for the upcoming set, as stores list them
+
+**#ccqs** — CCQs within 600 km, six months ahead
+
+**#etb-discount** — press the button to unlock the Enter the Battlefield community discount
 
 Full automation means less room for manual corrections — results should be submitted correctly at your local store. If something looks wrong, message Ryan.
 
@@ -64,11 +68,11 @@ Roles reflect your competitive achievements in the GTA Lorcana League. They are 
 
 Roles are awarded at the end of each season based on your final standing. Enchanted and mod-appointed roles are assigned manually by Ryan.
 
-Your Playhub username is used to match your results to your Discord account. I've done an initial pass to link accounts — if your role looks wrong or missing, message Ryan.
+Your Play Hub account is linked to your Discord account so your results count toward your roles. A mod confirms each link — if your role looks wrong or missing, message Ryan.
 
 To help keep things accurate going forward, try to keep your **Discord display name consistent with your Playhub username**.
 
-*Roles are never taken away — once earned, yours to keep.*
+*Roles are never taken away — once earned, yours to keep. Leave and rejoin the server and they come back automatically.*
 
 ---
 
@@ -82,7 +86,7 @@ A seasonal league tracking player performances across the GTA. Top performers ar
 
 **How long is a season?**
 
-7 weeks, starting with a new set release and ending the day before Set Championships.
+One set's cycle — it starts with the set's release and runs into that set's Championship season. The exact dates for the current season are below.
 
 **How do I join?**
 
@@ -102,11 +106,11 @@ Any store can participate as long as someone is able to report results.
 
 ---
 
-🗓️ **Season 10 — Whispers in the Well**
+🗓️ **Season 14 — Hyperia City**
 
-**Start:** November 7, 2025
+**Start:** October 16, 2026
 
-**End:** January 23, 2026 at 11:59 PM
+**End:** January 13, 2027 at 11:59 PM
 
 *Please submit results before the deadline.*
 
@@ -116,7 +120,7 @@ Note: This season runs into Set Champs season. Locals and weeklies during that p
 
 🎯 **Scoring**
 
-Core Constructed tournaments only.
+Core Constructed and Infinity Constructed
 
 3 points per Match Win
 
@@ -156,11 +160,11 @@ Higher seed in each Top 8 match chooses whether to go first.
 
 **Location**
 
-Enter The Battlefield Oakville
+Enter The Battlefield Newmarket
 
-Saturday February 7, 2026 at 12:00 PM
+Saturday January 30, 2027 at 12:00 PM
 
-*Going forward, Invitationals will alternate between Newmarket (odd seasons) and Oakville (even seasons).*
+*Going forward, Invitationals will alternate between Newmarket (even seasons) and Oakville (odd seasons).*
 
 ---
 
