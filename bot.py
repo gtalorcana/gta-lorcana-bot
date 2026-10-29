@@ -2528,8 +2528,7 @@ _ETB_DISCOUNT_MIN_EVENTS = 3
 # nothing is written: no Shopify whitelist, no approval row, no registry link.
 # Typing a Play Hub name forces the unlinked path (pick-yourself + mod check);
 # the 3-event minimum, already-approved and ownership checks are skipped so any
-# player can be picked. Shopify is never called: any email counts as registered
-# except one ending @notregistered.test. Remove once the flow has been walked through.
+# player can be picked. Remove once the flow has been walked through.
 _ETB_TEST_USER_IDS = {361716209324130305}
 _ETB_TEST_NOTE     = "🧪 **Test run — nothing is saved or activated.**\n"
 
@@ -3149,13 +3148,7 @@ async def _etb_flow(interaction: discord.Interaction, email: str,
 
     if _shopify and _etb_price_rule_id:
         try:
-            if test:
-                # No call to the shop at all. Any email "is registered", except one
-                # ending @notregistered.test, which walks the not-registered reply.
-                customer = (None if email.lower().endswith("@notregistered.test")
-                            else {'id': None})
-            else:
-                customer = await loop.run_in_executor(None, _shopify.lookup_customer_by_email, email)
+            customer = await loop.run_in_executor(None, _shopify.lookup_customer_by_email, email)
         except Exception as e:
             print(f"  ✗ /etb-discount Shopify lookup failed: {e}")
             await interaction.followup.send(
