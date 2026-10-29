@@ -601,8 +601,10 @@ def get_linked_playhub_ids() -> set[str]:
 
 def get_unlinked_players(standing_rows: list[list]) -> list[tuple[str, str]]:
     """
-    From a full standings row list (playhub_id at index 6, display_name at index 3),
-    return (playhub_id, display_name) for players not yet linked in the registry.
+    From a full standings row list (playhub_id at index 8 — col I, display_name at
+    index 3), return (playhub_id, display_name) for players not yet linked in the
+    registry. The ID moved from index 6 when the record split into W/L/D (7243a7c);
+    reading 6 since then picked up the Draw count, so every suggestion said ID 0 or 1.
 
     Checks by both playhub_id and display_name. Deduplicates by playhub_id.
     """
@@ -613,9 +615,9 @@ def get_unlinked_players(standing_rows: list[list]) -> list[tuple[str, str]]:
     seen   = set()
     result = []
     for row in standing_rows:
-        if len(row) < 7:
+        if len(row) < 9:
             continue
-        playhub_id   = str(row[6])
+        playhub_id   = str(row[8])
         display_name = row[3]
         if playhub_id and playhub_id not in linked_ids and display_name.lower() not in linked_names:
             if playhub_id not in seen:
