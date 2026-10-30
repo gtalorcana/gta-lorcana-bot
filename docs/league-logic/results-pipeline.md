@@ -2,7 +2,7 @@
 
 1. Organizer creates a thread in `#results-reporting` with an RPH event URL as the first message
 2. Bot validates the URL format, fetches event data and standings from RPH
-3. Writes standings rows first, then the event row — so if a crash occurs mid-write, the missing event row signals a safe retry rather than a false duplicate
+3. Writes the event row first, then the standings — so if a crash occurs mid-write, the event row present with this thread's ID signals a safe retry rather than a false duplicate
 4. On validation error: posts feedback and waits for the organizer to edit — `on_message_edit` re-triggers automatically
 5. On API error: schedules auto-retries (up to `RPH_RETRY_ATTEMPTS`, spaced `RPH_RETRY_DELAY` seconds apart)
 6. If all retries fail: pings all `ADMIN_USER_IDS` in the thread
@@ -10,6 +10,12 @@
 8. After a successful write, the bot fuzzy-matches any new Playhub players and posts linking suggestions to the mod channel
 
 **Duplicate vs retry detection:** same URL + same thread = retry (allowed, overwrites). Same URL + different thread = true duplicate (rejected).
+
+**Standings stay in report order.** The Leaderboard's last tiebreaker is the Standings row, so
+each event's block must sit where its Events row does. A new event is appended. A retry
+(`/recheck`, an edit, an auto-retry) keeps its Events row in place and rewrites its standings
+at that position (`_place_event_standings`) — appending it at the bottom would rank it behind
+every event reported after it.
 
 **Submission eligibility.** A submitted event must pass all of these, in order:
 

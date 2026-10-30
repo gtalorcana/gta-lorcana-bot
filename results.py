@@ -310,6 +310,28 @@ def _fetch_event_rows_and_standings(input_rows):
     return event_rows, standing_rows, warnings
 
 
+def _place_event_standings(existing, new_rows, event_rows, event_date, store_name):
+    """
+    Return the Standings data rows with one event's rows replaced by new_rows,
+    placed after the last row of any event listed before it in the Events tab
+    (report order). Every other row keeps its relative order, including rows the
+    Events tab doesn't know (manual or orphaned), and blank rows.
+    """
+    order = {}
+    for i, r in enumerate(event_rows):
+        if len(r) > 4:
+            order.setdefault((r[3], r[4]), i)
+    mine = order.get((event_date, store_name), len(event_rows))
+    others = [r for r in existing
+              if not (len(r) >= 2 and r[0] == event_date and r[1] == store_name)]
+    insert_at = 0
+    for i, r in enumerate(others):
+        k = (r[0], r[1]) if len(r) >= 2 else None
+        if k in order and order[k] < mine:
+            insert_at = i + 1
+    return others[:insert_at] + list(new_rows) + others[insert_at:]
+
+
 def process_event_data(rph_url, thread_id):
     """
     Main entry point called by bot.py when a new results thread is submitted.
@@ -358,8 +380,9 @@ def process_event_data(rph_url, thread_id):
     event_row, standing_rows, warnings = _fetch_single_event(
         rph_url, thread_id, validate_eligibility=True
     )
-    event_date = event_row[3]
-    store_name = event_row[4]
+    event_date   = event_row[3]
+    store_name   = event_row[4]
+    written_rows = standing_rows
     print(f"  ✓ RPH data fetched: {store_name} {event_date}, {len(standing_rows)} standings rows")
 
     # An event with no standings used to be recorded as an empty event and
@@ -379,23 +402,34 @@ def process_event_data(rph_url, thread_id):
         print(f"  → Overwriting event row at sheet row {retry_sheet_row}...")
         _gs.update_values(LEAGUE_SPREADSHEET_ID, retry_range, "USER_ENTERED", [event_row])
 
-        # Clear any standings already written for this event (from a previous
-        # attempt that crashed after the standings write) before re-appending.
+        # Re-place this event's standings at its report-order position. The
+        # Leaderboard's last tiebreaker is the Standings row ("reported first"),
+        # so appending a retry at the bottom ranks it behind every event reported
+        # after it -- and clearing the old rows in place left blank holes.
         standings_data     = _gs.get_values(LEAGUE_SPREADSHEET_ID, season.STANDINGS_RANGE_NAME)
         existing_standings = standings_data.get('values', [])
-        to_clear = [
-            {"range": season.STANDINGS_SHEET_NAME + f"!A{idx + 3}:I{idx + 3}", "values": [[""] * 9]}
-            for idx, row in enumerate(existing_standings)
-            if len(row) >= 2 and row[0] == event_date and row[1] == store_name
-        ]
-        if to_clear:
-            print(f"  ↩ Clearing {len(to_clear)} existing standings row(s) for {store_name} {event_date}...")
-            _gs.batch_update_values(LEAGUE_SPREADSHEET_ID, to_clear)
+        rebuilt = _place_event_standings(
+            existing_standings, standing_rows, existing_rows, event_date, store_name
+        )
+        start = next(
+            (i for i, (a, b) in enumerate(zip(existing_standings, rebuilt)) if a != b),
+            min(len(existing_standings), len(rebuilt)),
+        )
+        tail = [r + [""] * (9 - len(r)) for r in rebuilt[start:]]
+        tail += [[""] * 9] * (len(existing_standings) - len(rebuilt))
+        if tail:
+            first, last = start + 3, start + 2 + len(tail)
+            print(f"  ↩ Rewriting standings rows {first}-{last} to place {store_name} {event_date} in report order...")
+            _gs.update_values(
+                LEAGUE_SPREADSHEET_ID, season.STANDINGS_SHEET_NAME + f"!A{first}:I{last}",
+                "USER_ENTERED", tail,
+            )
+        standing_rows = []  # written above; nothing left to append
     else:
         print(f"  → Appending event row...")
         _gs.append_values(LEAGUE_SPREADSHEET_ID, season.EVENTS_RANGE_NAME, "USER_ENTERED", [event_row])
 
-    # ── Step 4: Append standings ──────────────────────────────
+    # ── Step 4: Append standings (new events only; a retry placed them above) ──
     if standing_rows:
         print(f"  → Appending {len(standing_rows)} standings rows...")
         _gs.append_values(LEAGUE_SPREADSHEET_ID, season.STANDINGS_RANGE_NAME, "USER_ENTERED", standing_rows)
@@ -405,7 +439,7 @@ def process_event_data(rph_url, thread_id):
     _gs.update_values(LEAGUE_SPREADSHEET_ID, season.EVENTS_TIMESTAMP_RANGE_NAME, "USER_ENTERED", [['Last updated', local_dt]])
 
     print(f"  ✓ All sheets updated successfully")
-    return standing_rows, warnings
+    return written_rows, warnings
 
 
 def remove_event_data(thread_id):
