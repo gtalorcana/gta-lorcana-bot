@@ -1227,6 +1227,13 @@ async def _message_exists(channel, message_id: int) -> bool:
         return True
 
 
+def _unlinked_members(guild: discord.Guild, registry: list[dict]) -> list[discord.Member]:
+    """Members no registry row links to — the only ones a suggestion offers as a match.
+    A second Playhub account can still go to a linked member through the picker."""
+    linked = {r['discord_id'] for r in registry if r['discord_id']}
+    return [m for m in guild.members if not m.bot and m.id not in linked]
+
+
 async def _post_linking_suggestions(guild: discord.Guild, new_players: list[tuple[str, str]],
                                     context: str = ""):
     """Post a suggestion for each (playhub_id, display_name) not already suggested or skipped."""
@@ -1242,7 +1249,7 @@ async def _post_linking_suggestions(guild: discord.Guild, new_players: list[tupl
         print(f"  ⚠ Linking suggestions skipped — registry read failed: {e}")
         return
     by_pid  = {r['playhub_id']: r for r in registry if r['playhub_id']}
-    members = [m for m in guild.members if not m.bot]
+    members = _unlinked_members(guild, registry)
 
     for playhub_id, display_name in new_players:
         state, msg_id = suggestion_state(by_pid.get(playhub_id))
@@ -1478,7 +1485,7 @@ async def _suggest_for_new_member(member: discord.Member) -> None:
         except discord.HTTPException:
             pass
 
-    others  = [m for m in member.guild.members if not m.bot and m.id != member.id]
+    others  = [m for m in _unlinked_members(member.guild, registry) if m.id != member.id]
     matches = [(member, best_score)] + fuzzy_top_members(best['playhub_name'], others, n=2)
     await _post_link_suggestion(mod_ch, best['playhub_id'], best['playhub_name'], matches,
                                 f"🆕 {member.mention} just joined the server.")
