@@ -3144,10 +3144,16 @@ async def recheck(interaction: discord.Interaction, after: str = ""):
 
 
 # ── /link ─────────────────────────────────────────────────────
+#
+# With a member, links directly — after a confirm step if that member is already
+# linked to another Playhub ID, so a second account is never added by a slip.
+# Without one, posts the player's suggestion message to the mod channel, whose
+# buttons only offer unlinked members.
 @tree.command(name="link", description="Link a Discord member to a Playhub player (mods only)")
-@app_commands.describe(member="Discord member",
-                       identifier="Playhub ID (preferred) — or a display name, which must match exactly one player")
-async def link_command(interaction: discord.Interaction, member: discord.Member, identifier: str):
+@app_commands.describe(identifier="Playhub ID (preferred) — or a display name, which must match exactly one player",
+                       member="Discord member — leave out to post a suggestion with the closest matches")
+async def link_command(interaction: discord.Interaction, identifier: str,
+                       member: discord.Member | None = None):
     if not _is_admin(interaction):
         await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
         return
@@ -3217,26 +3223,78 @@ async def link_command(interaction: discord.Interaction, member: discord.Member,
 
         playhub_id, playhub_name = next(iter(candidates.items()))
 
-    # ── Refuse if that Playhub ID belongs to a different Discord account ─────
-    # Linking a second Playhub ID to the same member is still allowed.
-    owner = next(
-        (e for e in registry
-         if e['playhub_id'] == playhub_id and e['discord_id'] and e['discord_id'] != member.id),
-        None,
-    )
-    if owner:
+    row = next((e for e in registry if e['playhub_id'] == playhub_id), None)
+
+    if member is None:
         await interaction.followup.send(
-            f"⚠️ Playhub ID `{playhub_id}` is already linked to <@{owner['discord_id']}>.",
+            await _suggest_for_player(interaction, registry, row, playhub_id, playhub_name),
+            ephemeral=True,
+        )
+        return
+
+    # ── Refuse if that Playhub ID belongs to a different Discord account ─────
+    if row and row['discord_id'] and row['discord_id'] != member.id:
+        await interaction.followup.send(
+            f"⚠️ Playhub ID `{playhub_id}` is already linked to <@{row['discord_id']}>.",
             ephemeral=True
         )
         return
 
-    role_seasons = await loop.run_in_executor(
-        None, link_player,
-        member.id, member.display_name,
-        f'manual:{interaction.user.display_name}',
-        playhub_id, playhub_name,
+    # ── A second Playhub ID for the same member is allowed, but confirmed ────
+    other_ids = [e['playhub_id'] or '(no ID)' for e in registry
+                 if e['discord_id'] == member.id and e['playhub_id'] != playhub_id]
+    if other_ids:
+        listed = ", ".join(f"`{pid}`" for pid in other_ids)
+        await interaction.followup.send(
+            f"⚠️ {member.mention} is already linked to Playhub {listed}.\n"
+            f"Link `{playhub_id}` to them as a **second account**?",
+            view=_LinkConfirmView(interaction.user.id, member, playhub_id, playhub_name),
+            ephemeral=True,
+        )
+        return
+
+    await interaction.followup.send(
+        await _manual_link(interaction, member, playhub_id, playhub_name), ephemeral=True
     )
+
+
+async def _suggest_for_player(interaction: discord.Interaction, registry: list[dict],
+                              row: dict | None, playhub_id: str,
+                              playhub_name: str | None) -> str:
+    """/link with no member: (re)post the player's suggestion. Returns the reply for the mod."""
+    if row and row['discord_id']:
+        return f"ℹ️ Playhub ID `{playhub_id}` is already linked to <@{row['discord_id']}>."
+    mod_ch = get_channel_by_id(interaction.guild, MOD_CHANNEL_ID) if MOD_CHANNEL_ID else None
+    if not mod_ch:
+        return "❌ Mod channel not found."
+
+    # Replace an open suggestion rather than leave two up for the same player.
+    _state, old_id = suggestion_state(row)
+    if old_id:
+        try:
+            await (await mod_ch.fetch_message(old_id)).delete()
+        except discord.HTTPException:
+            pass
+
+    # An ID never seen in standings has no name to match members against.
+    matches = (fuzzy_top_members(playhub_name, _unlinked_members(interaction.guild, registry))
+               if playhub_name else [])
+    await _post_link_suggestion(mod_ch, playhub_id, playhub_name or f"Playhub {playhub_id}",
+                                matches, f"Requested by {interaction.user.mention} via `/link`.")
+    return f"📨 Suggestion for `{playhub_id}` posted in {mod_ch.mention}."
+
+
+async def _manual_link(interaction: discord.Interaction, member: discord.Member,
+                       playhub_id: str, playhub_name: str | None) -> str:
+    """Write a /link to the registry and grant its recorded roles. Returns the mod's reply."""
+    loop = asyncio.get_running_loop()
+    async with _sheet_lock:
+        role_seasons = await loop.run_in_executor(
+            None, link_player,
+            member.id, member.display_name,
+            f'manual:{interaction.user.display_name}',
+            playhub_id, playhub_name,
+        )
 
     # Apply whatever the registry already records for them.
     added, _failed = await _assign_recorded_roles(
@@ -3246,9 +3304,6 @@ async def link_command(interaction: discord.Interaction, member: discord.Member,
     # Always a resolved ID now; the name is shown alongside when we know it.
     id_str = f"ID `{playhub_id}`" + (f" (**{playhub_name}**)" if playhub_name else "")
     roles_str = f"\nRoles assigned: {_fmt_roles(added)}" if added else ""
-    await interaction.followup.send(
-        f"✅ Linked **{member.display_name}** → Playhub {id_str}{roles_str}", ephemeral=True
-    )
     mod_ch = get_channel_by_id(interaction.guild, MOD_CHANNEL_ID)
     if mod_ch:
         await mod_ch.send(embed=make_embed(
@@ -3260,6 +3315,44 @@ async def link_command(interaction: discord.Interaction, member: discord.Member,
             ),
             colour=discord.Colour.green()
         ))
+    return f"✅ Linked **{member.display_name}** → Playhub {id_str}{roles_str}"
+
+
+class _LinkConfirmView(discord.ui.View):
+    """Confirm/Cancel for /link onto a member who already has a Playhub ID.
+
+    In-memory, unlike the suggestion buttons: it hangs off the mod's own ephemeral
+    reply, and if a restart drops it they just run /link again.
+    """
+
+    def __init__(self, mod_id: int, member: discord.Member,
+                 playhub_id: str, playhub_name: str | None):
+        super().__init__(timeout=300)
+        self.mod_id       = mod_id
+        self.member       = member
+        self.playhub_id   = playhub_id
+        self.playhub_name = playhub_name
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.mod_id
+
+    @discord.ui.button(label="Link as second account", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        self.stop()
+        await interaction.response.edit_message(content="⏳ Linking…", view=None)
+        # Someone may have linked this ID while the prompt sat open.
+        registry = await asyncio.get_running_loop().run_in_executor(None, get_player_registry)
+        row = next((e for e in registry if e['playhub_id'] == self.playhub_id), None)
+        if row and row['discord_id'] and row['discord_id'] != self.member.id:
+            reply = f"⚠️ Playhub ID `{self.playhub_id}` was linked to <@{row['discord_id']}> meanwhile."
+        else:
+            reply = await _manual_link(interaction, self.member, self.playhub_id, self.playhub_name)
+        await interaction.edit_original_response(content=reply)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        self.stop()
+        await interaction.response.edit_message(content="✖ Not linked.", view=None)
 
 
 # ── Rare / Uncommon recording (season-close checklist) ────────

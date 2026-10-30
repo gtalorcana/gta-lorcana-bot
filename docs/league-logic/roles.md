@@ -57,17 +57,19 @@ New rows are written to an explicitly computed row (`A{n}:J{n}`), never via the 
 
 ## Mod Channel Flow
 
-After every successful results import, the bot checks which Playhub player IDs aren't yet linked to a Discord account and posts to the mod channel:
+After every successful results import, the bot posts a 🔗 **Unlinked Player** message to the mod
+channel for each Playhub ID with no Discord link — once per player, tracked in registry column F.
+It carries a button per close Discord match (up to three), a "Link to someone else…" member
+picker, and Skip:
 
-| Embed | Confidence | Action |
-|-------|------------|--------|
-| 🔗 Suggested Match (yellow) | ≥ 75% | React ✅ to confirm, ❌ to skip |
-| 🔗 Low-Confidence Match (orange) | 50–74% | Use `/link @member <playhub_id>` manually |
-| ❓ No Match (red) | < 50% | Use `/link @member <playhub_id>` manually |
+- a match button or the picker → writes the Discord ID to the registry, assigns any recorded roles
+- Skip → not suggested again unless a matching member joins the server
 
-After a mod reacts:
-- ✅ → writes Discord ID to registry, assigns any earned roles
-- ❌ → skips; player will surface again next event they attend
+The match buttons **only offer members no registry row links to**, so a click can't hand someone
+a second Playhub ID by accident. The picker stays unfiltered for genuine second accounts.
+
+`/link <id>` with no member (re)posts this message for that player. `/link <id> @member` links
+directly, and asks for a confirm click if the member already holds another Playhub ID.
 
 ---
 
@@ -75,9 +77,9 @@ After a mod reacts:
 
 Matching compares the RPH display name against Discord `display_name` and `global_name` using `SequenceMatcher`.
 
-- ≥ 75% → high confidence, auto-suggest with reaction prompt
-- 50–74% → low confidence, surface for manual `/link`
-- < 50% → no match, requires manual `/link`
+- ≥ 50% → offered as a match button on the suggestion (yellow embed; orange when none clear it)
+- ≥ 75% → a member who **joins** is suggested for the unlinked player they best match; the bar is
+  high because nearly every newcomer clears 50% against someone on the whole unlinked list
 
 If a player's Playhub display name changes, column A follows. Whenever a row is matched by **Playhub ID** and the incoming name differs, `link_player` and `batch_upsert_player_roles` rewrite column A to the newer name — so recording results, linking, and the ETB flow all keep it current.
 

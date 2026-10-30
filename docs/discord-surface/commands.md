@@ -7,7 +7,7 @@
 | `/help` | Everyone | List all commands |
 | `/etb-discount` | Everyone | Opens the ETB discount form — same as the button on the `#etb-discount` post |
 | `/recheck` | Admin | Reprocess any unhandled threads in `#results-reporting` |
-| `/link @member <id\|name>` | Admin | Link a Discord member to a Playhub player. Keyed on Playhub ID; a display name is accepted but must resolve to exactly one player, otherwise it is refused |
+| `/link <id\|name> [@member]` | Admin | Link a Discord member to a Playhub player. Keyed on Playhub ID; a display name is accepted but must resolve to exactly one player, otherwise it is refused. With no member, (re)posts the player's suggestion in the mod channel — its buttons only offer unlinked members. A member already linked to another Playhub ID needs a confirm click (second account) |
 | `/assign-roles-from-registry` | Admin | Assign every Discord rarity role the registry records. Additive only, idempotent, safe to re-run |
 | `/etb-post` | Admin | Post, or edit in place, the `#etb-discount` how-to (text from `discord/etb-discount.md`) with its apply button |
 | `/season-close` | Admin | Post or refresh the season-close checklist now. Recording roles, rollover and archiving are its buttons — there are no slash commands for them |
