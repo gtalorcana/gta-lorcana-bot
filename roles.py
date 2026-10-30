@@ -289,15 +289,20 @@ def link_player(
                 found_by_id = True
                 break
 
+    # Name fallback — exact match first, then case-insensitive. With an ID in
+    # hand, only an ID-less row may match: a row under another Playhub ID is a
+    # different account that happens to share the name.
+    def _name_candidate(row) -> bool:
+        return bool(row) and not (playhub_id and len(row) > 1 and row[1].strip())
+
     if row_idx is None and playhub_name:
-        # Exact match first, then case-insensitive fallback
         for i, row in enumerate(rows):
-            if row and row[0].strip() == playhub_name:
+            if _name_candidate(row) and row[0].strip() == playhub_name:
                 row_idx = i
                 break
     if row_idx is None and playhub_name:
         for i, row in enumerate(rows):
-            if row and row[0].strip().lower() == playhub_name.lower():
+            if _name_candidate(row) and row[0].strip().lower() == playhub_name.lower():
                 row_idx = i
                 break
 
@@ -363,13 +368,37 @@ def link_player(
     return role_seasons
 
 
-def _merge_duplicate_rows(discord_id: int):
+def _merge_groups(matching: list[tuple[int, list]]) -> list[list[tuple[int, list]]]:
     """
-    If multiple rows share the same Discord ID, union their role seasons
-    (keeping the earliest per role) and blank out duplicates.
+    Split one Discord ID's rows into groups that are the same Playhub account.
+
+    Rows sharing a Playhub ID are one account. A row with no Playhub ID is a
+    pre-S12 name-only row: it joins the account when there is exactly one, and
+    is left alone when there are several — nothing says which one it belongs to.
+    Different Playhub IDs never merge: one person may hold two accounts, and
+    those stay separate (no aliasing).
+    """
+    by_pid: dict[str, list] = {}
+    blank = []
+    for i, padded in matching:
+        pid = padded[1].strip()
+        (by_pid.setdefault(pid, []) if pid else blank).append((i, padded))
+    groups = list(by_pid.values())
+    if len(groups) == 1:
+        groups[0].extend(blank)
+    elif not groups:
+        groups.append(blank)
+    return groups
+
+
+def _merge_duplicate_rows(discord_id: int) -> int:
+    """
+    Collapse rows that are the same Playhub account linked to `discord_id`:
+    union their role seasons into the best row (earliest season per role) and
+    blank the others. See _merge_groups for what counts as the same account.
 
     The "best" row is determined by: has playhub_id + most roles filled.
-    All other rows with the same discord_id are cleared of their Discord columns.
+    Returns the number of rows blanked.
     """
     data = _gs.get_values(BOT_DATABASE_SPREADSHEET_ID, PLAYER_REGISTRY_RANGE_NAME)
     rows = data.get('values', [])
@@ -380,9 +409,6 @@ def _merge_duplicate_rows(discord_id: int):
         if padded[2].strip().isdigit() and int(padded[2].strip()) == discord_id:
             matching.append((i, padded))
 
-    if len(matching) <= 1:
-        return  # nothing to merge
-
     # Score each row: has playhub_id → +10, each non-blank role col → +1
     def _score(padded):
         s = 10 if padded[1].strip() else 0
@@ -391,30 +417,38 @@ def _merge_duplicate_rows(discord_id: int):
                 s += 1
         return s
 
-    matching.sort(key=lambda x: _score(x[1]), reverse=True)
-    best_idx, best_row = matching[0]
+    value_ranges = []
+    for group in _merge_groups(matching):
+        if len(group) <= 1:
+            continue
+        group.sort(key=lambda x: _score(x[1]), reverse=True)
+        best_idx, best_row = group[0]
 
-    # Union role seasons into the best row — preserve earliest (lowest sort order)
-    best_row = list(best_row)
-    for _, dup_row in matching[1:]:
-        for col in range(6, 10):
-            if dup_row[col].strip():
-                if not best_row[col].strip() or _season_num(dup_row[col]) < _season_num(best_row[col]):
-                    best_row[col] = dup_row[col].strip()
+        # Union role seasons into the best row — preserve earliest (lowest sort order)
+        best_row = list(best_row)
+        for _, dup_row in group[1:]:
+            for col in range(6, 10):
+                if dup_row[col].strip():
+                    if not best_row[col].strip() or _season_num(dup_row[col]) < _season_num(best_row[col]):
+                        best_row[col] = dup_row[col].strip()
 
-    # Write best row + blank all duplicates in one batch call
-    best_sheet_row = best_idx + 2
-    value_ranges = [{
-        'range': f"{PLAYER_REGISTRY_SHEET_NAME}!A{best_sheet_row}:J{best_sheet_row}",
-        'values': [best_row],
-    }]
-    for dup_idx, _ in matching[1:]:
-        dup_sheet_row = dup_idx + 2
+        best_sheet_row = best_idx + 2
         value_ranges.append({
-            'range': f"{PLAYER_REGISTRY_SHEET_NAME}!A{dup_sheet_row}:J{dup_sheet_row}",
-            'values': [[''] * 10],
+            'range': f"{PLAYER_REGISTRY_SHEET_NAME}!A{best_sheet_row}:J{best_sheet_row}",
+            'values': [best_row],
         })
+        for dup_idx, _ in group[1:]:
+            dup_sheet_row = dup_idx + 2
+            value_ranges.append({
+                'range': f"{PLAYER_REGISTRY_SHEET_NAME}!A{dup_sheet_row}:J{dup_sheet_row}",
+                'values': [[''] * 10],
+            })
+
+    if not value_ranges:
+        return 0  # nothing to merge
+    # Best rows + blanked duplicates in one batch call
     _gs.batch_update_values(BOT_DATABASE_SPREADSHEET_ID, value_ranges)
+    return sum(1 for vr in value_ranges if vr['values'] == [[''] * 10])
 
 
 def batch_upsert_player_roles(earners: list[tuple[str, dict, str | None]],

@@ -3440,7 +3440,8 @@ async def _record_rare_and_uncommon(guild: discord.Guild, season_id: str, loop,
         return {'recorded': 0, 'unlinked': [], 'merged': 0}
 
     # Read the registry back to report coverage, and collapse any duplicate
-    # rows for the players just recorded (same Discord ID across two rows).
+    # rows for the players just recorded (same Playhub account linked twice —
+    # two Playhub IDs on one Discord ID are kept apart, see _merge_groups).
     # Only fires where the snapshot already shows a duplicate, so there is no
     # full registry read per player.
     registry = await loop.run_in_executor(None, get_player_registry)
@@ -3466,8 +3467,7 @@ async def _record_rare_and_uncommon(guild: discord.Guild, season_id: str, loop,
     for did in matched_discord_ids:
         if dup_counts.get(did, 0) > 1:
             try:
-                await loop.run_in_executor(None, _merge_duplicate_rows, did)
-                merged += 1
+                merged += await loop.run_in_executor(None, _merge_duplicate_rows, did)
             except Exception as e:
                 print(f"  ⚠ record-rare-and-uncommon: dedupe failed for discord_id {did}: {e}")
 
