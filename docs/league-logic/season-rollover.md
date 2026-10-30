@@ -55,6 +55,9 @@ and check it with `/seasons`. The checklist links the tab and has a **Reload** b
   formulas seeded. Tabs that already exist are skipped, so it is safe to re-run
 - Writes **only** `season` to Bot State — the dates live in the Seasons tab — and calls
   `season.init()` in memory, so no redeploy is needed
+- Edits the three `#league-rules` posts for the new season (dates, set name, invitational
+  date and venue from columns I–J). Edit only: if a post is missing, or the edit fails, the
+  rollover reply warns and points at `/league-rules-post`. It never blocks or undoes the rollover
 - Warns if the outgoing season's Set Champs window is still open: the Set Champs digest and its
   sheet follow `CURRENT_SEASON` and stop refreshing the outgoing tab
 

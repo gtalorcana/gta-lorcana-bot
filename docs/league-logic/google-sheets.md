@@ -47,7 +47,7 @@ tab (empty) if it's ever missing, since a broken reference would `#REF!` the who
 ## Seasons Tab (Bot Database Sheet)
 
 The league calendar: one row per set's cycle. **Hand-maintained — the bot only ever reads it.**
-Data starts at `A2` (`Seasons!A2:H`).
+Data starts at `A2` (`Seasons!A2:J`).
 
 | Col | Header | Example | Notes |
 |-----|--------|---------|-------|
@@ -59,6 +59,8 @@ Data starts at `A2` (`Seasons!A2:H`).
 | F | Season End | `2026-12-20` | Required once that season is current |
 | G | Set Champs Start | `2026-12-04` | Both or neither, with H |
 | H | Set Champs End | `2026-12-27` | May fall after the season end (S11 did) |
+| I | Invitational Date | `2027-01-30` | #league-rules only; blank → "Date TBA". Time is fixed at 12:00 PM |
+| J | Invitational Venue | `Enter The Battlefield Newmarket` | #league-rules only; blank → "Venue TBA". Never derived from the season number |
 
 It is a table rather than flat Bot State keys because cycles overlap: S13's Set Champs ran
 Sep 4-27 2026 while S14's prerelease was already scheduled for Oct 16-22. Stores list a
@@ -69,9 +71,10 @@ pinned to `CURRENT_SEASON`.
 Half-filled future rows are expected and load cleanly. A window with only one of its two dates,
 or one that ends before it starts, is ignored *for that window only* and reported; the rest of
 the row still works. A row whose season id or dates cannot be read is skipped entirely. Every
-problem is posted to the mod channel at startup and listed by `/seasons`.
+problem is posted to the mod channel at startup and listed by `/seasons`. An unreadable
+invitational date is reported and shows as TBA; it never costs the row its windows.
 
-**Format C2:H as `yyyy-mm-dd`** (Format → Number → Custom date) so what the bot reads back is
+**Format C2:I as `yyyy-mm-dd`** (Format → Number → Custom date) so what the bot reads back is
 ISO. `M/D/YYYY` and `Mon D, YYYY` are also accepted; `D/M/YYYY` is refused on purpose, since
 `03/04/2026` is unrecoverably ambiguous and a silently wrong season boundary is worse than a
 refused row.

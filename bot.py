@@ -4,9 +4,10 @@ GTA Lorcana — Discord Bot
 Features:
   - /etb-discount     — opens the ETB discount form (also a button in #etb-discount)
   - /etb-post          — post or refresh the #etb-discount how-to message (admins only)
+  - /league-rules-post — post or refresh the #league-rules messages from the Seasons tab (admins only)
   - /help            — list all commands
   - /recheck         — reprocess missed results threads (admins only)
-  - /link            — manually link a Discord member to a Playhub ID (admins only)
+  - /link            — link a Discord member to a Playhub ID, or post a link suggestion (admins only)
   - /assign-roles-from-registry      — assign every rarity role the registry records (admins only)
   - /where-to-play     — manually push the where-to-play post (admins only)
   - /set-champs      — manually refresh and post the Set Champs update (admins only)
@@ -64,6 +65,7 @@ from constants import (
     MOD_CHANNEL_ID,
     SEASON_CLOSE_CHANNEL_ID,
     ETB_DISCOUNT_CHANNEL_ID,
+    LEAGUE_RULES_CHANNEL_ID,
     SET_CHAMPS_CHANNEL_ID,
     PRERELEASE_CHANNEL_ID,
     CCQ_CHANNEL_ID,
@@ -2200,10 +2202,16 @@ async def _sc_rollover(interaction, season_id, loop) -> str:
         created = await _execute_rollover(loop, plan)
     except RuntimeError as e:
         return str(e)
+    # The rollover has happened; a #league-rules failure is reported, never undone.
+    try:
+        rules = await _refresh_league_rules(interaction.guild, repost=False)
+    except Exception as e:
+        print(f"  ⚠ season-close {season_id}: #league-rules refresh failed: {e}")
+        rules = f"⚠️ **#league-rules still shows {season_id}:** `{e}`"
     r = plan.resolved
     return (f"✅ **Rolled over to {nxt}.** Season {r['season_start']} → {r['season_end']}, "
             f"Set Champs {r['set_champs_start']} → {r['set_champs_end']}.\n"
-            f"Tabs created: {', '.join(created) or 'none (all existed)'}"
+            f"Tabs created: {', '.join(created) or 'none (all existed)'}\n{rules}"
             + "".join(f"\n\n{w}" for w in plan.warnings))
 
 
@@ -2707,6 +2715,133 @@ async def etb_post(interaction: discord.Interaction):
 def _etb_post_forbidden(channel) -> str:
     return (f"❌ I can't post in {channel.mention}. Give the **GTA Lorcana Bot** role "
             f"View Channel, Send Messages and Embed Links there (Edit Channel → Permissions).")
+
+
+# ═══════════════════════════════════════════════════════════════
+# #LEAGUE-RULES — bot-owned posts, refreshed at rollover
+# ═══════════════════════════════════════════════════════════════
+#
+# Three plain messages — FAQ, the season block, Tiebreakers — from
+# discord/league-rules-post.md, split on its "=== next message ===" lines. Only the
+# season block has placeholders, filled from the current season's Seasons tab row,
+# venue included: the venue is read from column J, never worked out from odd/even
+# season numbers, which went wrong in print before.
+#
+# The IDs live in Bot State (league_rules_msg_ids, '|'-joined, in channel order) so
+# a refresh edits in place. Discord has no way to insert a message above another,
+# so /league-rules-post reposts all three when any is gone; the rollover refresh
+# only ever edits, and reports a missing post rather than reordering the channel.
+
+_LEAGUE_RULES_KEY  = "league_rules_msg_ids"
+_LEAGUE_RULES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "discord", "league-rules-post.md")
+_LEAGUE_RULES_SPLIT = re.compile(r'^=== next message ===$', re.M)
+_INVITATIONAL_TIME  = "12:00 PM"
+
+
+def _long_date(iso: str | None, weekday: bool = False) -> str | None:
+    """'2026-10-16' → 'October 16, 2026' (or 'Friday October 16, 2026'); None if blank."""
+    if not iso:
+        return None
+    d = date.fromisoformat(iso)
+    return (f"{d:%A} " if weekday else "") + f"{d:%B} {d.day}, {d.year}"
+
+
+def _render_league_rules(row: dict | None, template: str) -> list[str]:
+    """The three #league-rules messages for a Seasons tab row. Raises ValueError on a
+    row the season block can't be written from."""
+    if not row or not row.get('season_start') or not row.get('season_end'):
+        raise ValueError(f"{(row or {}).get('season') or season.CURRENT_SEASON} "
+                         f"has no season start/end in the Seasons tab")
+    sc_start = row.get('set_champs_start')
+    runs_into_sc = bool(sc_start) and sc_start <= row['season_end']
+    when = _long_date(row.get('invitational_date'), weekday=True)
+    fields = {
+        'season_number':      row['season'].lstrip('S'),
+        'set_name':           row.get('set_name') or "TBA",
+        'season_start':       _long_date(row['season_start']),
+        'season_end':         _long_date(row['season_end']),
+        'set_champs_note':    ("\nNote: This season runs into Set Champs season. Locals and weeklies "
+                               "during that period still count — Set Champs events themselves do not.\n"
+                               if runs_into_sc else ""),
+        'invitational_venue': row.get('invitational_venue') or "Venue TBA",
+        'invitational_when':  f"{when} at {_INVITATIONAL_TIME}" if when else "Date TBA",
+    }
+    messages = [part.strip().format(**fields) for part in _LEAGUE_RULES_SPLIT.split(template)]
+    too_long = [i + 1 for i, m in enumerate(messages) if len(m) > 2000]
+    if too_long:
+        raise ValueError(f"message(s) {too_long} over Discord's 2,000 characters")
+    return messages
+
+
+async def _refresh_league_rules(guild: discord.Guild, repost: bool) -> str:
+    """
+    Bring #league-rules in line with the current season. Returns a one-line outcome.
+
+    repost: when any of the posts is missing, delete the rest and post all three in
+    order (/league-rules-post). Without it a missing post is reported, not fixed —
+    the rollover path must never reorder the channel on its own.
+    Raises on anything that leaves the posts unrefreshed.
+    """
+    loop = asyncio.get_running_loop()
+    channel = get_channel_by_id(guild, LEAGUE_RULES_CHANNEL_ID)
+    if not channel:
+        raise RuntimeError(f"channel `{LEAGUE_RULES_CHANNEL_ID}` not found")
+    with open(_LEAGUE_RULES_FILE, encoding="utf-8") as f:
+        messages = _render_league_rules(season.CURRENT, f.read())
+
+    # strict: posting blind could duplicate the posts — same rule as the digests.
+    state   = await loop.run_in_executor(None, lambda: load_bot_state(strict=True))
+    old_ids = [int(x) for x in state.get(_LEAGUE_RULES_KEY, '').split('|') if x.isdigit()]
+    # The text mentions the organiser and a channel — show them, never ping.
+    quiet = discord.AllowedMentions.none()
+
+    existing = []
+    for mid in old_ids:
+        try:
+            existing.append(await channel.fetch_message(mid))
+        except discord.NotFound:
+            pass
+    if len(old_ids) == len(messages) and len(existing) == len(messages):
+        for msg, text in zip(existing, messages):
+            if msg.content != text:
+                await msg.edit(content=text, allowed_mentions=quiet)
+        return f"✅ #league-rules updated for {season.CURRENT_SEASON}."
+    if not repost:
+        raise RuntimeError(f"{len(messages) - len(existing)} of its {len(messages)} posts "
+                           f"missing — run /league-rules-post to repost them")
+
+    for msg in existing:
+        await msg.delete()
+    new_ids = [(await channel.send(text, allowed_mentions=quiet)).id for text in messages]
+    try:
+        await loop.run_in_executor(None, set_bot_state_key, _LEAGUE_RULES_KEY,
+                                   '|'.join(str(i) for i in new_ids))
+    except Exception as e:
+        print(f"  ⚠ league-rules: couldn't save the message IDs {new_ids}: {e}")
+        return (f"⚠️ Posted in {channel.mention}, but couldn't save the message IDs (`{e}`) — "
+                f"the next refresh will post again. Delete the extra copies if so.")
+    return f"✅ Posted {len(new_ids)} messages in {channel.mention} for {season.CURRENT_SEASON}."
+
+
+@tree.command(name="league-rules-post",
+              description="Post or refresh the #league-rules messages from the Seasons tab (mods only)")
+async def league_rules_post(interaction: discord.Interaction):
+    if not _is_admin(interaction):
+        await interaction.response.send_message("⚠️ Mods only.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True)
+    # Pick up a venue or date typed into the tab since the last load.
+    await _reload_season(asyncio.get_running_loop())
+    try:
+        reply = await _refresh_league_rules(interaction.guild, repost=True)
+    except discord.Forbidden:
+        channel = get_channel_by_id(interaction.guild, LEAGUE_RULES_CHANNEL_ID)
+        reply = _etb_post_forbidden(channel) if channel else "❌ Missing permissions."
+    except Exception as e:
+        print(f"  ✗ /league-rules-post failed:\n{traceback.format_exc()}")
+        reply = f"❌ #league-rules not updated: `{e}`"
+    await interaction.followup.send(reply, ephemeral=True)
 
 
 async def _etb_flow(interaction: discord.Interaction, email: str,
@@ -4076,8 +4211,9 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="/recheck",
                     value=f"Reprocess any missed threads in `{_ch('results_reporting')}`",
                     inline=False)
-    embed.add_field(name="/link", value="Manually link a Discord member to a Playhub ID", inline=False)
+    embed.add_field(name="/link", value="Link a Discord member to a Playhub ID — leave out the member to post a suggestion instead", inline=False)
     embed.add_field(name="/etb-post", value="Post or refresh the #etb-discount how-to message and its button", inline=False)
+    embed.add_field(name="/league-rules-post", value="Post or refresh the #league-rules messages from the Seasons tab", inline=False)
     embed.add_field(name="/tidy-registry", value="Remove blank rows and sort the Player Registry by rarity", inline=False)
     embed.add_field(name="/assign-roles-from-registry", value="Assign every Discord rarity role the registry records — safe to re-run", inline=False)
     embed.add_field(name="/where-to-play", value="Manually push the Where to Play post", inline=False)

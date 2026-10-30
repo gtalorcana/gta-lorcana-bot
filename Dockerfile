@@ -17,5 +17,6 @@ COPY season.py .
 COPY util/ ./util/
 COPY scripts/ ./scripts/
 COPY discord/etb-discount.md ./discord/
+COPY discord/league-rules-post.md ./discord/
 
 CMD ["python", "bot.py"]

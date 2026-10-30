@@ -19,6 +19,8 @@ CCQ_CHANNEL_ID        = int(os.getenv("CCQ_CHANNEL_ID",        15542171099180648
 SEASON_CLOSE_CHANNEL_ID = int(os.getenv("SEASON_CLOSE_CHANNEL_ID", 1557615130769096724))
 # #etb-discount — the bot-posted how-to message with the apply button
 ETB_DISCOUNT_CHANNEL_ID = int(os.getenv("ETB_DISCOUNT_CHANNEL_ID", 1255205802944233483))
+# #league-rules — the bot-owned FAQ / season / tiebreakers posts, refreshed at rollover
+LEAGUE_RULES_CHANNEL_ID = int(os.getenv("LEAGUE_RULES_CHANNEL_ID", 1253923057828102175))
 
 # Hour (ET) at which event_digests_daily refreshes each digest, one per minute
 # thereafter in _DIGESTS order. Overridable so a dev can fire the loop without
@@ -96,10 +98,11 @@ BOT_STATE_RANGE_NAME  = BOT_STATE_SHEET_NAME + "!A1:B"
 # neighbouring cycles overlap: S13's Set Champs ran Sep 4-27 2026 while S14's
 # Hyperia City prerelease was already scheduled for Oct 16-22, and prereleases are
 # listed by stores weeks before that set's season exists at all.
-# Columns (A–H): Season | Set Name | Prerelease Start | Prerelease End |
-#                Season Start | Season End | Set Champs Start | Set Champs End
+# Columns (A–J): Season | Set Name | Prerelease Start | Prerelease End |
+#                Season Start | Season End | Set Champs Start | Set Champs End |
+#                Invitational Date | Invitational Venue
 SEASONS_SHEET_NAME = "Seasons"
-SEASONS_RANGE_NAME = SEASONS_SHEET_NAME + "!A2:H"
+SEASONS_RANGE_NAME = SEASONS_SHEET_NAME + "!A2:J"
 
 STORE_DEBUG_SHEET_NAME = "Store Debug"
 STORE_DEBUG_RANGE_NAME = STORE_DEBUG_SHEET_NAME + "!A1:Z"  # wide enough for 4 week columns + fixed cols

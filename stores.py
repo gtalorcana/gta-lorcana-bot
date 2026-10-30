@@ -525,7 +525,7 @@ def load_season_calendar() -> tuple[list[dict], list[str]]:
     for i, raw_row in enumerate(result.get('values', []), start=2):  # A2 is the first data row
         if not any(str(c).strip() for c in raw_row):
             continue  # blank spacer rows are normal in a hand-edited tab
-        cells     = [str(c).strip() for c in raw_row] + [''] * (8 - len(raw_row))
+        cells     = [str(c).strip() for c in raw_row] + [''] * (10 - len(raw_row))
         season_id = cells[0].lstrip("'")
 
         if not _SEASON_ID_RE.match(season_id):
@@ -551,6 +551,12 @@ def load_season_calendar() -> tuple[list[dict], list[str]]:
         if len(problems) > before:
             problems.append(f"{season_id}: row skipped because a date could not be read")
             continue
+
+        # The invitational only feeds the #league-rules post, so an unreadable date
+        # is reported and shown as TBA there — it never costs the row its windows.
+        row['invitational_date']  = _parse_calendar_date(cells[8], 'invitational date',
+                                                         season_id, problems)
+        row['invitational_venue'] = cells[9]
 
         # A window is used whole or not at all, but one bad window never discards the
         # rest of the row: an unusable window is blanked and reported, and the other
