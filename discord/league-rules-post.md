@@ -13,7 +13,7 @@ Play in your local store's constructed tournaments. Have someone submit results 
 Run tournaments with rounds and match results recorded. Prizing and structure are up to the store.
 
 **What stores are participating?**
-Any store can participate as long as someone is able to report results.
+Any store within 250 miles of Toronto, as long as someone is able to report results. Core Constructed and Infinity Constructed events count, local CCQs included — Set Championships do not.
 
 **Who organizes this?**
 <@904550642213875723> and volunteers.
@@ -38,7 +38,9 @@ Core Constructed and Infinity Constructed
 
 Your final score is your **ten best performances** across the season.
 
-Stores running four rounds are welcome to — a 4-0 earns 12 points. Stores running 5-round swiss with top cut: all match wins count.
+Stores running four rounds are welcome to — a 4-0 earns 12 points.
+
+Events with a top cut: every match win counts, top cut included.
 
 ---
 
@@ -75,13 +77,15 @@ When players are tied on points, tiebreakers are applied in this order:
 **1st — Who reached the score first**
 Alice hits 50 points on June 1. Bob hits 50 points on June 2. Alice wins the tiebreaker.
 
-**2nd — Same points, same day — whose store reported first**
-Both hit 50 points on June 1. Alice's store reported at 11:58 PM, Bob's at 11:59 PM. Alice wins the tiebreaker.
+**2nd — Same day — whose event was reported first**
+Both hit 50 points on June 1. Alice's event was reported at 11:58 PM, Bob's at 11:59 PM. Alice wins the tiebreaker.
 
-**3rd — Same points, same day, same store — who scored more points that day**
-Alice earned 9 points on the day, Bob earned 6. Alice wins the tiebreaker.
+**3rd — Same event — more match points at that event**
+Both hit 50 points at the same event. Alice went 3-0 there, Bob went 2-1. Alice wins the tiebreaker.
 
-**4th — Same points, same day, same store, same points earned — OMW%**
-Alice had 70% OMW on the day, Bob had 69%. Alice wins the tiebreaker.
+**4th — Same event, same match points — OMW%**
+Alice had 70% OMW at the event, Bob had 69%. Alice wins the tiebreaker.
+
+*3rd and 4th are the event's own final standings, as Play Hub ranks them.*
 
 *All data is visible on the league spreadsheet for full transparency.*

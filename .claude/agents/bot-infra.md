@@ -17,8 +17,8 @@ trusts a single walk. See `docs/bot-infra/design-notes.md` for the measurements.
 ## RPH fetch width
 
 `iter_events()` streams pages so the digests never hold a whole window in memory. `num_miles`
-defaults to 250 and must stay there — it defines the store universe for classification,
-`#where-to-play` and results eligibility. `stores.fetch_ccqs()` is the only caller that overrides
+defaults to `LEAGUE_RADIUS_MILES` (250) and must stay there — it defines the store universe for
+classification and `#where-to-play`, and results eligibility measures stores against it. `stores.fetch_ccqs()` is the only caller that overrides
 it (373 miles) or relaxes `countries` (both countries). See `docs/bot-infra/design-notes.md`.
 
 ## Files you own

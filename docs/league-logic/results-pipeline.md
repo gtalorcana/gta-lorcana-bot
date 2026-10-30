@@ -18,10 +18,11 @@
 3. URL not already reported by another thread (`results.py`)
 4. `gameplay_format` is Core Constructed or Infinity Constructed
 5. **Not a Set Championship** — `stores.is_set_champs_event()`
-6. **Not a CCQ** — `stores.is_ccq_event()`
-6. Event date inside the season window
+6. **Store within `LEAGUE_RADIUS_MILES` (250) of Toronto** — great-circle distance from the
+   store's Play Hub coordinates (`results._miles_from_centre`). A store with no coordinates is refused
+7. Event date inside the season window
 
-Rules 5 and 6 are gated behind `_fetch_single_event(..., validate_eligibility=True)`, set only for
+Rules 5–7 are gated behind `_fetch_single_event(..., validate_eligibility=True)`, set only for
 live submissions. The bulk re-fetch path (`_fetch_event_rows_and_standings`) deliberately leaves it
 False: it re-reads rows already accepted into the sheet, and must not start rejecting history when
 the eligibility rules change.
@@ -30,6 +31,11 @@ The Set Champs rule is separate from the date rule because **the season and Set 
 overlap** — S13 ran the season to Sep 18 while Set Champs ran Sep 4-27. An in-window Set
 Championship is otherwise a perfectly valid Core Constructed event, so nothing else rejects it. One
 (event 843203) was accepted into S13 before this rule existed.
+
+**CCQs count when they're local.** From Sep 28 to Oct 30 2026 every CCQ was refused: the
+single-event endpoint takes no location filter, so the only geography check was `country == "CA"`,
+and the first CCQ found was in Laval, 493 km out. The radius check replaced that rule, so a local
+CCQ is scored like any other Constructed event and a far one is refused for its distance.
 
 ---
 

@@ -48,6 +48,13 @@ WHERE_TO_PLAY_POST_DAY        = 6   # Sunday (0=Mon … 6=Sun)
 WHERE_TO_PLAY_POST_HOUR_ET    = int(os.getenv("WHERE_TO_PLAY_POST_HOUR_ET", 23))  # 11PM ET Sunday
 WHERE_TO_PLAY_MIN_CONSECUTIVE_WEEKS    = 2   # weeks in a row to become Regular
 
+# The league's catchment: Toronto and a 250-mile radius. One definition for the
+# RPH store/event searches (store classification, #where-to-play) and for results
+# eligibility, which measures each submitted event's store against it.
+LEAGUE_CENTRE_LAT   = 43.653226
+LEAGUE_CENTRE_LON   = -79.3831843
+LEAGUE_RADIUS_MILES = 250
+
 # Regex to validate RPH event URLs submitted in results threads
 EVENTS_URL_RE = r'https://tcg.ravensburgerplay.com/events/[0-9]+'
 RPH_GAME_STORES_URL = "https://api.cloudflare.ravensburgerplay.com/hydraproxy/api/v2/game-stores/?"

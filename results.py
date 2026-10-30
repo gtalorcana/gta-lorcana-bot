@@ -1,3 +1,4 @@
+import math
 from datetime import datetime, timezone
 
 import season
@@ -5,8 +6,11 @@ from clients import gs as _gs, rph_api as _rph_api
 from constants import (
     LEAGUE_SPREADSHEET_ID,
     RESULTS_REPORTING_CHANNEL_URL,
+    LEAGUE_CENTRE_LAT,
+    LEAGUE_CENTRE_LON,
+    LEAGUE_RADIUS_MILES,
 )
-from stores import is_ccq_event, is_set_champs_event
+from stores import is_set_champs_event
 
 # ── Singletons ────────────────────────────────────────────────────────────────
 #
@@ -107,6 +111,14 @@ def _parse_record(record) -> list:
         return [0, 0, 0]
 
 
+def _miles_from_centre(lat: float, lon: float) -> float:
+    """Great-circle distance in miles from the league centre (Toronto)."""
+    p1, p2 = math.radians(LEAGUE_CENTRE_LAT), math.radians(lat)
+    dp, dl = p2 - p1, math.radians(lon - LEAGUE_CENTRE_LON)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * 3958.8 * math.asin(math.sqrt(a))
+
+
 def _fetch_single_event(rph_url, thread_id, note=None, validate_eligibility=False):
     """
     Fetch RPH data for a single event URL.
@@ -116,15 +128,15 @@ def _fetch_single_event(rph_url, thread_id, note=None, validate_eligibility=Fals
           Auto-corrections will overwrite this if they fire.
 
     validate_eligibility: if True, enforce the rules deciding whether an event may
-          enter the league at all -- in season, and neither a Set Championship nor a
-          CCQ. Set only for live submissions. The bulk re-fetch path leaves it False on purpose: it
+          enter the league at all -- in season, within the league radius, and not a
+          Set Championship. Set only for live submissions. The bulk re-fetch path leaves it False on purpose: it
           re-reads rows already accepted into the sheet, and must not start rejecting
           history when the eligibility rules change.
 
     Raises RuntimeError if the API call fails all retries or returns no event.
     Raises ValueError  if the format is wrong, or validate_eligibility=True and the
-                       event is out of season, a Set Championship, a CCQ, or the
-                       season window is not configured at all.
+                       event is out of season, out of range, a Set Championship,
+                       or the season window is not configured at all.
     """
     warnings      = []
     standing_rows = []
@@ -164,14 +176,23 @@ def _fetch_single_event(rph_url, thread_id, note=None, validate_eligibility=Fals
                 f"Event: {event.get('name') or event_id}"
             )
 
-        # CCQs are their own track too, and need rejecting for the same reason: a CCQ
-        # is Core Constructed inside the season window, so nothing else here stops
-        # one. They also run well outside the GTA -- the first one found was in Laval,
-        # 493km out -- which the date and format checks say nothing about either.
-        if is_ccq_event(event):
+        # The league radius, measured from the store. RPH's single-event endpoint
+        # takes no location filter, so without this any Canadian store counted --
+        # the first CCQ found was in Laval, 493 km out. Local CCQs count like any
+        # other Constructed event; it is distance, not the event type, that rules
+        # a far one out. A store with no coordinates is refused, not waved through.
+        store = event['store']
+        lat, lon = store.get('latitude'), store.get('longitude')
+        if lat is None or lon is None:
             raise ValueError(
-                f"This is a CCQ, which does not count toward league standings.\n"
-                f"Event: {event.get('name') or event_id}"
+                f"Play Hub has no location for {store.get('name') or 'this store'}, so it "
+                f"can't be checked against the league's {LEAGUE_RADIUS_MILES}-mile radius."
+            )
+        miles = _miles_from_centre(float(lat), float(lon))
+        if miles > LEAGUE_RADIUS_MILES:
+            raise ValueError(
+                f"{store.get('name') or 'This store'} is {miles:.0f} miles from Toronto -- "
+                f"only events within {LEAGUE_RADIUS_MILES} miles count toward league standings."
             )
 
         # Refuse rather than skip when the window is missing. These checks used to be

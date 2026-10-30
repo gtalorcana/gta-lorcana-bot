@@ -36,10 +36,10 @@ Measured 2026-09-28, six-month upcoming window at 373 miles with both countries:
 | CCQ, no format filter | 3,373 | 68 |
 | CCQ, Canada only | 843 | 17 |
 
-**`num_miles` defaults to 250 in `util/rph_api_utils.py` and must stay there.** That default
-defines the store universe behind store classification, `#where-to-play` and results
-eligibility; widening it would pull Quebec and US stores into all three, silently and with no
-error. The 373-mile CCQ radius and its `countries=None` are per-fetch overrides in
+**`num_miles` defaults to `LEAGUE_RADIUS_MILES` (250, `constants.py`) and must stay there.**
+That default defines the store universe behind store classification and `#where-to-play`, and
+results eligibility checks each submitted store's distance against the same constant; widening
+it would pull Quebec and US stores into all three, silently and with no error. The 373-mile CCQ radius and its `countries=None` are per-fetch overrides in
 `stores.fetch_ccqs()` — the only call site that passes either.
 
 

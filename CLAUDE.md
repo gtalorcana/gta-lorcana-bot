@@ -30,9 +30,10 @@ that season starts, and the previous season's Set Champs can still be running wh
 When ready to extract a generic league engine from this GTA-specific bot,
 the GTA-specific code is concentrated in these places:
 
+**`constants.py`** — `LEAGUE_CENTRE_LAT/LON` (Toronto) and `LEAGUE_RADIUS_MILES` (250): the RPH
+search centre and radius, and the results-eligibility distance check
+
 **`util/rph_api_utils.py`** — hardcoded GTA/Lorcana params that would become Bot State config:
-- `latitude: 43.653226` / `longitude: -79.3831843` — Toronto coordinates
-- `num_miles: 250` — search radius
 - `country == "CA"` / `administrative_area_level_1_short == "ON"` — Canada/Ontario filters
 - `game_id: '1'` / `game_slug: 'disney-lorcana'` — Lorcana-specific
 - `gameplay_format_ids: [...]` — Constructed + Booster Draft format UUIDs
@@ -88,9 +89,9 @@ via `GH_TOKEN` in `.claude/settings.local.json` (untracked; the repo is public).
   stays dead for the reason 39ef4f0 removed it. A rotated UUID is a silent precision loss, not an
   outage — `fetch_ccqs` logs per-arm counts so a zero is visible
 - The CCQ digest is the only one with **no season**: a rolling six-month lookahead, upcoming only,
-  at 373 miles (600 km) across both countries. Those are per-fetch overrides; `num_miles` stays 250
-  in `util/rph_api_utils.py`, because that default defines store classification, `#where-to-play`
-  and results eligibility
+  at 373 miles (600 km) across both countries. Those are per-fetch overrides; `num_miles` stays
+  `LEAGUE_RADIUS_MILES` (250), because that default defines store classification and
+  `#where-to-play`, and results eligibility measures each store against the same radius
 - **RPH's `/events` pagination silently skips rows** at page boundaries, and the same window
   at the same `page_size` reproduces the identical gap — it is not a timing effect. `fetch_events`
   re-walks at a different page size (250 then 173, coprime) whenever a pass comes up short of the

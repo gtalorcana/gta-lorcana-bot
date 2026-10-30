@@ -3,7 +3,8 @@ import time
 import requests
 
 from constants import (RPH_EVENTS_URL, RPH_EVENT_URL, RPH_GAME_STORES_URL,
-                       RPH_STANDINGS_URL, RPH_USERS_URL)
+                       RPH_STANDINGS_URL, RPH_USERS_URL,
+                       LEAGUE_CENTRE_LAT, LEAGUE_CENTRE_LON, LEAGUE_RADIUS_MILES)
 
 _MAX_RETRIES = 3
 _RETRY_DELAY = 2  # seconds between retries
@@ -51,9 +52,9 @@ class RphApi:
 
     def fetch_game_stores(self, extra_params=None):
         params = {
-            'latitude': 43.653226,
-            'longitude': -79.3831843,
-            'num_miles': 250,
+            'latitude': LEAGUE_CENTRE_LAT,
+            'longitude': LEAGUE_CENTRE_LON,
+            'num_miles': LEAGUE_RADIUS_MILES,
             'game_id': '1',
             'page': 1,
             'page_size': 50,
@@ -141,9 +142,9 @@ class RphApi:
             'start_date_before': start_date_before,
             'display_status': 'past',
             'game_slug': 'disney-lorcana',
-            'latitude': 43.653226,
-            'longitude': -79.3831843,
-            'num_miles': 250,
+            'latitude': LEAGUE_CENTRE_LAT,
+            'longitude': LEAGUE_CENTRE_LON,
+            'num_miles': LEAGUE_RADIUS_MILES,
             'page': 1,
             'gameplay_format_ids': ["2b6e184a-72d7-4ae5-a5f1-f16d79646c39", "4f43d777-beeb-4e1e-a04c-c1f2b3c5258a"],
         }
@@ -183,7 +184,8 @@ class RphApi:
         event = self.fetch_event_by_id(event_id)
         if not event or 'store' not in event:
             return None
-        # filter on Ontario, Canada stores and events with more than 0 people
+        # Canadian stores and events with more than 0 people. Not Ontario-only, and no
+        # distance check: results.py measures the store against the league radius.
         if event['store']['country'] == "CA" and event['starting_player_count'] > 0:
             return event
         return None
