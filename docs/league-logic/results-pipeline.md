@@ -22,6 +22,14 @@
    store's Play Hub coordinates (`results._miles_from_centre`). A store with no coordinates is refused
 7. Event date inside the season window
 
+8. **Play Hub has standings for it.** An event with no standings is refused, not recorded empty
+
+**Which round is scored.** The latest round of the last played phase that has standings. Stores
+sometimes open a round and never play it, leaving the event "in progress" with an empty last
+round. Reading that round recorded Game 3 (Oct 27 2026) and Derpy Cards (Oct 29) with no players
+while reporting success, so empty trailing rounds are skipped with a warning. After that, an
+all-draw last round is dropped too (`_is_all_draw_round`).
+
 Rules 5–7 are gated behind `_fetch_single_event(..., validate_eligibility=True)`, set only for
 live submissions. The bulk re-fetch path (`_fetch_event_rows_and_standings`) deliberately leaves it
 False: it re-reads rows already accepted into the sheet, and must not start rejecting history when

@@ -240,14 +240,28 @@ def _fetch_single_event(rph_url, thread_id, note=None, validate_eligibility=Fals
     if not last_phase['rounds']:
         return event_row, standing_rows, warnings
 
-    last_round_id = last_phase['rounds'][-1]['id']
-
-    print(f"    → Fetching standings for round {last_round_id}...")
-    standings = _rph_api.get_standings_from_tournament_round_id(str(last_round_id))
+    # Take the latest round that has standings. A store that opens a round and
+    # never plays it (Game 3, Oct 27 2026: round 4 UPCOMING, event left in
+    # progress) leaves an empty last round, and reading it recorded the event
+    # with no players at all.
+    rounds = last_phase['rounds']
+    standings = []
+    while rounds:
+        last_round_id = rounds[-1]['id']
+        print(f"    → Fetching standings for round {last_round_id}...")
+        standings = _rph_api.get_standings_from_tournament_round_id(str(last_round_id))
+        if standings:
+            break
+        print(f"    ⚠ Round {rounds[-1].get('round_number', '?')} has no standings — trying the round before")
+        warnings.append(
+            f"⚠️ Round {rounds[-1].get('round_number', '?')} has no results on Play Hub (never played?) "
+            f"— standings taken from the round before it."
+        )
+        rounds = rounds[:-1]
     print(f"    ✓ {len(standings)} standings retrieved for {event['store']['name']} {event_date}")
 
-    if len(last_phase['rounds']) >= 2:
-        prev_round_id = last_phase['rounds'][-2]['id']
+    if standings and len(rounds) >= 2:
+        prev_round_id = rounds[-2]['id']
         prev_standings = _rph_api.get_standings_from_tournament_round_id(str(prev_round_id))
         if _is_all_draw_round(standings, prev_standings):
             print(f"    ⚠ Last round detected as all-draw — auto-using second-to-last round")
@@ -347,6 +361,14 @@ def process_event_data(rph_url, thread_id):
     event_date = event_row[3]
     store_name = event_row[4]
     print(f"  ✓ RPH data fetched: {store_name} {event_date}, {len(standing_rows)} standings rows")
+
+    # An event with no standings used to be recorded as an empty event and
+    # reported as processed, so nobody noticed the missing results.
+    if not standing_rows:
+        raise ValueError(
+            "Play Hub has no standings for this event yet. Ask the store to finish "
+            "the event on Play Hub, then an admin can run `/recheck`."
+        )
 
     # ── Step 3: Write event row ───────────────────────────────
     # Event row is written before standings so that any crash between the two
