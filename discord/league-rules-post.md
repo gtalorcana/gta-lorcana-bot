@@ -1,7 +1,7 @@
 📋 **League Rules & FAQ**
 
 **What is the GTA Lorcana League?**
-A seasonal league tracking player performances across the GTA. Top performers are invited to a **free** Invitational before the next set release.
+A seasonal league tracking player performances across the GTA. Top performers are invited to an Invitational before the next set release.
 
 **How long is a season?**
 One set's cycle — it starts with the set's release and runs into that set's Championship season. The exact dates for the current season are below.
