@@ -2736,7 +2736,7 @@ _LEAGUE_RULES_KEY  = "league_rules_msg_ids"
 _LEAGUE_RULES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                   "discord", "league-rules-post.md")
 _LEAGUE_RULES_SPLIT = re.compile(r'^=== next message ===$', re.M)
-_INVITATIONAL_TIME  = "12:00 PM"
+_INVITATIONAL_TIME  = "12:00 PM ET"
 
 
 def _long_date(iso: str | None, weekday: bool = False) -> str | None:

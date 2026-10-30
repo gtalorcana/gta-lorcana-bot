@@ -4,7 +4,7 @@
 A seasonal league tracking player performances across the GTA. Top performers are invited to an Invitational before the next set release.
 
 **How long is a season?**
-One set's cycle — it starts with the set's release and runs into that set's Championship season. The exact dates for the current season are below.
+One set's cycle — it starts with the set's prerelease and runs into that set's Championship season. The exact dates for the current season are below.
 
 **How do I join?**
 Play in your local store's constructed tournaments. Have someone submit results to <#1253943193519784028> after the event.
@@ -23,7 +23,7 @@ Any store within 250 miles of Toronto, as long as someone is able to report resu
 🗓️ **Season {season_number} — {set_name}**
 
 **Start:** {season_start}
-**End:** {season_end} at 11:59 PM
+**End:** {season_end} at 11:59 PM ET
 
 *Please submit results before the deadline.*
 {set_champs_note}
@@ -38,7 +38,7 @@ Core Constructed and Infinity Constructed
 
 Your final score is your **ten best performances** across the season.
 
-Stores running four rounds are welcome to — a 4-0 earns 12 points.
+Any number of rounds counts.
 
 Events with a top cut: every match win counts, top cut included.
 
@@ -88,4 +88,4 @@ Alice had 70% OMW at the event, Bob had 69%. Alice wins the tiebreaker.
 
 *3rd and 4th are the event's own final standings, as Play Hub ranks them.*
 
-*All data is visible on the league spreadsheet for full transparency.*
+*All data is visible on the league spreadsheet in <#1253958098062803095> for full transparency.*

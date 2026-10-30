@@ -59,7 +59,7 @@ Data starts at `A2` (`Seasons!A2:J`).
 | F | Season End | `2026-12-20` | Required once that season is current |
 | G | Set Champs Start | `2026-12-04` | Both or neither, with H |
 | H | Set Champs End | `2026-12-27` | May fall after the season end (S11 did) |
-| I | Invitational Date | `2027-01-30` | #league-rules only; blank → "Date TBA". Time is fixed at 12:00 PM |
+| I | Invitational Date | `2027-01-30` | #league-rules only; blank → "Date TBA". Time is fixed at 12:00 PM ET |
 | J | Invitational Venue | `Enter The Battlefield Newmarket` | #league-rules only; blank → "Venue TBA". Never derived from the season number |
 
 It is a table rather than flat Bot State keys because cycles overlap: S13's Set Champs ran
