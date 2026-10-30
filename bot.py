@@ -2768,6 +2768,9 @@ def _render_league_rules(row: dict | None, template: str) -> list[str]:
         'invitational_when':  f"{when} at {_INVITATIONAL_TIME}" if when else "Date TBA",
     }
     messages = [part.strip().format(**fields) for part in _LEAGUE_RULES_SPLIT.split(template)]
+    # Discord runs consecutive messages from one author together, and strips trailing
+    # blank lines — a last line holding only a zero-width space survives, as a gap.
+    messages = [m + "\n​" for m in messages[:-1]] + messages[-1:]
     too_long = [i + 1 for i, m in enumerate(messages) if len(m) > 2000]
     if too_long:
         raise ValueError(f"message(s) {too_long} over Discord's 2,000 characters")
