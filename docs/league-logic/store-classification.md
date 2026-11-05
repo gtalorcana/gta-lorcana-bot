@@ -2,7 +2,7 @@
 
 Every Sunday, `analyse_stores()` in `stores.py`:
 
-1. Fetches all Ontario Lorcana events for the current season from RPH
+1. Fetches all Ontario Lorcana events from RPH for the last 8 weeks (`WHERE_TO_PLAY_WINDOW_WEEKS`), ending with the reference week. The window is rolling, not the season's: between a season's end and the next rollover the season window holds no recent events, and every store would drop off the list
 2. Groups events by `(store_id, day_of_week, floored_hour, format)` — events within the same clock hour are merged to handle organizers adjusting start times slightly week to week
 3. Classifies each group based on streak
 4. Applies manual overrides from the `Overrides` sheet tab
@@ -15,7 +15,7 @@ Every Sunday, `analyse_stores()` in `stores.py`:
 | Status | Criteria |
 |--------|----------|
 | Regular | Consecutive streak ≥ 2 weeks |
-| Semi-Regular | Ran at least once in the last 2 weeks AND at least twice total |
+| Semi-Regular | Ran at least once in the last 2 weeks AND at least twice in the 8-week window |
 | *(unlisted)* | Everything else |
 
 **Reference date:** Streaks are always evaluated against the last *completed* week, not the current in-progress one. This prevents a store from being demoted mid-week just because this week's event hasn't happened yet.
@@ -44,7 +44,7 @@ store_id | store_name | day | time | format | override_status | override_day | o
 
 Match-based overrides (`Regular`, `Semi-Regular`, `Exclude`) match on exact `(store_id, day, time, format)`. These must match what's in the `Store Classifications` tab exactly.
 
-`Add` overrides don't need a match — the `day` and `time` columns can be left blank. City is automatically looked up from the RPH event data if the store appears anywhere in the season.
+`Add` overrides don't need a match — the `day` and `time` columns can be left blank. City is automatically looked up from the RPH event data if the store appears anywhere in the 8-week window.
 
 **Examples:**
 

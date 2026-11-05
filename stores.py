@@ -1,7 +1,7 @@
 """
 Where-to-Play utility module.
 
-Analyses current season RPH event data to classify Ontario Lorcana store events
+Analyses recent RPH event data (a rolling window, not the season) to classify Ontario Lorcana store events
 as Regular or Semi-Regular, persists state to Google Sheets, and determines which
 events are expected on a given date.
 
@@ -42,6 +42,7 @@ from constants import (
     BOT_STATE_RANGE_NAME,
     SEASONS_RANGE_NAME,
     WHERE_TO_PLAY_MIN_CONSECUTIVE_WEEKS,
+    WHERE_TO_PLAY_WINDOW_WEEKS,
     STORE_DEBUG_SHEET_NAME,
     STORE_DEBUG_RANGE_NAME,
     ETB_APPROVALS_SHEET_NAME,
@@ -61,19 +62,21 @@ _DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
-def _fetch_current_season_events() -> list:
-    """Fetch Ontario Lorcana events for the current season (with lookback) from RPH.
+def _fetch_recent_events(reference_date: date) -> list:
+    """Fetch Ontario Lorcana events for the WHERE_TO_PLAY_WINDOW_WEEKS weeks ending
+    with the week containing reference_date (Monday → Sunday) from RPH.
 
-    Extends the query window back by WHERE_TO_PLAY_MIN_CONSECUTIVE_WEEKS before
-    the season start so that streaks spanning a season boundary are preserved.
+    Independent of the season on purpose: the season window goes stale between a
+    season's end and the next rollover, and empties #where-to-play (#4). Ending at
+    the reference week also keeps the in-progress week out of the counts.
     """
-    if not season.SEASON_START_DATE or not season.SEASON_END_DT:
-        raise RuntimeError("Season dates not configured — add this season's row to the Seasons tab.")
-    lookback_date = (date.fromisoformat(season.SEASON_START_DATE)
-                     - timedelta(weeks=WHERE_TO_PLAY_MIN_CONSECUTIVE_WEEKS))
-    start_dt = season._start_of_day_utc(lookback_date.isoformat())
-    print(f"  → Fetching RPH events ({lookback_date} → {season.SEASON_END_DATE})...")
-    events = _rph_api.get_events(start_dt, season.SEASON_END_DT)
+    ref_week   = _get_week_start(reference_date)
+    first_week = ref_week - timedelta(weeks=WHERE_TO_PLAY_WINDOW_WEEKS - 1)
+    last_day   = ref_week + timedelta(days=6)
+    start_dt   = season._start_of_day_utc(first_week.isoformat())
+    end_dt     = season._end_of_day_utc(last_day.isoformat())
+    print(f"  → Fetching RPH events ({first_week} → {last_day})...")
+    events = _rph_api.get_events(start_dt, end_dt)
     print(f"  ✓ {len(events)} events fetched")
     return events
 
@@ -1372,8 +1375,8 @@ def archive_season_data(season_name: str) -> list[str]:
 
 def analyse_stores(reference_date: date = None) -> dict:
     """
-    Run a fresh classification against current season RPH data,
-    save the result to Google Sheets, and return it.
+    Run a fresh classification against the last WHERE_TO_PLAY_WINDOW_WEEKS
+    weeks of RPH data, save the result to Google Sheets, and return it.
 
     Called every Sunday by the where_to_play_weekly task in bot.py.
 
@@ -1398,7 +1401,7 @@ def analyse_stores(reference_date: date = None) -> dict:
         # Mid-week or Sunday — current week is in progress, use its Monday as ref
         reference_date = ref_week
 
-    events         = _fetch_current_season_events()
+    events         = _fetch_recent_events(reference_date)
     event_map      = _build_event_type_map(events)
     raw_analysis   = _classify_event_types(event_map, reference_date)
 
