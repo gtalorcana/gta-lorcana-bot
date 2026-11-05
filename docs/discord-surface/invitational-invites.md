@@ -91,7 +91,8 @@ one of them, the bot posts a note to the season-close channel instead of a menti
 ## Permissions
 
 The bot needs **Manage Channels**, **Manage Roles** (for channel permission overwrites) and
-**Manage Messages** (to pin). The preview names whichever are missing.
+**Pin Messages**. The preview names whichever are missing. discord.py 2.4 has no named flag for
+Pin Messages, so the preview checks permission bit 51 directly.
 
 ## Testing
 
