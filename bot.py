@@ -2740,9 +2740,16 @@ class _InviteButton(discord.ui.DynamicItem[discord.ui.Button],
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
-        content, view = await _invite_panel(interaction.user.id, self.season_id)
-        await interaction.followup.send(content, view=view, ephemeral=True,
-                                        allowed_mentions=_NO_PINGS)
+        try:
+            content, view = await _invite_panel(interaction.user.id, self.season_id)
+        except Exception as e:
+            print(f"  ⚠ invites {self.season_id}: My invite failed: {e}")
+            content, view = (f"⚠️ Something went wrong — message <@{BOT_CONTACT_USER_ID}>. "
+                             f"(`{e}`)"), None
+        # followup.send rejects view=None outright, so a reply without buttons omits it
+        kwargs = {'view': view} if view else {}
+        await interaction.followup.send(content, ephemeral=True,
+                                        allowed_mentions=_NO_PINGS, **kwargs)
 
 
 def _invite_find(invites: list, user_id: int):
