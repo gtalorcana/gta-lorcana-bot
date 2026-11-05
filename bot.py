@@ -55,7 +55,7 @@ from typing import Callable
 
 from clients import gs as _gs, rph_api as _rph_api
 from results import process_event_data, remove_event_data
-from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, load_season_config, refresh_set_champs, fetch_prereleases, fetch_ccqs, set_bot_state_key, delete_bot_state_key, create_season_sheets, archive_season_data, get_etb_approval, append_etb_approval, lookup_player_standings, get_current_display_names
+from stores import analyse_stores, get_expected_stores_for_date, load_bot_state, save_bot_state, load_season_config, refresh_set_champs, fetch_prereleases, fetch_ccqs, set_bot_state_key, delete_bot_state_key, create_season_sheets, archive_season_data, get_etb_approval, append_etb_approval, lookup_player_standings, get_current_display_names, _is_missing_sheet
 
 from constants import (
     DISCORD_BOT_TOKEN,
@@ -2763,6 +2763,9 @@ async def _invite_panel(user_id: int, season_id: str) -> tuple[str, discord.ui.V
     try:
         invites = await loop.run_in_executor(None, _inv.read_invites, season_id)
     except Exception as e:
+        # The tab was deleted (a finished test season) — that's an answer, not an outage
+        if _is_missing_sheet(e):
+            return f"The {season_id} Invitational invite list is closed.", None
         return f"⚠️ Couldn't read the invite list right now — try again in a minute. (`{e}`)", None
     inv = _invite_find(invites, user_id)
     if not inv:
