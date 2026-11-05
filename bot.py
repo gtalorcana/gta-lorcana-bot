@@ -2407,6 +2407,8 @@ def _invite_roster(season_id: str, invites: list) -> discord.Embed:
     inv_date = _invitational_date(season_id)
     holding  = [i for i in invites if i.status in _inv.HOLDING]
     lines    = [f"**{_invite_tally(invites)}** · {len(holding)}/{_inv.INVITE_SIZE} spots", ""]
+    if not any(i.on_discord for i in holding):
+        lines.append("*Nobody on Discord holds a spot right now.*")
     for i in holding:
         if not i.on_discord:
             continue
@@ -2430,7 +2432,7 @@ def _invite_roster(season_id: str, invites: list) -> discord.Embed:
         lines += [f"`{i.rank:>2}` {_INVITE_ICON[i.status]} {i.name}" for i in off]
 
     lines += ["", f"Press **My invite** to accept, decline or defer. You have "
-                  f"{_inv.INVITE_DEADLINE_HOURS} hours; each defer adds "
+                  f"{_inv.INVITE_DEADLINE_HOURS} {_inv.UNIT}; each defer adds "
                   f"{_inv.INVITE_DEFER_HOURS} (up to {_inv.INVITE_MAX_DEFERS})."]
     when = _long_date(inv_date, weekday=True)
     venue = (season.get_season(season_id) or {}).get('invitational_venue')
@@ -2703,7 +2705,7 @@ async def _send_invites(guild: discord.Guild, season_id: str) -> str:
                    + "\n" if when else "")
                 + f"Press **My invite** on the pinned roster to accept or decline"
                 + (f" by {_ts(deadline, 'F')}" if deadline else "")
-                + f". Need more time? **Defer** adds {_inv.INVITE_DEFER_HOURS} hours, up to "
+                + f". Need more time? **Defer** adds {_inv.INVITE_DEFER_HOURS} {_inv.UNIT}, up to "
                   f"{_inv.INVITE_MAX_DEFERS} times. A declined spot goes straight to the next "
                   f"player on the leaderboard.")
         if not meta.get('announced'):     # a resumed send must not ping all 32 again
@@ -2768,7 +2770,7 @@ async def _invite_panel(user_id: int, season_id: str) -> tuple[str, discord.ui.V
                 if inv.deadline else f"**{season_id} Invitational** — you're #{inv.rank}.")
         view.add('accept', "Accept", discord.ButtonStyle.success)
         if new:
-            view.add('defer', f"Defer +{_inv.INVITE_DEFER_HOURS}h ({left} left)",
+            view.add('defer', f"Defer +{_inv.INVITE_DEFER_HOURS}{_inv.UNIT[0]} ({left} left)",
                      discord.ButtonStyle.secondary)
         view.add('decline', "Decline", discord.ButtonStyle.danger)
         return text, view
@@ -2834,10 +2836,14 @@ async def _invite_act(interaction: discord.Interaction, season_id: str, playhub_
                 reply = f"🕓 Deferred — your new deadline is {_ts(new, 'F')}."
             elif action == 'decline' and inv.status in _inv.OPEN:
                 inv.status, inv.responded = 'declined', now
-                reply = "Declined — thanks for letting us know. Your spot goes to the next player."
+                reply = "Declined — thanks for letting us know." + (f" Your spot goes to the next player. You'll lose access to this channel in "
+                         f"{_inv.INVITE_ACCESS_GRACE_HOURS} {_inv.UNIT}; changed your mind before "
+                         f"then? Message <@{BOT_CONTACT_USER_ID}>.")
             elif action == 'withdraw' and inv.status == 'accepted':
                 inv.status, inv.responded = 'withdrawn', now
-                reply = "Withdrawn — thanks for letting us know. Your spot goes to the next player."
+                reply = "Withdrawn — thanks for letting us know." + (f" Your spot goes to the next player. You'll lose access to this channel in "
+                         f"{_inv.INVITE_ACCESS_GRACE_HOURS} {_inv.UNIT}; changed your mind before "
+                         f"then? Message <@{BOT_CONTACT_USER_ID}>.")
             else:
                 return "⚠️ That can't be done any more — press **My invite** again."
             await _invite_write(season_id, [inv])

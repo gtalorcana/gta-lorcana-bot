@@ -44,6 +44,7 @@ from constants import (
 
 _TZ_ET = ZoneInfo("America/Toronto")
 _MINUTES = INVITE_TIME_SCALE == "minutes"
+UNIT = "minutes" if _MINUTES else "hours"   # for wording that quotes a duration
 
 
 def hours(n: float) -> timedelta:
