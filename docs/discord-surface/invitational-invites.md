@@ -95,6 +95,17 @@ The bot needs **Manage Channels**, **Manage Roles** (for channel permission over
 
 ## Testing
 
-Set `INVITE_TIME_SCALE=minutes` and every hour above becomes a minute: 48-minute deadlines,
-24-minute defers. Use a dummy season and channel with Ryan, the bot and one unlinked player, to
-exercise a replacement and the not-on-Discord path.
+Four environment variables (Fly secrets) turn a run into a test. The preview says **Test mode**
+while any is set:
+
+| Variable | Test value | Effect |
+|---|---|---|
+| `INVITE_TIME_SCALE` | `minutes` | Every hour becomes a minute: 48-minute deadlines, 24-minute defers |
+| `INVITE_SIZE` | `1` | One spot, so a single decline reaches a replacement |
+| `INVITE_TEST_CHANNEL_ID` | the bot test channel | Used instead of creating a channel; not-on-Discord notes go there too |
+| `INVITE_SPREADSHEET_ID` | the Bot Database sheet | `S## Leaderboard` is read, and `S## Invitational` written, there instead of the public League sheet |
+
+Put a fake `S99 Leaderboard` tab in that sheet (A rank, B Playhub ID, C name), with a linked
+player at rank 1 and unlinked ones below, and run `/invite-send S99`. Afterwards, unset the four
+secrets, delete the `S99 Leaderboard` and `S99 Invitational` tabs, and delete the
+`invitational:S99` and `season_close:S99` Bot State keys.

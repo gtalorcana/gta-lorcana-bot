@@ -26,9 +26,13 @@ INVITE_CATEGORY_ID = int(os.getenv("INVITE_CATEGORY_ID", 1253915141716578315))
 # Role that sees every invites channel, looked up by name in the server
 STAFF_ROLE_NAME = os.getenv("STAFF_ROLE_NAME", "Staff")
 
-# Invitational invites (invitational.py). Hours throughout; INVITE_TIME_SCALE=minutes
-# in the environment turns every one of them into minutes, for testing only.
-INVITE_SIZE               = 32
+# Invitational invites (invitational.py). Hours throughout. For a test run only, set in the
+# environment: INVITE_TIME_SCALE=minutes (every hour becomes a minute), INVITE_SIZE (fewer
+# spots, so a decline reaches a replacement), INVITE_TEST_CHANNEL_ID (use that channel instead
+# of creating one; staff notes go there too) and INVITE_SPREADSHEET_ID (read `S## Leaderboard`
+# and write `S## Invitational` in that sheet instead of the public League sheet).
+INVITE_SIZE               = int(os.getenv("INVITE_SIZE", 32))
+INVITE_TEST_CHANNEL_ID    = int(os.getenv("INVITE_TEST_CHANNEL_ID", 0))
 INVITE_DEADLINE_HOURS     = 48
 INVITE_DEFER_HOURS        = 24   # each Defer press
 INVITE_MAX_DEFERS         = 3
@@ -56,8 +60,10 @@ RARE_ROLE_ID       = int(os.getenv("RARE_ROLE_ID",       1347683773256568964))
 SUPER_RARE_ROLE_ID = int(os.getenv("SUPER_RARE_ROLE_ID", 1347683770815479819))
 LEGENDARY_ROLE_ID  = int(os.getenv("LEGENDARY_ROLE_ID",  1347683767367503953))
 
-# All accounts authorised to run admin/mod bot commands
+# All accounts authorised to run admin/mod bot commands: the GTA Lorcana account, then Ryan's own
 ADMIN_USER_IDS = [904550642213875723, 361716209324130305]
+# Who players are told to message, and who the bot DMs, about bot issues — Ryan's personal account
+BOT_CONTACT_USER_ID = 361716209324130305
 
 # Where-to-Play settings
 WHERE_TO_PLAY_POST_DAY        = 6   # Sunday (0=Mon … 6=Sun)
@@ -97,6 +103,9 @@ TIMEZONE_ET = "America/Toronto"
 
 # Google Sheets Constants
 LEAGUE_SPREADSHEET_ID = "1dSv5lzVwhot1DR0e2FghyS7R1Vm1ODZtH3d8e3C55Zo"
+# Where invitational.py reads `S## Leaderboard` and keeps `S## Invitational` — overridden only
+# for a test run (see INVITE_SIZE above)
+INVITE_SPREADSHEET_ID = os.getenv("INVITE_SPREADSHEET_ID") or LEAGUE_SPREADSHEET_ID
 
 # How far down a new season's Results tab the per-row formulas (C, M, N, O, P)
 # are seeded. Only rows with a player in column A produce output, so extra rows

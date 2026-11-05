@@ -12,6 +12,7 @@
 | `/etb-post` | Admin | Post, or edit in place, the `#etb-discount` how-to (text from `discord/etb-discount.md`) with its apply button |
 | `/league-rules-post` | Admin | Post, or edit in place, the three `#league-rules` messages (text from `discord/league-rules-post.md`, season block from the current Seasons tab row). Re-reads the tab first. If any of the three is gone it deletes the rest and reposts all three, to keep their order |
 | `/season-close` | Admin | Post or refresh the season-close checklist now. Recording roles, rollover and archiving are its buttons — there are no slash commands for them |
+| `/invite-send <season_id>` | Admin | The season-close checklist's **Send invites**, for a season without an open checklist — a test season, or a checklist that failed to post. Same preview, nothing sent until confirmed |
 | `/invite-set <player> <status> [season_id]` | Admin | Set an Invitational invitee's status: record an answer from someone not on Discord, undo a decline (`pending` gives a fresh deadline and restores channel access), or free a duplicate account's spot. A decline or withdraw invites the next player. Invites themselves are sent from the season-close checklist. See `invitational-invites.md` |
 | `/tidy-registry` | Admin | Remove blank rows from the Player Registry, refresh display names from this season's sheets, and sort by rarity tier, newest season first |
 | `/where-to-play` | Admin | Manually trigger a `#where-to-play` refresh |

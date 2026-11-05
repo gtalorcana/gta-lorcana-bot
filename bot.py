@@ -76,6 +76,8 @@ from constants import (
     RPH_RETRY_DELAY,
     RPH_RETRY_ATTEMPTS,
     ADMIN_USER_IDS,
+    BOT_CONTACT_USER_ID,
+    INVITE_TEST_CHANNEL_ID,
     WHERE_TO_PLAY_POST_DAY,
     WHERE_TO_PLAY_POST_HOUR_ET,
     COMMON_ROLE_ID,
@@ -2452,7 +2454,10 @@ async def _invite_channel(guild: discord.Guild, season_id: str):
     if meta.get('channel_id') and (ch := guild.get_channel(int(meta['channel_id']))):
         return ch
     name = f"{season_id.lower()}-top-{_inv.INVITE_SIZE}-invites"
-    ch = discord.utils.get(guild.text_channels, name=name)
+    ch = (guild.get_channel(INVITE_TEST_CHANNEL_ID) if INVITE_TEST_CHANNEL_ID
+          else discord.utils.get(guild.text_channels, name=name))
+    if ch is None and INVITE_TEST_CHANNEL_ID:
+        raise RuntimeError(f"INVITE_TEST_CHANNEL_ID {INVITE_TEST_CHANNEL_ID} not found")
     if ch is None:
         staff = discord.utils.get(guild.roles, name=STAFF_ROLE_NAME)
         see   = discord.PermissionOverwrite(view_channel=True, send_messages=True,
@@ -2548,7 +2553,7 @@ async def _invite_fill(guild: discord.Guild, season_id: str, invites: list,
                 f"pinned roster by {_ts(inv.deadline, 'F')} to accept or decline.",
                 allowed_mentions=discord.AllowedMentions(users=[discord.Object(inv.discord_id)]))
         else:
-            sc = guild.get_channel(SEASON_CLOSE_CHANNEL_ID)
+            sc = guild.get_channel(INVITE_TEST_CHANNEL_ID or SEASON_CLOSE_CHANNEL_ID)
             if sc:
                 await sc.send(f"📋 {season_id} invites: next up is **{inv.name}** (#{inv.rank}), "
                               f"who isn't on Discord{f' ({inv.note})' if inv.note else ''}. "
@@ -2598,6 +2603,11 @@ async def _invite_preview(interaction: discord.Interaction, season_id: str) -> N
     if not guild.get_channel(INVITE_CATEGORY_ID):
         warnings.append(f"League category `{INVITE_CATEGORY_ID}` not found — the channel will "
                         f"be created outside any category.")
+    if INVITE_TEST_CHANNEL_ID or _inv.INVITE_SPREADSHEET_ID != LEAGUE_SPREADSHEET_ID or _inv._MINUTES:
+        warnings.append(f"🧪 **Test mode** — channel <#{INVITE_TEST_CHANNEL_ID}>, "
+                        f"{_inv.INVITE_SIZE} spot(s), "
+                        f"{'minutes' if _inv._MINUTES else 'hours'}, "
+                        f"{'test' if _inv.INVITE_SPREADSHEET_ID != LEAGUE_SPREADSHEET_ID else 'League'} sheet.")
     if not _invitational_date(season_id):
         warnings.append(f"No invitational date in the Seasons tab for {season_id} — replacements "
                         f"won't stop the day before.")
@@ -2764,7 +2774,7 @@ async def _invite_panel(user_id: int, season_id: str) -> tuple[str, discord.ui.V
         return (f"✅ You've accepted your spot (#{inv.rank}) in the {season_id} Invitational. "
                 f"Can't make it after all? Withdraw so the next player gets it."), view
     return (f"You {inv.status} your {season_id} Invitational spot. If that was a mistake, "
-            f"message <@{ADMIN_USER_IDS[0]}>."), None
+            f"message <@{BOT_CONTACT_USER_ID}>."), None
 
 
 class _InvitePanelView(discord.ui.View):
@@ -2905,7 +2915,22 @@ async def _invite_tick(guild: discord.Guild, season_id: str) -> None:
                                                       any(i.reminded == 'failed' for i in plan.remind)))
 
 
-# ── /invite-set (staff) ─────────────────────────────────────────────
+# ── /invite-send, /invite-set (staff) ───────────────────────────────
+
+@tree.command(name="invite-send", description="Preview and send a season's Invitational invites (admins only)")
+@app_commands.describe(season_id="e.g. S14 — normally pressed as Send invites on the checklist")
+async def invite_send_command(interaction: discord.Interaction, season_id: str):
+    """The checklist's Send invites, for a season with no open checklist — a test
+    season, or a checklist that failed to post. Same preview, same confirm."""
+    if not _is_admin(interaction):
+        await interaction.response.send_message("❌ Admins only.", ephemeral=True)
+        return
+    sid = season_id.strip().upper()
+    if not re.fullmatch(r'S\d+', sid):
+        await interaction.response.send_message("⚠️ Season looks like `S14`.", ephemeral=True)
+        return
+    await _invite_preview(interaction, sid)
+
 
 @tree.command(name="invite-set", description="Set an Invitational invitee's status (admins only)")
 @app_commands.choices(status=[app_commands.Choice(name=s, value=s)
@@ -3647,7 +3672,7 @@ async def _etb_flow(interaction: discord.Interaction, email: str,
         print(f"  ⚠ /etb-discount: {interaction.user} claimed playhub_id={playhub_id} "
               f"owned by discord {owner['discord_id']}")
         try:
-            ryan = await bot.fetch_user(ADMIN_USER_IDS[0])
+            ryan = await bot.fetch_user(BOT_CONTACT_USER_ID)
             await ryan.send(
                 f"⚠️ /etb-discount ownership conflict — {interaction.user} "
                 f"(`{interaction.user.id}`) claimed Playhub `{playhub_id}` "
@@ -3795,7 +3820,7 @@ async def _etb_flow(interaction: discord.Interaction, email: str,
     )
     if err:
         try:
-            ryan = await bot.fetch_user(ADMIN_USER_IDS[0])
+            ryan = await bot.fetch_user(BOT_CONTACT_USER_ID)
             await ryan.send(
                 f"⚠️ /etb-discount Shopify whitelist failed for {interaction.user} "
                 f"(rph: {rph_username})\nError: {err}"
@@ -4926,6 +4951,10 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="/tidy-registry", value="Remove blank rows and sort the Player Registry by rarity", inline=False)
     embed.add_field(name="/assign-roles-from-registry", value="Assign every Discord rarity role the registry records — safe to re-run", inline=False)
     embed.add_field(name="/where-to-play", value="Manually push the Where to Play post", inline=False)
+    embed.add_field(name="/invite-send",
+                    value="Preview and send a season's Invitational invites — the same as Send "
+                          "invites on the season-close checklist, for when there's no checklist",
+                    inline=False)
     embed.add_field(name="/invite-set",
                     value="Set an Invitational invitee's status — record an answer from someone "
                           "not on Discord, undo a decline (`pending`), or free a duplicate's spot. "

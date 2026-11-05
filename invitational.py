@@ -30,7 +30,7 @@ from zoneinfo import ZoneInfo
 
 from clients import gs as _gs
 from constants import (
-    LEAGUE_SPREADSHEET_ID,
+    INVITE_SPREADSHEET_ID,
     INVITE_SIZE,
     INVITE_DEADLINE_HOURS,
     INVITE_DEFER_HOURS,
@@ -137,7 +137,7 @@ def _parse_row(n: int, cells: list) -> Invite | None:
 
 def read_invites(season_id: str) -> list[Invite]:
     """Every invite row, in rank order. Raises if the tab can't be read."""
-    data = _gs.get_values(LEAGUE_SPREADSHEET_ID, f"'{tab_name(season_id)}'!A2:L")
+    data = _gs.get_values(INVITE_SPREADSHEET_ID, f"'{tab_name(season_id)}'!A2:L")
     invites = [inv for i, cells in enumerate(data.get('values', []))
                if (inv := _parse_row(i + 2, cells))]
     return sorted(invites, key=lambda inv: inv.rank)
@@ -146,22 +146,22 @@ def read_invites(season_id: str) -> list[Invite]:
 def write_invite(season_id: str, inv: Invite) -> None:
     """Write one row to its own range — never append, never the whole tab, so a
     hand edit to another row between a read and this write survives."""
-    _gs.update_values(LEAGUE_SPREADSHEET_ID,
+    _gs.update_values(INVITE_SPREADSHEET_ID,
                       f"'{tab_name(season_id)}'!A{inv.row}:L{inv.row}",
                       'RAW', [inv.to_cells()])
 
 
 def create_tab(season_id: str, invites: list[Invite]) -> None:
     """Create the tab and write the snapshot. Raises if the tab already exists."""
-    _gs.add_sheet(LEAGUE_SPREADSHEET_ID, tab_name(season_id))
+    _gs.add_sheet(INVITE_SPREADSHEET_ID, tab_name(season_id))
     rows = [HEADER] + [inv.to_cells() for inv in invites]
-    _gs.update_values(LEAGUE_SPREADSHEET_ID,
+    _gs.update_values(INVITE_SPREADSHEET_ID,
                       f"'{tab_name(season_id)}'!A1:L{len(rows)}", 'RAW', rows)
 
 
 def read_leaderboard(season_id: str) -> list[tuple[int, str, str]]:
     """[(rank, playhub_id, name)] from `S## Leaderboard`, in rank order, one per ID."""
-    data = _gs.get_values(LEAGUE_SPREADSHEET_ID, f"{season_id} Leaderboard!A2:C")
+    data = _gs.get_values(INVITE_SPREADSHEET_ID, f"{season_id} Leaderboard!A2:C")
     out, seen = [], set()
     for cells in data.get('values', []):
         if len(cells) < 3:
