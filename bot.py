@@ -287,11 +287,11 @@ def _build_where_to_play_messages(store_analysis: dict, as_of: date) -> list[str
     ])
 
     # Build semi-regular day blocks individually so we can split if needed
-    semi_header = "\u200b\n🔄 Semi-Regular Events — *ran at least twice in the last 4 weeks*"
+    semi_header = "\u200b\n🔄 Semi-Regular Events — *ran at least twice in the last 8 weeks, once in the last 2*"
     semi_entries = store_analysis.get('semi_regular', [])
 
     if not semi_entries:
-        semi_msgs = [semi_header + "\n*None yet this season*"]
+        semi_msgs = [semi_header + "\n*None right now*"]
     else:
         groups = {}
         for e in semi_entries:
@@ -321,7 +321,7 @@ def _build_where_to_play_messages(store_analysis: dict, as_of: date) -> list[str
     info_msg = "\n".join([
         "\u200b",
         "🏪 Don't see your store?",
-        "Ask them to run the same event (same day, same time) at least twice in the last 4 weeks and it'll appear here automatically!",
+        "Ask them to run the same event (same day, same time) two weeks in a row and it'll appear here automatically!",
         "*If something looks off, DM <@904550642213875723> and we'll manually fix it.*",
         "",
         "ℹ️ How this works",
