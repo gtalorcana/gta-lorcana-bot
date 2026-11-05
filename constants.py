@@ -23,8 +23,9 @@ ETB_DISCOUNT_CHANNEL_ID = int(os.getenv("ETB_DISCOUNT_CHANNEL_ID", 1255205802944
 LEAGUE_RULES_CHANNEL_ID = int(os.getenv("LEAGUE_RULES_CHANNEL_ID", 1253923057828102175))
 # The league category — each season's `#s##-top-32-invites` channel is created here
 INVITE_CATEGORY_ID = int(os.getenv("INVITE_CATEGORY_ID", 1253915141716578315))
-# Role that sees every invites channel, looked up by name in the server
-STAFF_ROLE_NAME = os.getenv("STAFF_ROLE_NAME", "Staff")
+# The staff role (Enchanted: Ryan, Kris, Alex) — sees every invites channel. By ID, so a
+# rename can't silently drop staff off the channel.
+STAFF_ROLE_ID = int(os.getenv("STAFF_ROLE_ID", 1346139045624811631))
 
 # Invitational invites (invitational.py). Hours throughout. For a test run only, set in the
 # environment: INVITE_TIME_SCALE=minutes (every hour becomes a minute), INVITE_SIZE (fewer

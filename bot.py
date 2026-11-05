@@ -65,7 +65,7 @@ from constants import (
     MOD_CHANNEL_ID,
     SEASON_CLOSE_CHANNEL_ID,
     INVITE_CATEGORY_ID,
-    STAFF_ROLE_NAME,
+    STAFF_ROLE_ID,
     ETB_DISCOUNT_CHANNEL_ID,
     LEAGUE_RULES_CHANNEL_ID,
     SET_CHAMPS_CHANNEL_ID,
@@ -2459,7 +2459,7 @@ async def _invite_channel(guild: discord.Guild, season_id: str):
     if ch is None and INVITE_TEST_CHANNEL_ID:
         raise RuntimeError(f"INVITE_TEST_CHANNEL_ID {INVITE_TEST_CHANNEL_ID} not found")
     if ch is None:
-        staff = discord.utils.get(guild.roles, name=STAFF_ROLE_NAME)
+        staff = guild.get_role(STAFF_ROLE_ID)
         see   = discord.PermissionOverwrite(view_channel=True, send_messages=True,
                                             read_message_history=True)
         overwrites = {guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -2591,32 +2591,35 @@ async def _invite_preview(interaction: discord.Interaction, season_id: str) -> N
         warnings.append(f"<@{did}> holds {ranks} (two Playhub accounts). After sending, "
                         f"decline the extra one with `/invite-set` to free the spot.")
     perms = guild.me.guild_permissions
-    missing = [p for p, ok in (("Manage Channels", perms.manage_channels),
+    # Pin Messages is bit 51, newer than discord.py 2.4's named flags; Manage Messages also pins.
+    can_pin = perms.manage_messages or bool(perms.value >> 51 & 1)
+    missing = [p for p, ok in (("Manage Channels", perms.manage_channels or INVITE_TEST_CHANNEL_ID),
                                ("Manage Roles", perms.manage_roles),
-                               ("Pin Messages", perms.manage_messages
-                                or getattr(perms, 'pin_messages', False))) if not ok]
+                               ("Pin Messages", can_pin)) if not ok]
     if missing:
         warnings.append(f"The bot is missing **{', '.join(missing)}** — sending will fail. "
                         f"Server Settings → Roles → GTA Lorcana Bot.")
-    if not discord.utils.get(guild.roles, name=STAFF_ROLE_NAME):
-        warnings.append(f"No **@{STAFF_ROLE_NAME}** role found — staff won't see the channel.")
-    if not guild.get_channel(INVITE_CATEGORY_ID):
+    if not guild.get_role(STAFF_ROLE_ID):
+        warnings.append(f"Staff role `{STAFF_ROLE_ID}` not found — staff won't see the channel.")
+    if not INVITE_TEST_CHANNEL_ID and not guild.get_channel(INVITE_CATEGORY_ID):
         warnings.append(f"League category `{INVITE_CATEGORY_ID}` not found — the channel will "
                         f"be created outside any category.")
-    if INVITE_TEST_CHANNEL_ID or _inv.INVITE_SPREADSHEET_ID != LEAGUE_SPREADSHEET_ID or _inv._MINUTES:
-        warnings.append(f"🧪 **Test mode** — channel <#{INVITE_TEST_CHANNEL_ID}>, "
-                        f"{_inv.INVITE_SIZE} spot(s), "
-                        f"{'minutes' if _inv._MINUTES else 'hours'}, "
-                        f"{'test' if _inv.INVITE_SPREADSHEET_ID != LEAGUE_SPREADSHEET_ID else 'League'} sheet.")
     if not _invitational_date(season_id):
         warnings.append(f"No invitational date in the Seasons tab for {season_id} — replacements "
                         f"won't stop the day before.")
 
+    test = INVITE_TEST_CHANNEL_ID or _inv.INVITE_SPREADSHEET_ID != LEAGUE_SPREADSHEET_ID or _inv._MINUTES
     off = sum(not r.on_discord for r in rows)
     desc = "\n".join(lines)
+    if test:
+        desc += (f"\n\n🧪 **Test mode** — {_inv.INVITE_SIZE} spot(s), "
+                 f"{'minutes' if _inv._MINUTES else 'hours'}, "
+                 f"{'test' if _inv.INVITE_SPREADSHEET_ID != LEAGUE_SPREADSHEET_ID else 'League'} sheet.")
     if warnings:
         desc += "\n\n" + "\n".join(f"⚠️ {w}" for w in warnings)
-    desc += (f"\n\n**Send** creates the channel and mentions the {len(rows) - off} on Discord. "
+    where = (f"posts in <#{INVITE_TEST_CHANNEL_ID}>" if INVITE_TEST_CHANNEL_ID
+             else "creates the channel")
+    desc += (f"\n\n**Send** {where} and mentions the {len(rows) - off} on Discord. "
              f"{off} not on Discord are listed on the roster for staff.")
     embed = make_embed(title=f"Preview — {season_id} Invitational invites",
                        description=desc[:4096], colour=discord.Colour.blurple())

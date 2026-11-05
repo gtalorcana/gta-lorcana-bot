@@ -12,12 +12,12 @@ with each one's Discord member or *not on Discord*, and flags:
 
 - one member holding two ranks (two Playhub accounts) — send, then decline the extra one with
   `/invite-set` to free its spot
-- missing bot permissions, a missing `@Staff` role or league category, a missing invitational date
+- missing bot permissions, a missing staff role or league category, a missing invitational date
 
 Nothing goes out until **Send invites** under the preview is pressed. Then the bot:
 
 1. Creates `#s##-top-32-invites` in the league category (`INVITE_CATEGORY_ID`): hidden from
-   `@everyone`, visible to `@Staff` (`STAFF_ROLE_NAME`), the bot, and each invitee by a
+   `@everyone`, visible to the staff role (`STAFF_ROLE_ID`, Enchanted), the bot, and each invitee by a
    per-member overwrite. There is no per-season role
 2. Snapshots the 32 into the `S## Invitational` tab (League sheet)
 3. Posts **one** message mentioning every invitee on Discord
