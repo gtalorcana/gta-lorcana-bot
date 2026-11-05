@@ -50,7 +50,7 @@ Events with a top cut: every match win counts, top cut included.
 
 The top 32 players at season end will be contacted via Discord. Please keep your Discord name consistent with your Playhub username to make this easier.
 
-You will have three days to confirm your spot before it is forfeited to the next player.
+You will have 48 hours to confirm your spot before it is forfeited to the next player. Need more time? You can defer up to three times, a day each.
 
 **Format**
 32 Players — 5 Rounds Swiss, Best of 3 — Top 8 Cut

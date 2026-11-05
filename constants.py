@@ -21,6 +21,22 @@ SEASON_CLOSE_CHANNEL_ID = int(os.getenv("SEASON_CLOSE_CHANNEL_ID", 1557615130769
 ETB_DISCOUNT_CHANNEL_ID = int(os.getenv("ETB_DISCOUNT_CHANNEL_ID", 1255205802944233483))
 # #league-rules — the bot-owned FAQ / season / tiebreakers posts, refreshed at rollover
 LEAGUE_RULES_CHANNEL_ID = int(os.getenv("LEAGUE_RULES_CHANNEL_ID", 1253923057828102175))
+# The league category — each season's `#s##-top-32-invites` channel is created here
+INVITE_CATEGORY_ID = int(os.getenv("INVITE_CATEGORY_ID", 1253915141716578315))
+# Role that sees every invites channel, looked up by name in the server
+STAFF_ROLE_NAME = os.getenv("STAFF_ROLE_NAME", "Staff")
+
+# Invitational invites (invitational.py). Hours throughout; INVITE_TIME_SCALE=minutes
+# in the environment turns every one of them into minutes, for testing only.
+INVITE_SIZE               = 32
+INVITE_DEADLINE_HOURS     = 48
+INVITE_DEFER_HOURS        = 24   # each Defer press
+INVITE_MAX_DEFERS         = 3
+INVITE_REMINDER_HOURS     = 24   # one DM once a pending invite has this long left
+INVITE_ACCESS_GRACE_HOURS = 24   # a decliner keeps the channel this long, so staff can undo
+INVITE_LOOP_MINUTES       = 5
+INVITE_LAST_CALL_HOUR_ET  = 21   # no deadline runs past 9 PM ET the night before
+INVITE_TIME_SCALE         = os.getenv("INVITE_TIME_SCALE", "").strip().lower()
 
 # Hour (ET) at which event_digests_daily refreshes each digest, one per minute
 # thereafter in _DIGESTS order. Overridable so a dev can fire the loop without

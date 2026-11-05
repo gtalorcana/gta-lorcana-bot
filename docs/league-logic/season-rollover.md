@@ -8,12 +8,16 @@ edited in place, refreshed on every button click and daily at `DIGEST_HOUR_ET`:2
 
 | Step | Button | Ticked when |
 |---|---|---|
-| 1. Rare / Uncommon | **Record & assign roles** — previews the final leaderboard's earners first | marker `rare_uncommon`, or registry I/J carry the season — *and* every linked member holds those roles |
-| 2. Invitational | **Submit invitational URL** (opens a box → the usual ✅/❌ preview; ✅ also grants roles) or **No invitational** | marker `invitational`, or registry G/H carry the season — and the roles are on Discord |
-| 3. Rollover | **Roll over to S##** — appears only once step 1 is recorded and the next row is complete; re-validated at click time | marker `rolled_over`, or the pointer is past the season |
-| 4. Archive | **Archive S##** — after the rollover | marker `archived`, or the Archive sheet has `S## Leaderboard` |
+| 1. Invites | **Send invites** — previews the top 32 first and sends nothing until confirmed. See `docs/discord-surface/invitational-invites.md` | marker `invites_sent`; also ticked by **No invitational**, or by step 3 being recorded (invites sent outside the bot) |
+| 2. Rare / Uncommon | **Record & assign roles** — previews the final leaderboard's earners first | marker `rare_uncommon`, or registry I/J carry the season — *and* every linked member holds those roles |
+| 3. Invitational | **Submit invitational URL** (opens a box → the usual ✅/❌ preview; ✅ also grants roles) or **No invitational** | marker `invitational`, or registry G/H carry the season — and the roles are on Discord |
+| 4. Rollover | **Roll over to S##** — appears only once step 2 is recorded and the next row is complete; re-validated at click time | marker `rolled_over`, or the pointer is past the season |
+| 5. Archive | **Archive S##** — after the rollover | marker `archived`, or the Archive sheet has `S## Leaderboard` |
 
-Steps 1 and 2 show each player's progression — highest rarity before → after, e.g.
+Step 1 is done at season end; steps 2–5 are for after the invitational. That order is shown, not
+enforced — the invites read `S## Leaderboard` by name, so nothing later in the list can break them.
+
+Steps 2 and 3 show each player's progression — highest rarity before → after, e.g.
 `Common → Rare (+Uncommon)` — split into **Moving up**, **Already hold theirs** (nothing new to
 stamp) and **Not on Discord** (unlinked or left the server; their roles land on `/link`). After
 recording, "moved up" is read back from cells stamped with the season, which under
@@ -21,9 +25,9 @@ earliest-season-wins are exactly the roles first earned in it. The invitational 
 shows the same before → after per finisher.
 
 The next season's dates come **only** from the Seasons tab; the checklist links it and has a
-**Reload** button. When all four are done the message becomes a one-line `🏁 S## closed` summary
-and is never touched again. Steps can finish out of order — the invitational usually lands after
-the rollover, so the checklist stays open into the next season.
+**Reload** button. When every step is done the message becomes a one-line `🏁 S## closed` summary
+and is never touched again. Steps can finish out of order, and the checklist stays open into the
+next season if the invitational lands after the rollover.
 
 Every step checks what it *produced* — registry stamps, the season pointer, the Archive sheet —
 or a marker the step writes. State lives in one Bot State key per season, `season_close:S##`
@@ -44,9 +48,9 @@ Fill the next season's row in the **Seasons** tab — season start/end and Set C
 and check it with `/seasons`. The checklist links the tab and has a **Reload** button.
 
 > **Recording must come before rollover**, or the finished season is easy never to record. The
-> Roll over button only appears once step 1 is recorded, and is re-checked at click time.
+> Roll over button only appears once step 2 is recorded, and is re-checked at click time.
 
-## Roll over (step 3)
+## Roll over (step 4)
 
 - Re-reads the Seasons tab, so a row edited moments earlier is picked up without a restart
 - Refuses, naming the empty cells, if any of the next season's four dates are missing
@@ -61,7 +65,7 @@ and check it with `/seasons`. The checklist links the tab and has a **Reload** b
 - Warns if the outgoing season's Set Champs window is still open: the Set Champs digest and its
   sheet follow `CURRENT_SEASON` and stop refreshing the outgoing tab
 
-## Archive (step 4)
+## Archive (step 5)
 
 - Copies the season's four League tabs (`Standings`, `Events`, `Leaderboard`, `Results`) to the
   Archive spreadsheet, overwriting a tab that already exists there (safe to re-run)

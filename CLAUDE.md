@@ -162,6 +162,11 @@ via `GH_TOKEN` in `.claude/settings.local.json` (untracked; the repo is public).
   is a different UUID every set. Both arms are load-bearing and neither is safe alone;
   never date-scope the name arm, as a previous set's championships run early in a new
   season, outside the Set Champs window
+- **Invitational invites** (`invitational.py`, season-close step 1) keep each invitee in the
+  `S## Invitational` tab, written row by row with `RAW`, never as columns beside the
+  re-sorting Leaderboard. Every click and watch pass re-reads the tab under `_invite_lock`.
+  A deadline that passed before the process was watching is **extended, never declined**, so
+  an outage can't mass-decline. See `docs/discord-surface/invitational-invites.md`
 - Sheets' `addSheet` returns a bare 400 with no machine-readable reason — the only signal is
   the message text `A sheet with the name "X" already exists.` Match on that (see
   `_is_already_exists`), never on an `ALREADY_EXISTS` token; the API does not send one

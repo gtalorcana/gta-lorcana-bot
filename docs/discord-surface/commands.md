@@ -12,6 +12,7 @@
 | `/etb-post` | Admin | Post, or edit in place, the `#etb-discount` how-to (text from `discord/etb-discount.md`) with its apply button |
 | `/league-rules-post` | Admin | Post, or edit in place, the three `#league-rules` messages (text from `discord/league-rules-post.md`, season block from the current Seasons tab row). Re-reads the tab first. If any of the three is gone it deletes the rest and reposts all three, to keep their order |
 | `/season-close` | Admin | Post or refresh the season-close checklist now. Recording roles, rollover and archiving are its buttons — there are no slash commands for them |
+| `/invite-set <player> <status> [season_id]` | Admin | Set an Invitational invitee's status: record an answer from someone not on Discord, undo a decline (`pending` gives a fresh deadline and restores channel access), or free a duplicate account's spot. A decline or withdraw invites the next player. Invites themselves are sent from the season-close checklist. See `invitational-invites.md` |
 | `/tidy-registry` | Admin | Remove blank rows from the Player Registry, refresh display names from this season's sheets, and sort by rarity tier, newest season first |
 | `/where-to-play` | Admin | Manually trigger a `#where-to-play` refresh |
 | `/seasons [reload]` | Admin | Show the season calendar as the bot reads it, what each digest resolves to, and any problems with the Seasons tab. Read-only |
@@ -34,4 +35,5 @@ Admin commands are also accessible to any Discord user ID listed in `ADMIN_USER_
 | ↳ `:00` Set Champs | Season start → Set Champs end, current season | Refreshes the `S## Set Champs` tab and the digest in `#gta-set-championships` |
 | ↳ `:05` Prerelease | While any season's prerelease window has not ended (normally the incoming season) | Refreshes the digest in `#gta-prereleases`. No sheet |
 | ↳ `:10` CCQ | Always — rolling six-month lookahead, no season | Refreshes the digest in `#ccqs`. No sheet. The widest fetch the bot runs: 600 km, both countries, ~55 API pages |
+| `invitational_watch` | Every `INVITE_LOOP_MINUTES` (5); idle unless invites are open | Auto-declines past deadlines (extends instead if the bot was down), sends the one reminder DM, removes a decliner's access after 24h, invites replacements, reposts the roster if it was deleted. Closes the day after the invitational |
 | `keepalive` | Every 30 min | Heartbeat log |

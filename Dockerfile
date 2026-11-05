@@ -14,6 +14,7 @@ COPY stores.py .
 COPY clients.py .
 COPY constants.py .
 COPY season.py .
+COPY invitational.py .
 COPY util/ ./util/
 COPY scripts/ ./scripts/
 COPY discord/etb-discount.md ./discord/

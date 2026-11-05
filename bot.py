@@ -64,6 +64,8 @@ from constants import (
     CHANNELS,
     MOD_CHANNEL_ID,
     SEASON_CLOSE_CHANNEL_ID,
+    INVITE_CATEGORY_ID,
+    STAFF_ROLE_NAME,
     ETB_DISCOUNT_CHANNEL_ID,
     LEAGUE_RULES_CHANNEL_ID,
     SET_CHAMPS_CHANNEL_ID,
@@ -89,6 +91,7 @@ from constants import (
     SHOPIFY_STORE_DOMAIN,
 )
 import season
+import invitational as _inv
 from util.shopify_api_utils import ShopifyApi as _ShopifyApi
 from roles import (
     fuzzy_match_member,
@@ -119,7 +122,7 @@ class GtaLorcanaBot(commands.Bot):
     async def setup_hook(self):
         # Every button routes by custom_id, so clicks on a message posted
         # before a restart still land.
-        self.add_dynamic_items(_SeasonCloseButton, _InvitationalButton,
+        self.add_dynamic_items(_SeasonCloseButton, _InvitationalButton, _InviteButton,
                                _LinkButton, _LinkPicker, _EtbButton, _EtbApplyButton)
         if os.getenv("SYNC_COMMANDS_ONLY") == "1":
             guild = discord.Object(id=int(DISCORD_GUILD_ID))
@@ -672,6 +675,7 @@ async def on_ready():
     # Load Bot State: initialise season config and restore persisted message IDs
     loop = asyncio.get_running_loop()
     state, problems = await _reload_season(loop)
+    boot_state = state   # `state` is reused as a label further down
 
     if season.SEASON_START_DATE is None:
         print(f"  ✗ CRITICAL: Season dates not configured — season-dependent tasks will not run.")
@@ -744,6 +748,17 @@ async def on_ready():
             state = "active" if spec.active(today) else "idle"
             print(f"  ♻ {spec.label} digest scheduled for "
                   f"{_DIGEST_HOUR_ET}:{spec.minute:02d} ET ({state})")
+    # Open invitationals, so the watch loop picks their deadlines back up.
+    for key, raw in (boot_state or {}).items():
+        if key.startswith(_INVITE_PREFIX):
+            entry = _parse_season_close(raw)
+            if entry.get('sent') and not entry.get('closed'):
+                _invite_meta[key.removeprefix(_INVITE_PREFIX)] = entry
+    if not invitational_watch.is_running():
+        invitational_watch.start()
+        print(f"  ♻ Invitational watch started (every {_inv.INVITE_LOOP_MINUTES} min; "
+              f"open: {', '.join(_invite_meta) or 'none'})")
+
     if not season_close_daily.is_running():
         season_close_daily.start()
         print(f"  ♻ Season-close checklist scheduled for {_DIGEST_HOUR_ET}:20 ET")
@@ -1683,6 +1698,13 @@ def _season_close_snapshot(season_id: str) -> dict:
         except Exception as e:
             snap['errors'].append(f"{season_id} Leaderboard: {e}")
 
+    snap['invites'] = None
+    if entry.get('invites_sent') and not entry.get('invitational'):
+        try:
+            snap['invites'] = _inv.read_invites(season_id)
+        except Exception as e:
+            snap['errors'].append(f"{_inv.tab_name(season_id)}: {e}")
+
     snap['archived_tab'] = None
     if not entry.get('archived'):
         try:
@@ -1852,8 +1874,27 @@ async def _render_season_close(season_id: str, snap: dict, guild: discord.Guild,
         view.add_item(_SeasonCloseButton(season_id, action, label, style))
 
     assign_shown = False
+    inv          = entry.get('invitational')
+    stamped2     = [r for r in registry or [] if season_id in (r['legendary'], r['super_rare'])]
 
-    # ── 1. Rare / Uncommon ──────────────────────────────────────────
+    # ── 1. Invitational invites ─────────────────────────────────────
+    # First, at season end. Everything below is for after the invitational —
+    # ordered, not locked: nothing below reads what the invites write.
+    if inv == 'skipped':
+        lines.append("**1. ✅ Invites** — no invitational this season")
+    elif entry.get('invites_sent'):
+        lines.append(f"**1. ✅ Invites** — sent {_short_date(entry['invites_sent'])}"
+                     + (f": {_invite_tally(snap['invites'])}" if snap.get('invites') else "")
+                     + (f" · <#{entry['invites_channel']}>" if entry.get('invites_channel') else ""))
+    elif inv or stamped2:
+        lines.append("**1. ✅ Invites** — handled outside the bot")
+    else:
+        lines.append(f"**1. ⏳ Send invites** — previews the top {_inv.INVITE_SIZE} of the final "
+                     f"{season_id} leaderboard first; nothing is sent until you confirm.")
+        button('send_invites', "Send invites", discord.ButtonStyle.primary)
+    lines += ["", "*After the invitational:*"]
+
+    # ── 2. Rare / Uncommon ──────────────────────────────────────────
     stamped1  = [r for r in registry or [] if season_id in (r['rare'], r['uncommon'])]
     recorded1 = bool(entry.get('rare_uncommon') or stamped1)
     n1        = entry.get('rare_uncommon_n', len(stamped1))
@@ -1867,11 +1908,11 @@ async def _render_season_close(season_id: str, snap: dict, guild: discord.Guild,
         moved = len(prog1['up']) + len(prog1['off']) if prog1 else len(stamped1)
         tally = f"{moved} moved up, {max(n1 - moved, 0)} unchanged"
         if done1:
-            lines.append(f"**1. ✅ Rare / Uncommon** — recorded{when}: {tally}, roles on Discord")
+            lines.append(f"**2. ✅ Rare / Uncommon** — recorded{when}: {tally}, roles on Discord")
             if prog1:
                 lines += _progression_lines(prog1)
         else:
-            lines.append(f"**1. ⚠️ Rare / Uncommon** — recorded{when}: {tally}; "
+            lines.append(f"**2. ⚠️ Rare / Uncommon** — recorded{when}: {tally}; "
                          f"**{missing1}** role(s) still to assign")
             lines += _progression_lines(prog1, pending_only=True)
             button('assign', "Assign roles", discord.ButtonStyle.success)
@@ -1880,13 +1921,13 @@ async def _render_season_close(season_id: str, snap: dict, guild: discord.Guild,
         earners = snap['earners']
         if earners is None or registry is None:
             what = f"the `{season_id} Leaderboard`" if earners is None else "the Player Registry"
-            lines.append(f"**1. ⏳ Rare / Uncommon** — ⚠️ couldn't read {what}")
+            lines.append(f"**2. ⏳ Rare / Uncommon** — ⚠️ couldn't read {what}")
         elif not earners:
-            lines.append(f"**1. ⏳ Rare / Uncommon** — nobody earned Rare or Uncommon. "
+            lines.append(f"**2. ⏳ Rare / Uncommon** — nobody earned Rare or Uncommon. "
                          f"Approving marks {season_id} as recorded.")
         else:
             prog = _season_progression(season_id, registry, guild, ('rare', 'uncommon'), earners)
-            lines.append(f"**1. ⏳ Rare / Uncommon** — {len(earners)} player(s) earned roles "
+            lines.append(f"**2. ⏳ Rare / Uncommon** — {len(earners)} player(s) earned roles "
                          f"on the final {season_id} leaderboard")
             lines += _progression_lines(prog)
             if not prog['up'] and not prog['off']:
@@ -1895,9 +1936,7 @@ async def _render_season_close(season_id: str, snap: dict, guild: discord.Guild,
             button('record', "Record & assign roles", discord.ButtonStyle.success)
     lines.append("")
 
-    # ── 2. Invitational ─────────────────────────────────────────────
-    stamped2  = [r for r in registry or [] if season_id in (r['legendary'], r['super_rare'])]
-    inv       = entry.get('invitational')
+    # ── 3. Invitational ─────────────────────────────────────────────
     recorded2 = bool(inv or stamped2)
     prog2     = (_season_progression(season_id, registry, guild, ('legendary', 'super_rare'))
                  if registry is not None and recorded2 and inv != 'skipped' else None)
@@ -1905,24 +1944,24 @@ async def _render_season_close(season_id: str, snap: dict, guild: discord.Guild,
     done2     = recorded2 and missing2 == 0
 
     if inv == 'skipped':
-        lines.append("**2. ✅ Invitational** — skipped")
+        lines.append("**3. ✅ Invitational** — skipped")
     elif recorded2:
         n2    = entry.get('invitational_n', len(stamped2))
         when  = f" {_short_date(inv)}" if inv else ""
         moved = len(prog2['up']) + len(prog2['off']) if prog2 else len(stamped2)
         tally = f"{moved} moved up, {max(n2 - moved, 0)} unchanged"
         if done2:
-            lines.append(f"**2. ✅ Invitational** — recorded{when}: {tally}, roles on Discord")
+            lines.append(f"**3. ✅ Invitational** — recorded{when}: {tally}, roles on Discord")
             if prog2:
                 lines += _progression_lines(prog2)
         else:
-            lines.append(f"**2. ⚠️ Invitational** — recorded{when}: {tally}; "
+            lines.append(f"**3. ⚠️ Invitational** — recorded{when}: {tally}; "
                          f"**{missing2}** role(s) still to assign")
             lines += _progression_lines(prog2, pending_only=True)
             if not assign_shown:
                 button('assign', "Assign roles", discord.ButtonStyle.success)
     else:
-        lines.append(f"**2. ⏳ Invitational** — waiting for the {season_id} invitational. "
+        lines.append(f"**3. ⏳ Invitational** — waiting for the {season_id} invitational. "
                      f"Submit its RPH link once it's finished; it doesn't block the rollover.")
         button('invite', "Submit invitational URL", discord.ButtonStyle.primary)
         button('skip_invite', "No invitational")
@@ -1937,7 +1976,7 @@ async def _render_season_close(season_id: str, snap: dict, guild: discord.Guild,
     if rolled:
         to   = entry.get('rolled_to') or season.CURRENT_SEASON
         when = f" on {_short_date(entry['rolled_over'])}" if entry.get('rolled_over') else ""
-        lines.append(f"**3. ✅ Rolled over to {to}**{when}")
+        lines.append(f"**4. ✅ Rolled over to {to}**{when}")
     else:
         def row_lines() -> list[str]:
             """The next season's row, with each unusable date marked blank or ignored.
@@ -1958,16 +1997,16 @@ async def _render_season_close(season_id: str, snap: dict, guild: discord.Guild,
                      f"Set Champs {d('set_champs_start')} → {d('set_champs_end')}"]
                     + [f"⚠️ {w[0].upper()}{w[1:]}" for w in why])
         if season.CURRENT_SEASON != season_id:
-            lines.append(f"**3. ⚠️ Roll over to {nxt}** — the current season is "
+            lines.append(f"**4. ⚠️ Roll over to {nxt}** — the current season is "
                          f"{season.CURRENT_SEASON}, not {season_id}; nothing to roll over from here.")
         elif not recorded1:
-            lines.append(f"**3. 🔒 Roll over to {nxt}{nname}** — needs step 1 first.")
+            lines.append(f"**4. 🔒 Roll over to {nxt}{nname}** — needs step 2 first.")
             lines.extend(row_lines())
         else:
             plan, err = await _plan_rollover(loop, nxt)
             if plan:
                 r = plan.resolved
-                lines.append(f"**3. ⏳ Roll over to {nxt}{nname}** — ready")
+                lines.append(f"**4. ⏳ Roll over to {nxt}{nname}** — ready")
                 lines.append(f"Pointer: {season_id} → {nxt}")
                 lines.append(f"Season: {_short_date(r['season_start'])} → {_short_date(r['season_end'])}"
                              f" · Set Champs: {_short_date(r['set_champs_start'])} → "
@@ -1976,7 +2015,7 @@ async def _render_season_close(season_id: str, snap: dict, guild: discord.Guild,
                 lines.extend(plan.warnings)
                 button('rollover', f"Roll over to {nxt}", discord.ButtonStyle.danger)
             else:
-                lines.append(f"**3. ⏳ Roll over to {nxt}{nname}** — not ready")
+                lines.append(f"**4. ⏳ Roll over to {nxt}{nname}** — not ready")
                 lines.extend(row_lines())   # after _plan_rollover's reload, so it is current
                 lines.append("Fix the row in the Seasons tab, then press **Reload**.")
         view.add_item(discord.ui.Button(
@@ -1989,11 +2028,11 @@ async def _render_season_close(season_id: str, snap: dict, guild: discord.Guild,
     archived = entry.get('archived') or (_now_et().date().isoformat() if snap['archived_tab'] else None)
     if archived:
         when = f" on {_short_date(entry['archived'])}" if entry.get('archived') else ""
-        lines.append(f"**4. ✅ Archived {season_id}**{when}")
+        lines.append(f"**5. ✅ Archived {season_id}**{when}")
     elif not rolled:
-        lines.append(f"**4. 🔒 Archive {season_id}** — unlocks after the rollover")
+        lines.append(f"**5. 🔒 Archive {season_id}** — unlocks after the rollover")
     else:
-        lines.append(f"**4. ⏳ Archive {season_id}** — copies the {season_id} tabs to the Archive sheet")
+        lines.append(f"**5. ⏳ Archive {season_id}** — copies the {season_id} tabs to the Archive sheet")
         button('archive', f"Archive {season_id}", discord.ButtonStyle.success)
 
     if snap['errors']:
@@ -2240,6 +2279,9 @@ async def _season_close_action(interaction: discord.Interaction, season_id: str,
     if action == 'invite':
         await interaction.response.send_modal(_InvitationalUrlModal(season_id))
         return
+    if action == 'send_invites':
+        await _invite_preview(interaction, season_id)
+        return
     handler = _SEASON_CLOSE_ACTIONS.get(action)
     if not handler:
         await interaction.response.send_message(f"⚠️ Unknown action `{action}`.", ephemeral=True)
@@ -2262,6 +2304,670 @@ async def _season_close_action(interaction: discord.Interaction, season_id: str,
     finally:
         _season_close_busy.discard(season_id)
     await interaction.followup.send(reply[:1990], ephemeral=True)
+
+
+# ═══════════════════════════════════════════════════════════════
+# INVITATIONAL INVITES (#3)
+# ═══════════════════════════════════════════════════════════════
+#
+# Step 1 of the season-close checklist. The rules and the sheet live in
+# invitational.py; this is the Discord side. Send invites previews the top 32
+# privately and sends nothing until confirmed. Confirming:
+#   1. creates `#s##-top-32-invites` in the league category (staff, the bot and
+#      each invitee by per-member overwrite — no per-season role)
+#   2. snapshots the invitees into the `S## Invitational` tab
+#   3. posts one message mentioning them, and the roster, pinned and edited in place
+#
+# Nothing pending is held in memory. Each click reads its row from the tab, the
+# panel's buttons carry the row's token so a stale panel refuses, and
+# _invite_lock serialises every change — two declines must not both invite the
+# same replacement. Bot State `invitational:S##` holds channel_id,
+# roster_msg_id, sent and closed. The live set of seasons is cached here only to
+# keep the loop idle when nothing is open.
+
+_INVITE_PREFIX = "invitational:"
+_invite_lock   = asyncio.Lock()
+_invite_meta: dict[str, dict] = {}            # open seasons → Bot State record
+_invite_last_ok: datetime | None = None       # last successful watch pass
+_BOT_STARTED_AT = datetime.now(timezone.utc)
+_NO_PINGS = discord.AllowedMentions.none()
+
+_INVITE_ICON = {'accepted': '✅', 'pending': '⏳', 'deferred': '🕓'}
+
+
+def _invite_key(season_id: str) -> str:
+    return f"{_INVITE_PREFIX}{season_id}"
+
+
+def _ts(dt: datetime, style: str = 'R') -> str:
+    return f"<t:{int(dt.timestamp())}:{style}>"
+
+
+async def _invite_mark(season_id: str, **fields) -> dict:
+    """Merge fields into the season's Bot State record and the cache. Raises on
+    failure: a record that didn't save means a channel or roster posted twice."""
+    loop = asyncio.get_running_loop()
+
+    def _write():
+        state = load_bot_state(strict=True)   # read-then-write — see set_bot_state_key
+        entry = _parse_season_close(state.get(_invite_key(season_id), ''))
+        entry.update(fields)
+        state[_invite_key(season_id)] = json.dumps(entry, separators=(',', ':'))
+        save_bot_state(state)
+        if load_bot_state(strict=True).get(_invite_key(season_id)) != state[_invite_key(season_id)]:
+            raise RuntimeError("Bot State write did not persist")
+        return entry
+
+    async with _season_close_lock:
+        entry = await loop.run_in_executor(None, _write)
+    if entry.get('closed'):
+        _invite_meta.pop(season_id, None)
+    else:
+        _invite_meta[season_id] = entry
+    return entry
+
+
+def _invitational_date(season_id: str) -> str | None:
+    return (season.get_season(season_id) or {}).get('invitational_date')
+
+
+def _invite_tally(invites: list) -> str:
+    n = lambda *s: sum(i.status in s for i in invites)
+    return (f"{n('accepted')} accepted · {n('pending', 'deferred')} waiting · "
+            f"{n('declined', 'withdrawn')} declined")
+
+
+def _invite_rows(guild: discord.Guild, picks: list[tuple[int, str, str]], registry: list[dict],
+                 first_row: int, now: datetime, inv_date: str | None) -> list:
+    """Invite rows for leaderboard picks, matched to Discord by Playhub ID (name only
+    for a pre-S12 row with no ID). Only a member still in the server gets a Discord
+    ID; anyone else is a qualifier staff reach by hand."""
+    by_id   = {r['playhub_id']: r for r in registry if r['playhub_id']}
+    by_name = {r['playhub_name'].lower(): r for r in registry if not r['playhub_id']}
+    out = []
+    for i, (rank, pid, name) in enumerate(picks):
+        reg = by_id.get(pid) if pid else None
+        reg = reg or by_name.get(name.lower())
+        did = reg['discord_id'] if reg and reg['discord_id'] else None
+        note = ''
+        if did and not guild.get_member(did):
+            note, did = f"linked to {did}, not in the server", None
+        out.append(_inv.Invite(
+            row=first_row + i, rank=rank, playhub_id=pid, name=name, discord_id=did,
+            deadline=_inv.first_deadline(now, inv_date) if did else None,
+            invited=now, note=note))
+    return out
+
+
+def _invite_roster(season_id: str, invites: list) -> discord.Embed:
+    """The live roster: every holder by rank, decliners on one line, then the
+    qualifiers staff must reach. An embed, so its mentions never ping."""
+    inv_date = _invitational_date(season_id)
+    holding  = [i for i in invites if i.status in _inv.HOLDING]
+    lines    = [f"**{_invite_tally(invites)}** · {len(holding)}/{_inv.INVITE_SIZE} spots", ""]
+    for i in holding:
+        if not i.on_discord:
+            continue
+        who  = f"<@{i.discord_id}> · {i.name}"
+        line = f"`{i.rank:>2}` {_INVITE_ICON[i.status]} {who}"
+        if i.status in _inv.OPEN and i.deadline:
+            line += f" — {_ts(i.deadline)}"
+            if i.defers:
+                line += f" (deferred ×{i.defers})"
+        if i.reminded == 'failed':
+            line += " · ⚠️ DM failed"
+        lines.append(line)
+
+    gone = [i for i in invites if i.status in _inv.GONE]
+    if gone:
+        lines += ["", "❌ **Declined:** " + ", ".join(f"{i.name} (#{i.rank})" for i in gone)]
+
+    off = [i for i in holding if not i.on_discord]
+    if off:
+        lines += ["", "📋 **Not on Discord** — staff, reach them and record with `/invite-set`:"]
+        lines += [f"`{i.rank:>2}` {_INVITE_ICON[i.status]} {i.name}" for i in off]
+
+    lines += ["", f"Press **My invite** to accept, decline or defer. You have "
+                  f"{_inv.INVITE_DEADLINE_HOURS} hours; each defer adds "
+                  f"{_inv.INVITE_DEFER_HOURS} (up to {_inv.INVITE_MAX_DEFERS})."]
+    when = _long_date(inv_date, weekday=True)
+    venue = (season.get_season(season_id) or {}).get('invitational_venue')
+    title = f"🏆 {season_id} Invitational — Top {_inv.INVITE_SIZE}"
+    if when:
+        lines.append(f"📅 {when} at {_INVITATIONAL_TIME}" + (f" · {venue}" if venue else ""))
+    return make_embed(title=title, description="\n".join(lines)[:4096],
+                      colour=discord.Colour.gold())
+
+
+def _invite_roster_view(season_id: str) -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    view.add_item(_InviteButton(season_id))
+    return view
+
+
+async def _invite_channel(guild: discord.Guild, season_id: str):
+    """The season's invites channel, created on first use. Looks it up by the saved
+    ID, then by name, so a retry after a failed send never makes a second one."""
+    meta = _invite_meta.get(season_id, {})
+    if meta.get('channel_id') and (ch := guild.get_channel(int(meta['channel_id']))):
+        return ch
+    name = f"{season_id.lower()}-top-{_inv.INVITE_SIZE}-invites"
+    ch = discord.utils.get(guild.text_channels, name=name)
+    if ch is None:
+        staff = discord.utils.get(guild.roles, name=STAFF_ROLE_NAME)
+        see   = discord.PermissionOverwrite(view_channel=True, send_messages=True,
+                                            read_message_history=True)
+        overwrites = {guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                      guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True,
+                                                            embed_links=True,
+                                                            read_message_history=True)}
+        if staff:
+            overwrites[staff] = see
+        ch = await guild.create_text_channel(
+            name, category=guild.get_channel(INVITE_CATEGORY_ID), overwrites=overwrites,
+            topic=f"{season_id} Invitational invites — press My invite on the pinned roster.",
+            reason=f"{season_id} Invitational invites")
+    if meta.get('channel_id') != str(ch.id):
+        await _invite_mark(season_id, channel_id=str(ch.id))
+    return ch
+
+
+async def _invite_grant(ch, guild: discord.Guild, inv) -> None:
+    member = guild.get_member(inv.discord_id) if inv.discord_id else None
+    if member:
+        await ch.set_permissions(member, view_channel=True, send_messages=True,
+                                 read_message_history=True,
+                                 reason=f"Invited to the Invitational (#{inv.rank})")
+
+
+async def _invite_revoke(ch, inv) -> None:
+    """By raw ID, so a member who has left the server is handled too."""
+    try:
+        await bot.http.delete_channel_permissions(ch.id, inv.discord_id,
+                                                  reason="Declined the Invitational")
+    except discord.NotFound:
+        pass
+
+
+async def _invite_write(season_id: str, rows: list) -> None:
+    loop = asyncio.get_running_loop()
+    async with _sheet_lock:
+        for inv in rows:
+            await loop.run_in_executor(None, _inv.write_invite, season_id, inv)
+
+
+async def _invite_refresh_roster(guild: discord.Guild, season_id: str, invites: list,
+                                 repost_only: bool = False) -> None:
+    """Edit the roster in place, or post and pin a new one if it's gone.
+    repost_only: just make sure it exists (the watch loop's check)."""
+    ch = await _invite_channel(guild, season_id)
+    meta = _invite_meta.get(season_id, {})
+    embed, view = _invite_roster(season_id, invites), _invite_roster_view(season_id)
+    if meta.get('roster_msg_id'):
+        try:
+            msg = await ch.fetch_message(int(meta['roster_msg_id']))
+            if not repost_only:
+                await msg.edit(embed=embed, view=view, allowed_mentions=_NO_PINGS)
+            return
+        except discord.NotFound:
+            print(f"  ⚠ invites {season_id}: roster message is gone — reposting")
+    msg = await ch.send(embed=embed, view=view, allowed_mentions=_NO_PINGS)
+    try:
+        await msg.pin(reason="Invitational roster")
+    except discord.HTTPException as e:
+        print(f"  ⚠ invites {season_id}: couldn't pin the roster ({e}) — needs Pin Messages")
+    await _invite_mark(season_id, roster_msg_id=str(msg.id))
+
+
+async def _invite_fill(guild: discord.Guild, season_id: str, invites: list,
+                       now: datetime) -> list:
+    """Invite the next leaderboard player into every open spot. Caller holds
+    _invite_lock. Returns the new rows (already appended to invites)."""
+    need = _inv.open_spots(invites)
+    inv_date = _invitational_date(season_id)
+    if not need or not _inv.can_invite(now, inv_date):
+        return []
+    loop = asyncio.get_running_loop()
+    leaderboard = await loop.run_in_executor(None, _inv.read_leaderboard, season_id)
+    picks = _inv.next_candidates(invites, leaderboard, need)
+    if not picks:
+        return []
+    registry = await loop.run_in_executor(None, get_player_registry)
+    first = max((i.row for i in invites), default=1) + 1
+    new = _invite_rows(guild, picks, registry, first, now, inv_date)
+    await _invite_write(season_id, new)
+    invites.extend(new)
+
+    ch = await _invite_channel(guild, season_id)
+    for inv in new:
+        if inv.on_discord:
+            await _invite_grant(ch, guild, inv)
+            await ch.send(
+                f"🏆 <@{inv.discord_id}>, a spot opened up in the **{season_id} Invitational** "
+                f"and it's yours (#{inv.rank} on the leaderboard)! Press **My invite** on the "
+                f"pinned roster by {_ts(inv.deadline, 'F')} to accept or decline.",
+                allowed_mentions=discord.AllowedMentions(users=[discord.Object(inv.discord_id)]))
+        else:
+            sc = guild.get_channel(SEASON_CLOSE_CHANNEL_ID)
+            if sc:
+                await sc.send(f"📋 {season_id} invites: next up is **{inv.name}** (#{inv.rank}), "
+                              f"who isn't on Discord{f' ({inv.note})' if inv.note else ''}. "
+                              f"Reach them and record the answer with `/invite-set`.")
+    return new
+
+
+# ── Send invites (checklist step 1) ─────────────────────────────────
+
+async def _invite_preview(interaction: discord.Interaction, season_id: str) -> None:
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    guild, loop = interaction.guild, asyncio.get_running_loop()
+    try:
+        leaderboard = await loop.run_in_executor(None, _inv.read_leaderboard, season_id)
+        registry    = await loop.run_in_executor(None, get_player_registry)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Couldn't read the sheets: `{e}`", ephemeral=True)
+        return
+    if not leaderboard:
+        await interaction.followup.send(f"❌ `{season_id} Leaderboard` is empty.", ephemeral=True)
+        return
+
+    now  = datetime.now(timezone.utc)
+    rows = _invite_rows(guild, leaderboard[:_inv.INVITE_SIZE], registry, 2, now,
+                        _invitational_date(season_id))
+    lines = []
+    for r in rows:
+        who = f"<@{r.discord_id}>" if r.on_discord else f"— not on Discord{f' ({r.note})' if r.note else ''}"
+        lines.append(f"`{r.rank:>2}` {r.name} {who}")
+
+    warnings = []
+    dids = [r.discord_id for r in rows if r.discord_id]
+    for did in {d for d in dids if dids.count(d) > 1}:
+        ranks = ", ".join(f"#{r.rank}" for r in rows if r.discord_id == did)
+        warnings.append(f"<@{did}> holds {ranks} (two Playhub accounts). After sending, "
+                        f"decline the extra one with `/invite-set` to free the spot.")
+    perms = guild.me.guild_permissions
+    missing = [p for p, ok in (("Manage Channels", perms.manage_channels),
+                               ("Manage Roles", perms.manage_roles),
+                               ("Pin Messages", perms.manage_messages
+                                or getattr(perms, 'pin_messages', False))) if not ok]
+    if missing:
+        warnings.append(f"The bot is missing **{', '.join(missing)}** — sending will fail. "
+                        f"Server Settings → Roles → GTA Lorcana Bot.")
+    if not discord.utils.get(guild.roles, name=STAFF_ROLE_NAME):
+        warnings.append(f"No **@{STAFF_ROLE_NAME}** role found — staff won't see the channel.")
+    if not guild.get_channel(INVITE_CATEGORY_ID):
+        warnings.append(f"League category `{INVITE_CATEGORY_ID}` not found — the channel will "
+                        f"be created outside any category.")
+    if not _invitational_date(season_id):
+        warnings.append(f"No invitational date in the Seasons tab for {season_id} — replacements "
+                        f"won't stop the day before.")
+
+    off = sum(not r.on_discord for r in rows)
+    desc = "\n".join(lines)
+    if warnings:
+        desc += "\n\n" + "\n".join(f"⚠️ {w}" for w in warnings)
+    desc += (f"\n\n**Send** creates the channel and mentions the {len(rows) - off} on Discord. "
+             f"{off} not on Discord are listed on the roster for staff.")
+    embed = make_embed(title=f"Preview — {season_id} Invitational invites",
+                       description=desc[:4096], colour=discord.Colour.blurple())
+    await interaction.followup.send(embed=embed, ephemeral=True,
+                                    view=_InviteSendView(interaction.user.id, season_id))
+
+
+class _InviteSendView(discord.ui.View):
+    """Send/Cancel under the preview. In-memory like _LinkConfirmView: it hangs off
+    the admin's own ephemeral reply, and after a restart they press Send invites again."""
+
+    def __init__(self, admin_id: int, season_id: str):
+        super().__init__(timeout=900)
+        self.admin_id, self.season_id = admin_id, season_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.admin_id
+
+    @discord.ui.button(label="Send invites", style=discord.ButtonStyle.success)
+    async def send(self, interaction: discord.Interaction, _b: discord.ui.Button):
+        self.stop()
+        await interaction.response.edit_message(content="⏳ Sending…", embed=None, view=None)
+        try:
+            reply = await _send_invites(interaction.guild, self.season_id)
+        except Exception as e:
+            print(f"  ✗ invites {self.season_id}: send failed:\n{traceback.format_exc()}")
+            reply = (f"❌ Sending failed: `{type(e).__name__}: {e}`\nPress **Send invites** "
+                     f"again once it's fixed — it picks up where it stopped.")
+        await interaction.edit_original_response(content=reply[:1990])
+        await _refresh_season_close_quietly(self.season_id)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, _b: discord.ui.Button):
+        self.stop()
+        await interaction.response.edit_message(content="✖ Nothing sent.", embed=None, view=None)
+
+
+async def _send_invites(guild: discord.Guild, season_id: str) -> str:
+    """Create the channel, snapshot the tab, mention the invitees, post the roster.
+    Each step is safe to repeat, so a retry after a failure resumes."""
+    from googleapiclient.errors import HttpError as _HttpError
+    from stores import _is_already_exists
+    loop = asyncio.get_running_loop()
+    async with _invite_lock:
+        meta = await loop.run_in_executor(
+            None, lambda: _parse_season_close(load_bot_state(strict=True).get(_invite_key(season_id), '')))
+        _invite_meta[season_id] = meta
+        if meta.get('sent'):
+            return f"ℹ️ {season_id} invites already went out on {_short_date(meta['sent'])}."
+
+        now = datetime.now(timezone.utc)
+        leaderboard = await loop.run_in_executor(None, _inv.read_leaderboard, season_id)
+        registry    = await loop.run_in_executor(None, get_player_registry)
+        invites = _invite_rows(guild, leaderboard[:_inv.INVITE_SIZE], registry, 2, now,
+                               _invitational_date(season_id))
+        if not invites:
+            return f"❌ `{season_id} Leaderboard` is empty — nothing sent."
+
+        ch = await _invite_channel(guild, season_id)
+        try:
+            async with _sheet_lock:
+                await loop.run_in_executor(None, _inv.create_tab, season_id, invites)
+        except _HttpError as e:
+            if not _is_already_exists(e):
+                raise
+            # A retry: the snapshot that's already there is the one people were told about.
+            invites = await loop.run_in_executor(None, _inv.read_invites, season_id)
+
+        for inv in invites:
+            if inv.on_discord and inv.status in _inv.HOLDING:
+                await _invite_grant(ch, guild, inv)
+
+        on = [i for i in invites if i.on_discord and i.status in _inv.OPEN]
+        deadline = min((i.deadline for i in on if i.deadline), default=None)
+        row = season.get_season(season_id) or {}
+        when = _long_date(row.get('invitational_date'), weekday=True)
+        text = (f"🏆 **{season_id} Invitational — you finished in the top {_inv.INVITE_SIZE}!**\n"
+                + " ".join(f"<@{i.discord_id}>" for i in on) + "\n\n"
+                + (f"📅 {when} at {_INVITATIONAL_TIME}"
+                   + (f" · {row['invitational_venue']}" if row.get('invitational_venue') else "")
+                   + "\n" if when else "")
+                + f"Press **My invite** on the pinned roster to accept or decline"
+                + (f" by {_ts(deadline, 'F')}" if deadline else "")
+                + f". Need more time? **Defer** adds {_inv.INVITE_DEFER_HOURS} hours, up to "
+                  f"{_inv.INVITE_MAX_DEFERS} times. A declined spot goes straight to the next "
+                  f"player on the leaderboard.")
+        if not meta.get('announced'):     # a resumed send must not ping all 32 again
+            msg = await ch.send(text[:2000], allowed_mentions=discord.AllowedMentions(
+                users=[discord.Object(i.discord_id) for i in on]))
+            await _invite_mark(season_id, announced=str(msg.id))
+        await _invite_refresh_roster(guild, season_id, invites)
+        await _invite_mark(season_id, sent=now.date().isoformat())
+
+    await _season_close_mark(season_id, invites_sent=_now_et().date().isoformat(),
+                             invites_channel=str(ch.id))
+    off = sum(not i.on_discord for i in invites)
+    return (f"✅ Invites sent in {ch.mention}: {len(on)} mentioned"
+            + (f", {off} not on Discord (listed on the roster)." if off else "."))
+
+
+# ── My invite (players) ─────────────────────────────────────────────
+
+class _InviteButton(discord.ui.DynamicItem[discord.ui.Button],
+                    template=r'inv:(?P<season>S\d+):open'):
+    """The roster's one button. Opens a private panel for whoever pressed it."""
+
+    def __init__(self, season_id: str):
+        super().__init__(discord.ui.Button(label="My invite", emoji="✉️",
+                                           style=discord.ButtonStyle.primary,
+                                           custom_id=f"inv:{season_id}:open"))
+        self.season_id = season_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match: re.Match, /):
+        return cls(match['season'])
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        content, view = await _invite_panel(interaction.user.id, self.season_id)
+        await interaction.followup.send(content, view=view, ephemeral=True,
+                                        allowed_mentions=_NO_PINGS)
+
+
+def _invite_find(invites: list, user_id: int):
+    """The member's row — an open one first, should they hold two (two accounts)."""
+    mine = [i for i in invites if i.discord_id == user_id]
+    return next((i for i in mine if i.status in _inv.OPEN), None) or (mine[0] if mine else None)
+
+
+async def _invite_panel(user_id: int, season_id: str) -> tuple[str, discord.ui.View | None]:
+    loop = asyncio.get_running_loop()
+    try:
+        invites = await loop.run_in_executor(None, _inv.read_invites, season_id)
+    except Exception as e:
+        return f"⚠️ Couldn't read the invite list right now — try again in a minute. (`{e}`)", None
+    inv = _invite_find(invites, user_id)
+    if not inv:
+        return f"You're not on the {season_id} Invitational invite list.", None
+
+    view = _InvitePanelView(season_id, inv.playhub_id, inv.token())
+    if inv.status in _inv.OPEN:
+        new = _inv.defer_deadline(inv, _invitational_date(season_id))
+        left = _inv.INVITE_MAX_DEFERS - inv.defers
+        text = (f"**{season_id} Invitational** — you're #{inv.rank}.\n"
+                f"Answer by {_ts(inv.deadline, 'F')} ({_ts(inv.deadline)})."
+                if inv.deadline else f"**{season_id} Invitational** — you're #{inv.rank}.")
+        view.add('accept', "Accept", discord.ButtonStyle.success)
+        if new:
+            view.add('defer', f"Defer +{_inv.INVITE_DEFER_HOURS}h ({left} left)",
+                     discord.ButtonStyle.secondary)
+        view.add('decline', "Decline", discord.ButtonStyle.danger)
+        return text, view
+    if inv.status == 'accepted':
+        view.add('withdraw', "Withdraw", discord.ButtonStyle.danger)
+        return (f"✅ You've accepted your spot (#{inv.rank}) in the {season_id} Invitational. "
+                f"Can't make it after all? Withdraw so the next player gets it."), view
+    return (f"You {inv.status} your {season_id} Invitational spot. If that was a mistake, "
+            f"message <@{ADMIN_USER_IDS[0]}>."), None
+
+
+class _InvitePanelView(discord.ui.View):
+    """The private panel. Short-lived: pressing My invite again makes a fresh one.
+    Decline and Withdraw ask once more, since the spot goes at once."""
+
+    def __init__(self, season_id: str, playhub_id: str, token: str):
+        super().__init__(timeout=900)
+        self.season_id, self.playhub_id, self.token = season_id, playhub_id, token
+
+    def add(self, action: str, label: str, style: discord.ButtonStyle) -> None:
+        button = discord.ui.Button(label=label, style=style)
+
+        async def cb(interaction: discord.Interaction):
+            if action in ('decline', 'withdraw'):
+                confirm = _InvitePanelView(self.season_id, self.playhub_id, self.token)
+                confirm.add(f"{action}_yes", f"Yes, {action}", discord.ButtonStyle.danger)
+                confirm.add('back', "Back", discord.ButtonStyle.secondary)
+                await interaction.response.edit_message(
+                    content=("Are you sure? Your spot goes to the next player on the "
+                             "leaderboard right away."), view=confirm)
+                return
+            if action == 'back':
+                content, view = await _invite_panel(interaction.user.id, self.season_id)
+                await interaction.response.edit_message(content=content, view=view)
+                return
+            await interaction.response.edit_message(content="⏳ Saving…", view=None)
+            reply = await _invite_act(interaction, self.season_id, self.playhub_id,
+                                      self.token, action.removesuffix('_yes'))
+            await interaction.edit_original_response(content=reply)
+
+        button.callback = cb
+        self.add_item(button)
+
+
+async def _invite_act(interaction: discord.Interaction, season_id: str, playhub_id: str,
+                      token: str, action: str) -> str:
+    loop = asyncio.get_running_loop()
+    try:
+        async with _invite_lock:
+            invites = await loop.run_in_executor(None, _inv.read_invites, season_id)
+            inv = next((i for i in invites if i.playhub_id == playhub_id), None)
+            if not inv or inv.discord_id != interaction.user.id:
+                return "⚠️ That isn't your invite."
+            if inv.token() != token:
+                return "⚠️ Your invite changed since you opened this — press **My invite** again."
+            now = datetime.now(timezone.utc)
+            if action == 'accept' and inv.status in _inv.OPEN:
+                inv.status, inv.responded = 'accepted', now
+                reply = f"✅ You're in! See you at the {season_id} Invitational."
+            elif action == 'defer' and (new := _inv.defer_deadline(inv, _invitational_date(season_id))):
+                inv.status, inv.deadline, inv.defers = 'deferred', new, inv.defers + 1
+                inv.reminded = ''          # a fresh day, so a fresh reminder
+                reply = f"🕓 Deferred — your new deadline is {_ts(new, 'F')}."
+            elif action == 'decline' and inv.status in _inv.OPEN:
+                inv.status, inv.responded = 'declined', now
+                reply = "Declined — thanks for letting us know. Your spot goes to the next player."
+            elif action == 'withdraw' and inv.status == 'accepted':
+                inv.status, inv.responded = 'withdrawn', now
+                reply = "Withdrawn — thanks for letting us know. Your spot goes to the next player."
+            else:
+                return "⚠️ That can't be done any more — press **My invite** again."
+            await _invite_write(season_id, [inv])
+            if inv.status in _inv.GONE:
+                await _invite_fill(interaction.guild, season_id, invites, now)
+            await _invite_refresh_roster(interaction.guild, season_id, invites)
+        return reply
+    except Exception as e:
+        print(f"  ✗ invites {season_id}: {action} failed:\n{traceback.format_exc()}")
+        return f"❌ Something went wrong saving that — please try again. (`{type(e).__name__}`)"
+
+
+# ── Watch loop ──────────────────────────────────────────────────────
+
+@tasks.loop(minutes=_inv.INVITE_LOOP_MINUTES)
+async def invitational_watch():
+    """Deadlines, the reminder DM, access removal and replacements for every open
+    invitational. Idle when none is open. Never raises — an exception escaping a
+    tasks.loop body stops the loop until the next restart."""
+    global _invite_last_ok
+    if not _invite_meta:
+        return
+    guild = bot.get_guild(int(DISCORD_GUILD_ID)) or (bot.guilds[0] if bot.guilds else None)
+    if not guild:
+        return
+    ok = True
+    for season_id in list(_invite_meta):
+        if not _invite_meta[season_id].get('sent'):
+            continue   # a send that failed partway — pressing Send invites again resumes it
+        try:
+            await _invite_tick(guild, season_id)
+        except Exception:
+            ok = False
+            print(f"  ✗ invites {season_id}: watch pass failed:\n{traceback.format_exc()}")
+    if ok:
+        _invite_last_ok = datetime.now(timezone.utc)
+
+
+async def _invite_tick(guild: discord.Guild, season_id: str) -> None:
+    loop, now = asyncio.get_running_loop(), datetime.now(timezone.utc)
+    inv_date = _invitational_date(season_id)
+    if inv_date and _now_et().date() > date.fromisoformat(inv_date):
+        await _invite_mark(season_id, closed=_now_et().date().isoformat())
+        print(f"  ✓ invites {season_id}: the invitational has passed — watch closed")
+        return
+
+    async with _invite_lock:
+        invites = await loop.run_in_executor(None, _inv.read_invites, season_id)
+        plan = _inv.plan_tick(invites, now, _invite_last_ok or _BOT_STARTED_AT, inv_date)
+        ch = await _invite_channel(guild, season_id)
+
+        for inv in plan.remind:
+            user = guild.get_member(inv.discord_id)
+            inv.reminded = 'failed'
+            if user:
+                try:
+                    await user.send(
+                        f"⏳ Reminder: your **{season_id} Invitational** spot (#{inv.rank}) needs "
+                        f"an answer by {_ts(inv.deadline, 'F')}. Press **My invite** in {ch.mention}.")
+                    inv.reminded = _inv.iso(now)
+                except discord.HTTPException:   # DMs closed — shown on the roster
+                    pass
+        for inv in plan.revoke:
+            await _invite_revoke(ch, inv)
+            inv.access_removed = now
+
+        touched = plan.changed + plan.remind + plan.revoke
+        if touched:
+            await _invite_write(season_id, list({i.row: i for i in touched}.values()))
+        new = await _invite_fill(guild, season_id, invites, now)
+        for inv in plan.declined:
+            print(f"  ✓ invites {season_id}: auto-declined #{inv.rank} {inv.name}")
+        for inv in plan.extended:
+            print(f"  ⚠ invites {season_id}: #{inv.rank} {inv.name}'s deadline passed while the "
+                  f"bot was down — extended to {inv.deadline:%b %d %H:%M} UTC")
+        await _invite_refresh_roster(guild, season_id, invites,
+                                     repost_only=not (plan.changed or new or
+                                                      any(i.reminded == 'failed' for i in plan.remind)))
+
+
+# ── /invite-set (staff) ─────────────────────────────────────────────
+
+@tree.command(name="invite-set", description="Set an Invitational invitee's status (admins only)")
+@app_commands.choices(status=[app_commands.Choice(name=s, value=s)
+                              for s in ('accepted', 'declined', 'withdrawn', 'pending')])
+@app_commands.describe(player="Playhub ID, name, or @mention",
+                       status="pending gives a fresh deadline and restores channel access",
+                       season_id="Defaults to the open invitational, e.g. S14")
+async def invite_set_command(interaction: discord.Interaction, player: str,
+                               status: app_commands.Choice[str], season_id: str | None = None):
+    if not _is_admin(interaction):
+        await interaction.response.send_message("❌ Admins only.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    sid = (season_id or '').strip().upper()
+    if not sid:
+        if len(_invite_meta) != 1:
+            await interaction.followup.send(
+                "⚠️ " + ("No invitational is open — pass `season_id`." if not _invite_meta else
+                         f"More than one is open ({', '.join(_invite_meta)}) — pass `season_id`."),
+                ephemeral=True)
+            return
+        sid = next(iter(_invite_meta))
+
+    loop, guild, now = asyncio.get_running_loop(), interaction.guild, datetime.now(timezone.utc)
+    try:
+        async with _invite_lock:
+            invites = await loop.run_in_executor(None, _inv.read_invites, sid)
+            key = player.strip()
+            m = re.fullmatch(r'<@!?(\d+)>', key)
+            inv = (_invite_find(invites, int(m[1])) if m else
+                   next((i for i in invites if i.playhub_id == key), None) or
+                   next((i for i in invites if i.name.lower() == key.lower()), None))
+            if not inv:
+                await interaction.followup.send(f"⚠️ **{key}** isn't in `{_inv.tab_name(sid)}`.",
+                                                ephemeral=True)
+                return
+            was, s = inv.status, status.value
+            inv.status = s
+            if s == 'pending':
+                inv.responded, inv.defers, inv.reminded = None, 0, ''
+                inv.deadline = _inv.first_deadline(now, _invitational_date(sid)) if inv.on_discord else None
+                if inv.on_discord:
+                    await _invite_grant(await _invite_channel(guild, sid), guild, inv)
+                    inv.access_removed = None
+            else:
+                inv.responded = now
+            inv.note = _inv.add_note(inv.note, f"{was} → {s} by {interaction.user.display_name}")
+            await _invite_write(sid, [inv])
+            new = await _invite_fill(guild, sid, invites, now) if s in _inv.GONE else []
+            await _invite_refresh_roster(guild, sid, invites)
+    except Exception as e:
+        print(f"  ✗ /invite-set failed:\n{traceback.format_exc()}")
+        await interaction.followup.send(f"❌ `{type(e).__name__}: {e}`", ephemeral=True)
+        return
+
+    msg = f"✅ #{inv.rank} **{inv.name}**: {was} → **{s}**."
+    if new:
+        msg += " Invited next: " + ", ".join(f"#{i.rank} {i.name}" for i in new) + "."
+    held = sum(i.status in _inv.HOLDING for i in invites)
+    if held > _inv.INVITE_SIZE:
+        msg += f"\n⚠️ {held} players now hold the {_inv.INVITE_SIZE} spots — a replacement already went out."
+    await interaction.followup.send(msg, ephemeral=True)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -4220,6 +4926,11 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="/tidy-registry", value="Remove blank rows and sort the Player Registry by rarity", inline=False)
     embed.add_field(name="/assign-roles-from-registry", value="Assign every Discord rarity role the registry records — safe to re-run", inline=False)
     embed.add_field(name="/where-to-play", value="Manually push the Where to Play post", inline=False)
+    embed.add_field(name="/invite-set",
+                    value="Set an Invitational invitee's status — record an answer from someone "
+                          "not on Discord, undo a decline (`pending`), or free a duplicate's spot. "
+                          "Invites themselves are sent from the season-close checklist",
+                    inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 

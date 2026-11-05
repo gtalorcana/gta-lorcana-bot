@@ -25,6 +25,14 @@ Created by the season-close checklist's rollover. `Standings` and `Events` are w
 > registry by **Player ID** (col B), falling back to Name only when the ID is blank — because RPH
 > display names change over time but the Discord↔Playhub ID link is permanent.
 
+**`S## Invitational`** — one season's Invitational invites, one row per invited Playhub ID:
+`A Rank | B Playhub ID | C Name | D Discord ID | E Status | F Deadline | G Defers | H Responded |
+I Invited | J Reminded | K Note | L Access removed`. Created by **Send invites** on the season-close
+checklist; replacements are new rows below. Written row by row with `RAW`, so timestamps (ISO UTC)
+and IDs stay text. Staff may hand-edit it, and the bot re-reads it on every click and every
+watch pass. It is a tab of its own rather than columns on the Leaderboard, because the Leaderboard
+re-sorts and typed cells beside it drift onto the wrong rows.
+
 **`Ban List`** — a persistent (non-season) tab in the League sheet. Banned players are listed by
 **Playhub ID in column A** (col B is a free-text name for reference). The Leaderboard formula
 excludes any Results row whose Player ID matches `Ban List!A2:A`. Rollover recreates the
@@ -92,6 +100,7 @@ other source of dates — the flat Bot State date keys were removed after the S1
 | `set_champs_msg_ids` / `prerelease_msg_ids` | `id\|id\|…` | Digest message IDs, header first, so the daily refresh edits in place |
 | `wtp_msg_0` / `wtp_msg_1` / `wtp_msg_2` | Discord message ID | Persists `#where-to-play` message IDs across restarts so the bot edits in-place rather than reposting |
 | `recheck:<thread_id>` | `1` | Crash-loop guard — set before a startup recheck attempt, cleared on success |
+| `invitational:S##` | JSON: `channel_id`, `announced`, `roster_msg_id`, `sent`, `closed` | One season's Invitational invites — see `docs/discord-surface/invitational-invites.md`. The invitees themselves are in the League sheet's `S## Invitational` tab |
 
 > When entering dates manually, prefix with `'` (e.g. `'2026-02-13`) to prevent Google Sheets from converting to a date serial number.
 
