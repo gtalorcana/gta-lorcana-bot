@@ -1317,6 +1317,11 @@ def archive_season_data(season_name: str) -> list[str]:
         (f"{season_name} Leaderboard", _archive_span(season.LEADERBOARD_RANGE_NAME)),
         (f"{season_name} Results",     _archive_span(season.RESULTS_RANGE_NAME)),
     ]
+    # Who was invited and how they answered (#3). Optional: a season whose invites
+    # went out by Google Form has no such tab. Its RSVP tab (names, pronouns,
+    # emails) stays in the private Bot Database sheet and is never copied here.
+    optional_tabs = {f"{season_name} Invitational"}
+    league_tabs.append((f"{season_name} Invitational", "A1:L"))
     db_tabs = [
         (f"{season_name} Set Champs", _archive_span(season.SET_CHAMPS_EVENTS_RANGE_NAME)),
     ]
@@ -1325,7 +1330,13 @@ def archive_season_data(season_name: str) -> list[str]:
     for title, col_range in league_tabs:
         read_range = f"{title}!{col_range}"
         print(f"  → Reading {read_range} from League sheet...")
-        result = _gs.get_values(LEAGUE_SPREADSHEET_ID, read_range)
+        try:
+            result = _gs.get_values(LEAGUE_SPREADSHEET_ID, f"'{title}'!{col_range}")
+        except _HttpError as e:
+            if title in optional_tabs and _is_missing_sheet(e):
+                print(f"  · {title} doesn't exist — skipping")
+                continue
+            raise
         rows   = result.get('values', [])
 
         if not rows:
@@ -1340,8 +1351,11 @@ def archive_season_data(season_name: str) -> list[str]:
             else:
                 raise
 
-        write_range = f"{title}!A1"
-        _gs.update_values(ARCHIVE_SPREADSHEET_ID, write_range, "USER_ENTERED", rows)
+        write_range = f"'{title}'!A1"
+        # RAW for the invitational tab: USER_ENTERED rounds an 18-digit Discord ID
+        # to a float and turns its ISO timestamps into dates
+        mode = "RAW" if title in optional_tabs else "USER_ENTERED"
+        _gs.update_values(ARCHIVE_SPREADSHEET_ID, write_range, mode, rows)
         print(f"  ✓ Archived '{title}' ({len(rows)} rows)")
         archived.append(title)
 

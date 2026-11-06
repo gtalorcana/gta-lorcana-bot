@@ -41,14 +41,33 @@ Embeds never ping. The only mentions are the one announcement and one per replac
 
 ## My invite
 
-The roster has a single **My invite** button. It opens a private panel for whoever pressed it:
+The roster has a single **My invite** button. It opens a private panel for whoever pressed it,
+with the invitational's date, time and venue (Seasons tab):
 
 | Their row | Buttons |
 |---|---|
 | pending / deferred | **Accept**, **Defer +24h (n left)**, **Decline** |
-| accepted | **Withdraw** |
+| accepted | **Update RSVP** (or **Complete your RSVP** if details are missing), **Withdraw** |
 | declined / withdrawn | none — "message Ryan if that was a mistake" |
 | not in the tab | none — "you're not on the invite list" |
+| tab deleted | none — "the invite list is closed" |
+
+## RSVP details (#10)
+
+**Accept** opens a form: first and last name, pronouns (for calling players out on stream) and
+Playhub email, all required. Submitting it is what accepts; closing it changes nothing. A bad
+email is refused with a **Try again** button that keeps what they typed. An accepted player can
+reopen the form, prefilled, from **Update RSVP**.
+
+The details go to `S## Invitational RSVP` in the private Bot Database sheet, never the League
+sheet. Accepted players are first, in rank order, ready to copy out; a blank Name is someone to
+chase. Anyone who gave details and later withdrew stays below that block. The tab is rewritten
+whole from a fresh read on each change, so a hand fix to an email survives. It is never archived
+or deleted.
+
+The **ETB** column is yes / no from the `ETB Approvals` tab. A player who accepts without being
+signed up gets one extra line: "Not on the ETB discount yet? Sign up in #etb-discount." It
+states no percentages on purpose, since the terms may change.
 
 Decline and Withdraw ask once more, because the spot goes to the next player at once. A panel
 carries its row's state; if the row changed after the panel opened, the click is refused and they
@@ -77,7 +96,10 @@ defers alike.
 
 ## Staff
 
-`/invite-set <player> <status>` (admins) takes a Playhub ID, name or @mention:
+`/invite-set <player> [status] [name] [pronouns] [email]` (admins) takes a Playhub ID, name or
+@mention. `name` / `pronouns` / `email` record RSVP details, typically for a qualifier not on
+Discord; give any of them, with or without a status. Every run re-syncs the RSVP tab, so a status
+change moves the player in or out of the accepted block. Statuses:
 
 - **accepted / declined / withdrawn** — record an answer, typically from a qualifier not on
   Discord. Declined and withdrawn invite the next player
@@ -108,5 +130,6 @@ while any is set:
 
 Put a fake `S99 Leaderboard` tab in that sheet (A rank, B Playhub ID, C name), with a linked
 player at rank 1 and unlinked ones below, and run `/invite-send S99`. Afterwards, unset the four
-secrets, delete the `S99 Leaderboard` and `S99 Invitational` tabs, and delete the
+secrets, delete the `S99 Leaderboard`, `S99 Invitational` and `S99 Invitational RSVP` tabs, and
+delete the
 `invitational:S99` and `season_close:S99` Bot State keys.

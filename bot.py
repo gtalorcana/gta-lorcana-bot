@@ -2373,6 +2373,17 @@ def _invitational_date(season_id: str) -> str | None:
     return (season.get_season(season_id) or {}).get('invitational_date')
 
 
+def _invite_when(season_id: str) -> str:
+    """'📅 Saturday, December 5 at 12:00 PM ET · Venue' from the Seasons tab, or ''
+    while the date isn't set. One line for the announcement, roster and panel."""
+    row = season.get_season(season_id) or {}
+    when = _long_date(row.get('invitational_date'), weekday=True)
+    if not when:
+        return ""
+    venue = row.get('invitational_venue')
+    return f"📅 {when} at {_INVITATIONAL_TIME}" + (f" · {venue}" if venue else "")
+
+
 def _invite_tally(invites: list) -> str:
     n = lambda *s: sum(i.status in s for i in invites)
     return (f"{n('accepted')} accepted · {n('pending', 'deferred')} waiting · "
@@ -2404,7 +2415,6 @@ def _invite_rows(guild: discord.Guild, picks: list[tuple[int, str, str]], regist
 def _invite_roster(season_id: str, invites: list) -> discord.Embed:
     """The live roster: every holder by rank, decliners on one line, then the
     qualifiers staff must reach. An embed, so its mentions never ping."""
-    inv_date = _invitational_date(season_id)
     holding  = [i for i in invites if i.status in _inv.HOLDING]
     lines    = [f"**{_invite_tally(invites)}** · {len(holding)}/{_inv.INVITE_SIZE} spots", ""]
     if not any(i.on_discord for i in holding):
@@ -2434,11 +2444,9 @@ def _invite_roster(season_id: str, invites: list) -> discord.Embed:
     lines += ["", f"Press **My invite** to accept, decline or defer. You have "
                   f"{_inv.INVITE_DEADLINE_HOURS} {_inv.UNIT}; each defer adds "
                   f"{_inv.INVITE_DEFER_HOURS} (up to {_inv.INVITE_MAX_DEFERS})."]
-    when = _long_date(inv_date, weekday=True)
-    venue = (season.get_season(season_id) or {}).get('invitational_venue')
     title = f"🏆 {season_id} Invitational — Top {_inv.INVITE_SIZE}"
-    if when:
-        lines.append(f"📅 {when} at {_INVITATIONAL_TIME}" + (f" · {venue}" if venue else ""))
+    if when := _invite_when(season_id):
+        lines.append(when)
     return make_embed(title=title, description="\n".join(lines)[:4096],
                       colour=discord.Colour.gold())
 
@@ -2696,13 +2704,10 @@ async def _send_invites(guild: discord.Guild, season_id: str) -> str:
 
         on = [i for i in invites if i.on_discord and i.status in _inv.OPEN]
         deadline = min((i.deadline for i in on if i.deadline), default=None)
-        row = season.get_season(season_id) or {}
-        when = _long_date(row.get('invitational_date'), weekday=True)
+        when = _invite_when(season_id)
         text = (f"🏆 **{season_id} Invitational — you finished in the top {_inv.INVITE_SIZE}!**\n"
                 + " ".join(f"<@{i.discord_id}>" for i in on) + "\n\n"
-                + (f"📅 {when} at {_INVITATIONAL_TIME}"
-                   + (f" · {row['invitational_venue']}" if row.get('invitational_venue') else "")
-                   + "\n" if when else "")
+                + (when + "\n" if when else "")
                 + f"Press **My invite** on the pinned roster to accept or decline"
                 + (f" by {_ts(deadline, 'F')}" if deadline else "")
                 + f". Need more time? **Defer** adds {_inv.INVITE_DEFER_HOURS} {_inv.UNIT}, up to "
@@ -2771,13 +2776,16 @@ async def _invite_panel(user_id: int, season_id: str) -> tuple[str, discord.ui.V
     if not inv:
         return f"You're not on the {season_id} Invitational invite list.", None
 
-    view = _InvitePanelView(season_id, inv.playhub_id, inv.token())
+    when = _invite_when(season_id)
+    when = f"\n{when}" if when else ""
     if inv.status in _inv.OPEN:
+        view = _InvitePanelView(season_id, inv.playhub_id, inv.token())
         new = _inv.defer_deadline(inv, _invitational_date(season_id))
         left = _inv.INVITE_MAX_DEFERS - inv.defers
-        text = (f"**{season_id} Invitational** — you're #{inv.rank}.\n"
-                f"Answer by {_ts(inv.deadline, 'F')} ({_ts(inv.deadline)})."
-                if inv.deadline else f"**{season_id} Invitational** — you're #{inv.rank}.")
+        text = f"**{season_id} Invitational** — you're #{inv.rank}.{when}"
+        if inv.deadline:
+            text += f"\nAnswer by {_ts(inv.deadline, 'F')} ({_ts(inv.deadline)})."
+        text += "\n\nAccepting asks for your name, pronouns and Playhub email."
         view.add('accept', "Accept", discord.ButtonStyle.success)
         if new:
             view.add('defer', f"Defer +{_inv.INVITE_DEFER_HOURS}{_inv.UNIT[0]} ({left} left)",
@@ -2785,9 +2793,23 @@ async def _invite_panel(user_id: int, season_id: str) -> tuple[str, discord.ui.V
         view.add('decline', "Decline", discord.ButtonStyle.danger)
         return text, view
     if inv.status == 'accepted':
+        try:
+            rsvp = (await loop.run_in_executor(None, _inv.read_rsvps, season_id)).get(inv.playhub_id)
+        except Exception as e:
+            return f"⚠️ Couldn't read your RSVP right now — try again in a minute. (`{e}`)", None
+        rsvp = rsvp or _inv.Rsvp()
+        view = _InvitePanelView(season_id, inv.playhub_id, inv.token(), rsvp)
+        text = f"✅ You've accepted your spot (#{inv.rank}) in the {season_id} Invitational.{when}\n\n"
+        if rsvp.complete:
+            text += (f"**Name:** {rsvp.name}\n**Pronouns:** {rsvp.pronouns}\n"
+                     f"**Playhub email:** {rsvp.email}\n\n")
+            view.add('rsvp', "Update RSVP", discord.ButtonStyle.secondary)
+        else:
+            text += "⚠️ **Your RSVP isn't complete** — we still need your name, pronouns and Playhub email.\n\n"
+            view.add('rsvp', "Complete your RSVP", discord.ButtonStyle.success)
+        text += "Can't make it after all? Withdraw so the next player gets it."
         view.add('withdraw', "Withdraw", discord.ButtonStyle.danger)
-        return (f"✅ You've accepted your spot (#{inv.rank}) in the {season_id} Invitational. "
-                f"Can't make it after all? Withdraw so the next player gets it."), view
+        return text, view
     return (f"You {inv.status} your {season_id} Invitational spot. If that was a mistake, "
             f"message <@{BOT_CONTACT_USER_ID}>."), None
 
@@ -2796,14 +2818,20 @@ class _InvitePanelView(discord.ui.View):
     """The private panel. Short-lived: pressing My invite again makes a fresh one.
     Decline and Withdraw ask once more, since the spot goes at once."""
 
-    def __init__(self, season_id: str, playhub_id: str, token: str):
+    def __init__(self, season_id: str, playhub_id: str, token: str, rsvp=None):
         super().__init__(timeout=900)
         self.season_id, self.playhub_id, self.token = season_id, playhub_id, token
+        self.rsvp = rsvp     # current details, to prefill Update RSVP
 
     def add(self, action: str, label: str, style: discord.ButtonStyle) -> None:
         button = discord.ui.Button(label=label, style=style)
 
         async def cb(interaction: discord.Interaction):
+            if action in ('accept', 'rsvp'):
+                # Accepting *is* submitting the form — closing it changes nothing
+                await interaction.response.send_modal(
+                    _RsvpModal(self.season_id, self.playhub_id, self.token, self.rsvp))
+                return
             if action in ('decline', 'withdraw'):
                 confirm = _InvitePanelView(self.season_id, self.playhub_id, self.token)
                 confirm.add(f"{action}_yes", f"Yes, {action}", discord.ButtonStyle.danger)
@@ -2813,8 +2841,9 @@ class _InvitePanelView(discord.ui.View):
                              "leaderboard right away."), view=confirm)
                 return
             if action == 'back':
+                await interaction.response.defer()     # two sheet reads can outrun 3s
                 content, view = await _invite_panel(interaction.user.id, self.season_id)
-                await interaction.response.edit_message(content=content, view=view)
+                await interaction.edit_original_response(content=content, view=view)
                 return
             await interaction.response.edit_message(content="⏳ Saving…", view=None)
             reply = await _invite_act(interaction, self.season_id, self.playhub_id,
@@ -2823,6 +2852,109 @@ class _InvitePanelView(discord.ui.View):
 
         button.callback = cb
         self.add_item(button)
+
+
+class _RsvpModal(discord.ui.Modal):
+    """Name, pronouns and Playhub email (#10). Submitting it from an open invite
+    is what accepts; from an accepted one it updates the details."""
+
+    def __init__(self, season_id: str, playhub_id: str, token: str, current=None):
+        super().__init__(title=f"{season_id} Invitational RSVP", timeout=900)
+        self.season_id, self.playhub_id, self.token = season_id, playhub_id, token
+        cur = current or _inv.Rsvp()
+        self.name = discord.ui.TextInput(
+            label="First and last name", placeholder="How we'd call you out on stream",
+            default=cur.name or None, max_length=100)
+        self.pronouns = discord.ui.TextInput(
+            label="Pronouns", placeholder="e.g. she/her", default=cur.pronouns or None,
+            max_length=40)
+        self.email = discord.ui.TextInput(
+            label="Playhub email", placeholder="The email on your Ravensburger Play Hub account",
+            default=cur.email or None, max_length=254)
+        for field in (self.name, self.pronouns, self.email):
+            self.add_item(field)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        rsvp = _inv.Rsvp(str(self.name.value).strip(), str(self.pronouns.value).strip(),
+                         str(self.email.value).strip())
+        if not _inv.valid_email(rsvp.email):
+            # Keep what they typed, so trying again is one fix, not three fields
+            again = _InvitePanelView(self.season_id, self.playhub_id, self.token, rsvp)
+            again.add('rsvp', "Try again", discord.ButtonStyle.primary)
+            await interaction.response.edit_message(
+                content=f"⚠️ `{rsvp.email}` doesn't look like an email address. Nothing was saved.",
+                view=again)
+            return
+        await interaction.response.edit_message(content="⏳ Saving…", view=None)
+        reply = await _invite_rsvp(interaction, self.season_id, self.playhub_id, self.token, rsvp)
+        await interaction.edit_original_response(content=reply)
+
+
+async def _rsvp_sync(season_id: str, invites: list, edit=None) -> set | None:
+    """Rewrite the RSVP tab from the invite rows, after applying edit(rsvps) to a
+    fresh read of it. Caller holds _invite_lock. Returns the ETB sign-ups, or None
+    if ETB Approvals couldn't be read (the ETB column is left blank then)."""
+    loop = asyncio.get_running_loop()
+
+    def _do():
+        rsvps = _inv.read_rsvps(season_id)
+        if edit:
+            edit(rsvps)
+        try:
+            etb = _inv.etb_discord_ids()
+        except Exception as e:
+            print(f"  ⚠ invites {season_id}: couldn't read ETB Approvals: {e}")
+            etb = None
+        _inv.write_rsvps(season_id, _inv.rsvp_rows(invites, rsvps, etb))
+        return etb
+
+    async with _sheet_lock:
+        return await loop.run_in_executor(None, _do)
+
+
+async def _invite_rsvp(interaction: discord.Interaction, season_id: str, playhub_id: str,
+                       token: str, rsvp) -> str:
+    loop = asyncio.get_running_loop()
+    try:
+        async with _invite_lock:
+            invites = await loop.run_in_executor(None, _inv.read_invites, season_id)
+            inv = next((i for i in invites if i.playhub_id == playhub_id), None)
+            if not inv or inv.discord_id != interaction.user.id:
+                return "⚠️ That isn't your invite."
+            if inv.token() != token:
+                return "⚠️ Your invite changed since you opened this — press **My invite** again."
+            now = datetime.now(timezone.utc)
+            first = inv.status in _inv.OPEN
+            if not first and inv.status != 'accepted':
+                return "⚠️ That can't be done any more — press **My invite** again."
+            if first:
+                inv.status, inv.responded = 'accepted', now
+                await _invite_write(season_id, [inv])
+            rsvp.updated = _inv.iso(now)
+            saved, etb = True, None
+            try:
+                etb = await _rsvp_sync(season_id, invites,
+                                       lambda rsvps: rsvps.__setitem__(playhub_id, rsvp))
+            except Exception:
+                saved = False
+                print(f"  ✗ invites {season_id}: RSVP write failed:\n{traceback.format_exc()}")
+            if first:
+                await _invite_refresh_roster(interaction.guild, season_id, invites)
+    except Exception as e:
+        print(f"  ✗ invites {season_id}: RSVP failed:\n{traceback.format_exc()}")
+        return f"❌ Something went wrong saving that — please try again. (`{type(e).__name__}`)"
+
+    if not first:
+        return ("✅ RSVP updated." if saved else
+                "❌ Couldn't save your details — please try again in a minute.")
+    when = _invite_when(season_id)
+    reply = f"✅ You're in! See you at the {season_id} Invitational." + (f"\n{when}" if when else "")
+    if not saved:
+        reply += ("\n\n⚠️ Your spot is saved, but your details didn't — press **My invite**, "
+                  "then **Complete your RSVP**.")
+    if etb is not None and inv.discord_id not in etb:
+        reply += f"\n\nNot on the ETB discount yet? Sign up in <#{ETB_DISCOUNT_CHANNEL_ID}>."
+    return reply
 
 
 async def _invite_act(interaction: discord.Interaction, season_id: str, playhub_id: str,
@@ -2837,10 +2969,7 @@ async def _invite_act(interaction: discord.Interaction, season_id: str, playhub_
             if inv.token() != token:
                 return "⚠️ Your invite changed since you opened this — press **My invite** again."
             now = datetime.now(timezone.utc)
-            if action == 'accept' and inv.status in _inv.OPEN:
-                inv.status, inv.responded = 'accepted', now
-                reply = f"✅ You're in! See you at the {season_id} Invitational."
-            elif action == 'defer' and (new := _inv.defer_deadline(inv, _invitational_date(season_id))):
+            if action == 'defer' and (new := _inv.defer_deadline(inv, _invitational_date(season_id))):
                 inv.status, inv.deadline, inv.defers = 'deferred', new, inv.defers + 1
                 inv.reminded = ''          # a fresh day, so a fresh reminder
                 reply = f"🕓 Deferred — your new deadline is {_ts(new, 'F')}."
@@ -2857,6 +2986,11 @@ async def _invite_act(interaction: discord.Interaction, season_id: str, playhub_
             else:
                 return "⚠️ That can't be done any more — press **My invite** again."
             await _invite_write(season_id, [inv])
+            if action == 'withdraw':
+                try:    # move them below the accepted block staff copy from
+                    await _rsvp_sync(season_id, invites)
+                except Exception as e:
+                    print(f"  ⚠ invites {season_id}: RSVP tab not updated after withdraw: {e}")
             if inv.status in _inv.GONE:
                 await _invite_fill(interaction.guild, season_id, invites, now)
             await _invite_refresh_roster(interaction.guild, season_id, invites)
@@ -2956,11 +3090,26 @@ async def invite_send_command(interaction: discord.Interaction, season_id: str):
                               for s in ('accepted', 'declined', 'withdrawn', 'pending')])
 @app_commands.describe(player="Playhub ID, name, or @mention",
                        status="pending gives a fresh deadline and restores channel access",
+                       name="RSVP: first and last name (sets their details; leave out to keep)",
+                       pronouns="RSVP: pronouns",
+                       email="RSVP: Playhub email",
                        season_id="Defaults to the open invitational, e.g. S14")
 async def invite_set_command(interaction: discord.Interaction, player: str,
-                               status: app_commands.Choice[str], season_id: str | None = None):
+                               status: app_commands.Choice[str] | None = None,
+                               name: str | None = None, pronouns: str | None = None,
+                               email: str | None = None, season_id: str | None = None):
     if not _is_admin(interaction):
         await interaction.response.send_message("❌ Admins only.", ephemeral=True)
+        return
+    details = {k: v.strip() for k, v in (('name', name), ('pronouns', pronouns), ('email', email))
+               if v and v.strip()}
+    if not status and not details:
+        await interaction.response.send_message(
+            "⚠️ Give a `status`, or RSVP details (`name`, `pronouns`, `email`).", ephemeral=True)
+        return
+    if 'email' in details and not _inv.valid_email(details['email']):
+        await interaction.response.send_message(
+            f"⚠️ `{details['email']}` doesn't look like an email address.", ephemeral=True)
         return
     await interaction.response.defer(ephemeral=True, thinking=True)
     sid = (season_id or '').strip().upper()
@@ -2986,26 +3135,49 @@ async def invite_set_command(interaction: discord.Interaction, player: str,
                 await interaction.followup.send(f"⚠️ **{key}** isn't in `{_inv.tab_name(sid)}`.",
                                                 ephemeral=True)
                 return
-            was, s = inv.status, status.value
-            inv.status = s
-            if s == 'pending':
-                inv.responded, inv.defers, inv.reminded = None, 0, ''
-                inv.deadline = _inv.first_deadline(now, _invitational_date(sid)) if inv.on_discord else None
-                if inv.on_discord:
-                    await _invite_grant(await _invite_channel(guild, sid), guild, inv)
-                    inv.access_removed = None
-            else:
-                inv.responded = now
-            inv.note = _inv.add_note(inv.note, f"{was} → {s} by {interaction.user.display_name}")
-            await _invite_write(sid, [inv])
-            new = await _invite_fill(guild, sid, invites, now) if s in _inv.GONE else []
-            await _invite_refresh_roster(guild, sid, invites)
+            was = s = inv.status
+            new, rsvp_err = [], None
+            if status:
+                s = inv.status = status.value
+                if s == 'pending':
+                    inv.responded, inv.defers, inv.reminded = None, 0, ''
+                    inv.deadline = _inv.first_deadline(now, _invitational_date(sid)) if inv.on_discord else None
+                    if inv.on_discord:
+                        await _invite_grant(await _invite_channel(guild, sid), guild, inv)
+                        inv.access_removed = None
+                else:
+                    inv.responded = now
+                inv.note = _inv.add_note(inv.note, f"{was} → {s} by {interaction.user.display_name}")
+                await _invite_write(sid, [inv])
+                new = await _invite_fill(guild, sid, invites, now) if s in _inv.GONE else []
+                await _invite_refresh_roster(guild, sid, invites)
+
+            def _merge(rsvps):
+                if details:
+                    r = rsvps.get(inv.playhub_id) or _inv.Rsvp()
+                    for k, v in details.items():
+                        setattr(r, k, v)
+                    r.updated = _inv.iso(now)
+                    rsvps[inv.playhub_id] = r
+            try:     # any status change can move them in or out of the accepted block
+                await _rsvp_sync(sid, invites, _merge)
+            except Exception as e:
+                print(f"  ✗ /invite-set: RSVP tab write failed:\n{traceback.format_exc()}")
+                rsvp_err = f"{type(e).__name__}: {e}"
     except Exception as e:
         print(f"  ✗ /invite-set failed:\n{traceback.format_exc()}")
         await interaction.followup.send(f"❌ `{type(e).__name__}: {e}`", ephemeral=True)
         return
 
-    msg = f"✅ #{inv.rank} **{inv.name}**: {was} → **{s}**."
+    msg = (f"✅ #{inv.rank} **{inv.name}**: {was} → **{s}**." if status else
+           f"✅ #{inv.rank} **{inv.name}** ({s}).")
+    if details:
+        msg += (f"\n❌ RSVP details not saved: `{rsvp_err}`" if rsvp_err else
+                " RSVP: " + ", ".join(f"{k} set" for k in details) + ".")
+        if s != 'accepted' and not rsvp_err:
+            msg += " They're not accepted, so their row sits below the accepted block."
+    elif rsvp_err:
+        msg += f"\n⚠️ RSVP tab not updated: `{rsvp_err}`"
     if new:
         msg += " Invited next: " + ", ".join(f"#{i.rank} {i.name}" for i in new) + "."
     held = sum(i.status in _inv.HOLDING for i in invites)
@@ -4976,7 +5148,8 @@ async def help_command(interaction: discord.Interaction):
                     inline=False)
     embed.add_field(name="/invite-set",
                     value="Set an Invitational invitee's status — record an answer from someone "
-                          "not on Discord, undo a decline (`pending`), or free a duplicate's spot. "
+                          "not on Discord, undo a decline (`pending`), or free a duplicate's spot — "
+                          "and/or their RSVP `name`, `pronouns`, `email`. "
                           "Invites themselves are sent from the season-close checklist",
                     inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)

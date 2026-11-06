@@ -24,6 +24,7 @@ rank not already in the tab.
 so they can be checked without Discord or Sheets.
 """
 
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -31,6 +32,8 @@ from zoneinfo import ZoneInfo
 from clients import gs as _gs
 from constants import (
     INVITE_SPREADSHEET_ID,
+    BOT_DATABASE_SPREADSHEET_ID,
+    ETB_APPROVALS_RANGE_NAME,
     INVITE_SIZE,
     INVITE_DEADLINE_HOURS,
     INVITE_DEFER_HOURS,
@@ -290,3 +293,103 @@ def plan_tick(invites: list[Invite], now: datetime, watching_since: datetime,
 
 def add_note(note: str, line: str) -> str:
     return f"{note}; {line}" if note else line
+
+
+# ── RSVP details (#10) ────────────────────────────────────────────────────────
+# Name, pronouns (for calling players out on stream) and Playhub email, asked on
+# Accept. Kept in the private Bot Database sheet — never in `S## Invitational`,
+# which sits in the League sheet players can view, and never archived: the
+# Archive step copies `S## Invitational` (no personal details) and leaves this.
+#
+#   A Rank | B Status | C Playhub ID | D Playhub name | E Name | F Pronouns |
+#   G Playhub email | H ETB | I Updated
+#
+# Every accepted invitee first, in rank order, so staff can copy that block out
+# as is; a blank Name is one who hasn't given their details yet. Below it, anyone
+# who gave details and then withdrew — kept, not deleted. Rewritten whole on every
+# change (about 32 rows) from a fresh read, so a hand fix to an email survives.
+
+RSVP_HEADER = ['Rank', 'Status', 'Playhub ID', 'Playhub name', 'Name', 'Pronouns',
+               'Playhub email', 'ETB', 'Updated']
+_EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+
+def rsvp_tab_name(season_id: str) -> str:
+    return f"{season_id} Invitational RSVP"
+
+
+@dataclass
+class Rsvp:
+    name:     str = ''
+    pronouns: str = ''
+    email:    str = ''
+    updated:  str = ''
+
+    @property
+    def complete(self) -> bool:
+        return bool(self.name and self.pronouns and self.email)
+
+
+def valid_email(s: str) -> bool:
+    return bool(_EMAIL_RE.match(s.strip()))
+
+
+def _is_missing_tab(e: Exception) -> bool:
+    # Sheets says only this, in a bare 400 — see stores._is_missing_sheet
+    return 'unable to parse range' in str(e).lower()
+
+
+def read_rsvps(season_id: str) -> dict[str, Rsvp]:
+    """{playhub_id: Rsvp}. No tab yet means nobody has given details."""
+    try:
+        data = _gs.get_values(BOT_DATABASE_SPREADSHEET_ID, f"'{rsvp_tab_name(season_id)}'!A2:I")
+    except Exception as e:
+        if _is_missing_tab(e):
+            return {}
+        raise
+    out = {}
+    for cells in data.get('values', []):
+        c = [str(x).strip() for x in cells] + [''] * (len(RSVP_HEADER) - len(cells))
+        if c[2]:
+            out[c[2]] = Rsvp(c[4], c[5], c[6], c[8])
+    return out
+
+
+def etb_discord_ids() -> set[int]:
+    """Discord IDs signed up for the ETB discount (the ETB Approvals tab)."""
+    data = _gs.get_values(BOT_DATABASE_SPREADSHEET_ID, ETB_APPROVALS_RANGE_NAME)
+    return {int(r[0]) for r in data.get('values', []) if r and str(r[0]).strip().isdigit()}
+
+
+def rsvp_rows(invites: list[Invite], rsvps: dict[str, Rsvp],
+              etb: set[int] | None) -> list[list[str]]:
+    """The tab's contents: header, every accepted invitee by rank, then anyone else
+    who has details on file. ETB is blank for players not on Discord, and when ETB
+    Approvals couldn't be read. Details whose invite row is gone are kept at the end."""
+    by_rank = sorted(invites, key=lambda i: i.rank)
+    keep = ([i for i in by_rank if i.status == 'accepted'] +
+            [i for i in by_rank if i.status != 'accepted' and i.playhub_id in rsvps])
+    rows = [RSVP_HEADER]
+    for inv in keep:
+        r = rsvps.get(inv.playhub_id) or Rsvp()
+        etb_cell = ('yes' if inv.discord_id in etb else 'no') if (inv.on_discord and etb is not None) else ''
+        rows.append([str(inv.rank), inv.status, inv.playhub_id, inv.name, r.name, r.pronouns,
+                     r.email, etb_cell, r.updated])
+    known = {i.playhub_id for i in invites}
+    for pid, r in rsvps.items():          # never drop details, even for an unknown row
+        if pid not in known:
+            rows.append(['', '', pid, '', r.name, r.pronouns, r.email, '', r.updated])
+    return rows
+
+
+def write_rsvps(season_id: str, rows: list[list[str]]) -> None:
+    """Write the tab, creating it on first use. New rows first, then clear what's
+    below — clearing first would lose everyone's details if the write failed."""
+    tab = rsvp_tab_name(season_id)
+    try:
+        _gs.add_sheet(BOT_DATABASE_SPREADSHEET_ID, tab)
+    except Exception as e:
+        if 'already exists' not in str(e).lower():
+            raise
+    _gs.update_values(BOT_DATABASE_SPREADSHEET_ID, f"'{tab}'!A1:I{len(rows)}", 'RAW', rows)
+    _gs.clear_values(BOT_DATABASE_SPREADSHEET_ID, f"'{tab}'!A{len(rows) + 1}:I")

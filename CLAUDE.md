@@ -167,6 +167,10 @@ via `GH_TOKEN` in `.claude/settings.local.json` (untracked; the repo is public).
   re-sorting Leaderboard. Every click and watch pass re-reads the tab under `_invite_lock`.
   A deadline that passed before the process was watching is **extended, never declined**, so
   an outage can't mass-decline. See `docs/discord-surface/invitational-invites.md`
+- **RSVP details** (name, pronouns, Playhub email) live only in `S## Invitational RSVP` in the
+  private Bot Database sheet — never the League sheet players can view, never the Archive
+  sheet. Kept, not deleted: Ryan wants history archived, and the archive step copies
+  `S## Invitational` (no personal data) instead
 - Sheets' `addSheet` returns a bare 400 with no machine-readable reason — the only signal is
   the message text `A sheet with the name "X" already exists.` Match on that (see
   `_is_already_exists`), never on an `ALREADY_EXISTS` token; the API does not send one

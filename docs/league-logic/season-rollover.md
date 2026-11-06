@@ -69,6 +69,9 @@ and check it with `/seasons`. The checklist links the tab and has a **Reload** b
 
 - Copies the season's four League tabs (`Standings`, `Events`, `Leaderboard`, `Results`) to the
   Archive spreadsheet, overwriting a tab that already exists there (safe to re-run)
+- Also copies `S## Invitational` (who was invited and how they answered) when it exists, `RAW`
+  so Discord IDs survive. The `S## Invitational RSVP` tab (names, pronouns, emails) is never
+  copied: it stays in the private Bot Database sheet and is kept, not deleted
 - Leaves the League sheet tabs intact — delete them by hand once you've checked the archive
 
 ## How Season Config Works
