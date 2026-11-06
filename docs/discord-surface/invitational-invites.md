@@ -65,7 +65,7 @@ chase. Anyone who gave details and later withdrew stays below that block. The ta
 whole from a fresh read on each change, so a hand fix to an email survives. It is never archived
 or deleted.
 
-The **ETB** column is yes / no from the `ETB Approvals` tab. A player who accepts without being
+The **Signed up for ETB discount** column is yes / no from the `ETB Approvals` tab. A player who accepts without being
 signed up gets one extra line: "Not on the ETB discount yet? Sign up in #etb-discount." It
 states no percentages on purpose, since the terms may change.
 

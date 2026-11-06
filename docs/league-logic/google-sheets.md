@@ -49,7 +49,7 @@ tab (empty) if it's ever missing, since a broken reference would `#REF!` the who
 | `Overrides` | store_id, store_name, day, time, format, override_status, override_day, override_time, reason | Manual — never touched by bot |
 | `Bot State` | key, value | Bot — see below |
 | `Player Registry` | See [roles.md](roles.md) | Bot — player linking + role audit |
-| `S## Invitational RSVP` | Rank, Status, Playhub ID, Playhub name, Name, Pronouns, Playhub email, ETB, Updated | Bot — the Invitational RSVP form and `/invite-set` (#10). Accepted invitees first in rank order, for copying out; anyone who gave details and then withdrew below. Holds personal details, so it is here and never in the League or Archive sheet. Kept after the season, not deleted |
+| `S## Invitational RSVP` | Rank, Status, Playhub ID, Playhub name, Name, Pronouns, Playhub email, Signed up for ETB discount, Updated | Bot — the Invitational RSVP form and `/invite-set` (#10). Accepted invitees first in rank order, for copying out; anyone who gave details and then withdrew below. Holds personal details, so it is here and never in the League or Archive sheet. Kept after the season, not deleted |
 
 ---
 

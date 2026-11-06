@@ -302,7 +302,7 @@ def add_note(note: str, line: str) -> str:
 # Archive step copies `S## Invitational` (no personal details) and leaves this.
 #
 #   A Rank | B Status | C Playhub ID | D Playhub name | E Name | F Pronouns |
-#   G Playhub email | H ETB | I Updated
+#   G Playhub email | H Signed up for ETB discount | I Updated
 #
 # Every accepted invitee first, in rank order, so staff can copy that block out
 # as is; a blank Name is one who hasn't given their details yet. Below it, anyone
@@ -310,7 +310,7 @@ def add_note(note: str, line: str) -> str:
 # change (about 32 rows) from a fresh read, so a hand fix to an email survives.
 
 RSVP_HEADER = ['Rank', 'Status', 'Playhub ID', 'Playhub name', 'Name', 'Pronouns',
-               'Playhub email', 'ETB', 'Updated']
+               'Playhub email', 'Signed up for ETB discount', 'Updated']
 _EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
 
