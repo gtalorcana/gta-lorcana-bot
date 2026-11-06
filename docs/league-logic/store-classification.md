@@ -2,7 +2,7 @@
 
 Every Sunday, `analyse_stores()` in `stores.py`:
 
-1. Fetches all Ontario Lorcana events from RPH for the last 8 weeks (`WHERE_TO_PLAY_WINDOW_WEEKS`), ending with the reference week. The window is rolling, not the season's: between a season's end and the next rollover the season window holds no recent events, and every store would drop off the list
+1. Fetches all Ontario Lorcana events from RPH for the last 8 weeks (`WHERE_TO_PLAY_WINDOW_WEEKS`), ending with the reference week. The window is rolling, not the season's: between a season's end and the next rollover the season window holds no recent events, and every store would drop off the list. It asks for `inProgress` as well as `past` events, because an organiser who never closes an event in RPH leaves it `inProgress` for good. In Nov 2026, 19 of 420 events in the window were in that state, including Game 3's Oct 27 Tuesday night, and skipping them knocked stores off the list
 2. Groups events by `(store_id, day_of_week, floored_hour, format)` — events within the same clock hour are merged to handle organizers adjusting start times slightly week to week
 3. Classifies each group based on streak
 4. Applies manual overrides from the `Overrides` sheet tab

@@ -69,6 +69,11 @@ def _fetch_recent_events(reference_date: date) -> list:
     Independent of the season on purpose: the season window goes stale between a
     season's end and the next rollover, and empties #where-to-play (#4). Ending at
     the reference week also keeps the in-progress week out of the counts.
+
+    Asks for inProgress as well as past. An organiser who never closes an event in
+    RPH leaves it inProgress indefinitely (Game 3's Oct 27 2026 night, 9 players,
+    still open 10 days later), and the default past-only filter dropped it. That
+    missing week broke the store's streak and pushed it off #where-to-play.
     """
     ref_week   = _get_week_start(reference_date)
     first_week = ref_week - timedelta(weeks=WHERE_TO_PLAY_WINDOW_WEEKS - 1)
@@ -76,7 +81,10 @@ def _fetch_recent_events(reference_date: date) -> list:
     start_dt   = season._start_of_day_utc(first_week.isoformat())
     end_dt     = season._end_of_day_utc(last_day.isoformat())
     print(f"  → Fetching RPH events ({first_week} → {last_day})...")
-    events = _rph_api.get_events(start_dt, end_dt)
+    events = _rph_api.get_events(start_dt, end_dt, extra_params={
+        'display_status':   None,
+        'display_statuses': ['past', 'inProgress'],
+    })
     print(f"  ✓ {len(events)} events fetched")
     return events
 
