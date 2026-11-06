@@ -254,12 +254,14 @@ def _fmt(format_str: str) -> str:
 def _grouped_by_day(entries: list) -> str:
     """Format a list of event entries grouped by day with day headers."""
     if not entries:
-        return "*None yet this season*"
+        return "*None right now*"
     groups = {}
     for e in entries:
         groups.setdefault(e['day'], []).append(e)
     lines = []
     for day, day_entries in groups.items():
+        if lines:
+            lines.append("")     # a blank line between days
         lines.append(f"__{day}__")
         for e in day_entries:
             city = f" ({e['city']})" if e.get('city') else ''
@@ -307,14 +309,15 @@ def _build_where_to_play_messages(store_analysis: dict, as_of: date) -> list[str
             day_blocks.append("\n".join(lines))
 
         # Greedily pack day blocks into message 1; overflow goes to message 2
+        # A blank line between days, as in the Regular message
         msg1 = semi_header
         msg2 = ""
         for block in day_blocks:
-            candidate = msg1 + "\n" + block
-            if len(candidate) <= _WTP_CHAR_LIMIT:
+            candidate = msg1 + ("\n\n" if msg1 != semi_header else "\n") + block
+            if len(candidate) <= _WTP_CHAR_LIMIT and not msg2:
                 msg1 = candidate
             else:
-                msg2 = (msg2 + "\n" + block) if msg2 else ("\u200b\n" + block)
+                msg2 = (msg2 + "\n\n" + block) if msg2 else ("\u200b\n" + block)
 
         semi_msgs = [msg1, msg2] if msg2 else [msg1]
 
