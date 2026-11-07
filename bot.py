@@ -1178,6 +1178,11 @@ async def on_thread_delete(thread: discord.Thread):
     """Remove event data from the sheet when a results thread is deleted."""
     if not thread.parent or thread.parent.id != CHANNELS["results_reporting"]:
         return
+    if thread.id in _bulk_deleting:
+        # A past season's thread removed by the clean-up: its row lives in an
+        # archived Events tab, and must not be looked for in the current one.
+        _bulk_deleting.discard(thread.id)
+        return
 
     print(f"  🗑 Results thread deleted: '{thread.name}'")
 
@@ -2039,18 +2044,32 @@ async def _render_season_close(season_id: str, snap: dict, guild: discord.Guild,
     else:
         lines.append(f"**5. ⏳ Archive {season_id}** — copies the {season_id} tabs to the Archive sheet")
         button('archive', f"Archive {season_id}", discord.ButtonStyle.success)
+    lines.append("")
+
+    # ── 6. Old results threads ──────────────────────────────────────
+    threads = entry.get('threads_deleted')
+    if threads:
+        lines.append(f"**6. ✅ Deleted {entry.get('threads_deleted_n', 0)} old results thread(s)** "
+                     f"on {_short_date(threads)}")
+    elif not archived:
+        lines.append("**6. 🔒 Delete old results threads** — unlocks after the archive")
+    else:
+        lines.append(f"**6. ⏳ Delete old results threads** — every {_ch('results_reporting')} "
+                     f"thread from before {season.CURRENT_SEASON} started. Previews the count first.")
+        button('delete_threads', "Delete old threads", discord.ButtonStyle.danger)
 
     if snap['errors']:
         lines += ["", "⚠️ **Couldn't read:** " + "; ".join(snap['errors'])[:500]]
 
     now = _now_et()
-    if done1 and done2 and rolled and archived:
+    if done1 and done2 and rolled and archived and threads:
         today = now.date().isoformat()
         inv_s = "skipped" if inv == 'skipped' else str(entry.get('invitational_n', len(stamped2)))
         summary = (f"Rare/Uncommon: {n1} · Invitational: {inv_s} · "
                    f"Rolled to {entry.get('rolled_to') or season.CURRENT_SEASON}"
                    f"{' ' + _short_date(entry['rolled_over']) if entry.get('rolled_over') else ''} · "
-                   f"Archived {_short_date(entry.get('archived') or today)}")
+                   f"Archived {_short_date(entry.get('archived') or today)} · "
+                   f"{entry.get('threads_deleted_n', 0)} threads deleted")
         embed = make_embed(title=f"🏁 {season_id} closed — {_short_date(today)}",
                            description=summary, colour=discord.Colour.green())
         return embed, None, {'closed': today, 'summary': summary}
@@ -2277,6 +2296,179 @@ _SEASON_CLOSE_ACTIONS = {
 }
 
 
+# ── Step 6: delete past seasons' results threads ─────────────────────
+# Once a season is archived, its Events tab holds every reported RPH URL and
+# Standings is rebuilt from those, so the forum threads carry nothing the sheets
+# don't. "Old" means created before the *current* season started — so this only
+# makes sense after the rollover, and it sweeps up any earlier season too.
+#
+# Deleting a results thread normally fires on_thread_delete, which clears that
+# thread's row from the current Events tab (one Sheets read each). Each ID goes
+# into _bulk_deleting first so the handler skips it.
+
+_bulk_deleting: set[int] = set()
+_thread_cleanup_running = False
+_THREAD_CLEANUP_PROGRESS_EVERY = 25
+
+
+async def _old_results_threads(guild: discord.Guild) -> tuple[list[discord.Thread], date]:
+    """
+    Results-forum threads created before the current season started, oldest first.
+    Pinned posts (the forum's how-to) and any thread the current Events tab still
+    references are kept. Raises if the forum or the Events tab can't be read —
+    better to delete nothing than to delete without the safety check.
+    """
+    if not season.SEASON_START_DATE:
+        raise RuntimeError(f"{season.CURRENT_SEASON} has no season start in the Seasons tab")
+    start  = date.fromisoformat(season.SEASON_START_DATE)
+    cutoff = datetime.combine(start, datetime.min.time(), tzinfo=_TZ_ET)
+
+    forum = guild.get_channel(CHANNELS["results_reporting"])
+    if forum is None:
+        raise RuntimeError(f"can't find {_ch('results_reporting')}")
+    threads = {t.id: t for t in forum.threads}
+    async for t in forum.archived_threads(limit=None):
+        threads.setdefault(t.id, t)
+
+    loop = asyncio.get_running_loop()
+    rows = (await loop.run_in_executor(
+        None, _gs.get_values, LEAGUE_SPREADSHEET_ID, season.EVENTS_RANGE_NAME)).get('values', [])
+    live = {r[1] for r in rows if len(r) > 1 and r[1]}
+
+    # snowflake_time, not created_at: created_at is None for pre-2022 threads.
+    old = [t for t in threads.values()
+           if discord.utils.snowflake_time(t.id) < cutoff
+           and not t.flags.pinned and str(t.id) not in live]
+    return sorted(old, key=lambda t: t.id), start
+
+
+async def _thread_cleanup_preview(interaction: discord.Interaction, season_id: str) -> None:
+    """Count what would go and ask to confirm. Nothing is deleted from here."""
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    if _thread_cleanup_running:
+        await interaction.followup.send("⏳ A thread clean-up is already running.", ephemeral=True)
+        return
+    try:
+        old, start = await _old_results_threads(interaction.guild)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Couldn't list the old threads: `{e}`", ephemeral=True)
+        return
+
+    if not old:
+        await _season_close_mark(season_id, threads_deleted=_now_et().date().isoformat(),
+                                 threads_deleted_n=0)
+        await _refresh_season_close_quietly(season_id)
+        await interaction.followup.send(
+            f"✅ No threads in {_ch('results_reporting')} from before {season.CURRENT_SEASON} "
+            f"started ({_short_date(start.isoformat())}). Nothing to delete.", ephemeral=True)
+        return
+
+    def day(t):   # spans years, so unlike _short_date it keeps the year
+        d = discord.utils.snowflake_time(t.id).astimezone(_TZ_ET)
+        return f"{d:%b} {d.day}, {d.year}"
+    recent = "\n".join(f"• {t.name[:80]}" for t in old[-5:])
+    body = (f"**{len(old)}** thread(s) in {_ch('results_reporting')} were created before "
+            f"{season.CURRENT_SEASON} started ({_short_date(start.isoformat())}), "
+            f"{day(old[0])} → {day(old[-1])}.\n\n"
+            f"Most recent:\n{recent}\n\n"
+            f"Their results are already in the archived Events tabs, and deleting them doesn't "
+            f"touch any sheet. Pinned posts and anything the {season.CURRENT_SEASON} Events tab "
+            f"links to are kept. Thread links in the archived tabs will stop working.\n"
+            f"**This can't be undone.**")
+    await interaction.followup.send(body[:1990], ephemeral=True,
+                                    view=_ThreadCleanupView(interaction.user.id, season_id, old))
+
+
+class _ThreadCleanupView(discord.ui.View):
+    """Delete/Cancel under the preview. In-memory like _InviteSendView: after a
+    restart the admin runs the preview again."""
+
+    def __init__(self, admin_id: int, season_id: str, threads: list[discord.Thread]):
+        super().__init__(timeout=900)
+        self.admin_id, self.season_id, self.threads = admin_id, season_id, threads
+        self.delete.label = f"Delete {len(threads)} thread(s)"
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.admin_id
+
+    @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger)
+    async def delete(self, interaction: discord.Interaction, _b: discord.ui.Button):
+        global _thread_cleanup_running
+        self.stop()
+        if _thread_cleanup_running:
+            await interaction.response.edit_message(content="⏳ A clean-up is already running.", view=None)
+            return
+        await interaction.response.edit_message(
+            content=f"🗑 Deleting {len(self.threads)} thread(s)…", view=None)
+        # Claimed here, not in the task, so a second confirm can't start a second run.
+        _thread_cleanup_running = True
+        # A task, not an await: hundreds of deletes can outlast the click.
+        asyncio.create_task(_delete_old_threads(interaction, self.season_id, self.threads))
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, _b: discord.ui.Button):
+        self.stop()
+        await interaction.response.edit_message(content="✖ Nothing deleted.", view=None)
+
+
+async def _delete_old_threads(interaction: discord.Interaction, season_id: str,
+                              threads: list[discord.Thread]) -> None:
+    """Delete each thread, reporting progress on the admin's ephemeral reply.
+    discord.py waits out rate limits itself; a permission error stops the run,
+    since every later delete would fail the same way."""
+    global _thread_cleanup_running   # set by the confirm click; cleared here
+    deleted, failed, stopped = 0, [], None
+    try:
+        for i, t in enumerate(threads, 1):
+            _bulk_deleting.add(t.id)
+            try:
+                await t.delete()
+                deleted += 1
+            except discord.NotFound:
+                _bulk_deleting.discard(t.id)
+                deleted += 1                      # already gone — the goal either way
+            except discord.Forbidden as e:
+                _bulk_deleting.discard(t.id)
+                stopped = (f"the bot lacks **Manage Threads** in {_ch('results_reporting')} "
+                           f"(`{e.text}`)")
+                break
+            except discord.HTTPException as e:
+                _bulk_deleting.discard(t.id)
+                failed.append(f"{t.name[:60]}: {e.status}")
+            if i % _THREAD_CLEANUP_PROGRESS_EVERY == 0:
+                try:
+                    await interaction.edit_original_response(
+                        content=f"🗑 Deleting… {i}/{len(threads)}")
+                except discord.HTTPException:
+                    pass                          # token expired after 15 min — keep going
+    except Exception as e:
+        print(f"  ✗ thread clean-up crashed:\n{traceback.format_exc()}")
+        stopped = f"`{type(e).__name__}: {e}`"
+    finally:
+        _thread_cleanup_running = False
+
+    print(f"  🗑 Thread clean-up: {deleted} deleted, {len(failed)} failed"
+          + (f", stopped: {stopped}" if stopped else ""))
+    msg = f"✅ Deleted **{deleted}** of {len(threads)} old thread(s) from {_ch('results_reporting')}."
+    if failed:
+        msg += f"\n⚠️ {len(failed)} failed:\n" + "\n".join(f"• {f}" for f in failed[:10])
+    if stopped:
+        msg = f"⚠️ Stopped after {deleted} of {len(threads)}: {stopped}. Run it again once fixed."
+    elif not failed:
+        await _season_close_mark(season_id, threads_deleted=_now_et().date().isoformat(),
+                                 threads_deleted_n=deleted)
+    await _refresh_season_close_quietly(season_id)
+
+    try:
+        await interaction.edit_original_response(content=msg[:1990])
+    except discord.HTTPException:
+        # Past the 15-minute interaction window — say it where admins will see it.
+        ch = interaction.guild.get_channel(SEASON_CLOSE_CHANNEL_ID)
+        if ch:
+            await ch.send(f"<@{interaction.user.id}> {msg}"[:1990],
+                          allowed_mentions=discord.AllowedMentions(users=True))
+
+
 async def _season_close_action(interaction: discord.Interaction, season_id: str, action: str) -> None:
     if interaction.user.id not in ADMIN_USER_IDS:
         await interaction.response.send_message("⚠️ Admins only.", ephemeral=True)
@@ -2286,6 +2478,9 @@ async def _season_close_action(interaction: discord.Interaction, season_id: str,
         return
     if action == 'send_invites':
         await _invite_preview(interaction, season_id)
+        return
+    if action == 'delete_threads':
+        await _thread_cleanup_preview(interaction, season_id)
         return
     handler = _SEASON_CLOSE_ACTIONS.get(action)
     if not handler:

@@ -13,6 +13,7 @@ edited in place, refreshed on every button click and daily at `DIGEST_HOUR_ET`:2
 | 3. Invitational | **Submit invitational URL** (opens a box → the usual ✅/❌ preview; ✅ also grants roles) or **No invitational** | marker `invitational`, or registry G/H carry the season — and the roles are on Discord |
 | 4. Rollover | **Roll over to S##** — appears only once step 2 is recorded and the next row is complete; re-validated at click time | marker `rolled_over`, or the pointer is past the season |
 | 5. Archive | **Archive S##** — after the rollover | marker `archived`, or the Archive sheet has `S## Leaderboard` |
+| 6. Old threads | **Delete old threads** — after the archive; previews the count, nothing is deleted until confirmed | marker `threads_deleted` |
 
 Step 1 is done at season end; steps 2–5 are for after the invitational. That order is shown, not
 enforced — the invites read `S## Leaderboard` by name, so nothing later in the list can break them.
@@ -73,6 +74,21 @@ and check it with `/seasons`. The checklist links the tab and has a **Reload** b
   so Discord IDs survive. The `S## Invitational RSVP` tab (names, pronouns, emails) is never
   copied: it stays in the private Bot Database sheet and is kept, not deleted
 - Leaves the League sheet tabs intact — delete them by hand once you've checked the archive
+
+## Delete old results threads (step 6)
+
+- Deletes every `#results-reporting` thread created before the **current** season started (ET
+  midnight), so it sweeps up any earlier season too. Only offered after the archive, which comes
+  after the rollover — before that, "current" is still the season being closed
+- Keeps pinned posts, and any thread the current season's Events tab links to
+- Safe because the archived Events tab holds every reported RPH URL; nothing is rebuilt from the
+  threads. The cost: thread links in archived Events tabs stop resolving
+- `on_thread_delete` normally clears a deleted thread's row from the current Events tab. The
+  clean-up puts each ID in `_bulk_deleting` first so that handler skips it — otherwise every
+  delete costs a Sheets read, and a run before rollover would clear the closing season's rows
+- Runs as a background task (hundreds of deletes outlast the 15-minute interaction token); the
+  final report falls back to the season-close channel. A missing **Manage Threads** permission
+  stops the run and leaves the step open
 
 ## How Season Config Works
 
