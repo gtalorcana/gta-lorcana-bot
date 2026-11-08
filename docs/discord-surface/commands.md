@@ -16,7 +16,7 @@
 | `/invite-set <player> [status] [name] [pronouns] [email] [season_id]` | Admin | Set an Invitational invitee's status: record an answer from someone not on Discord, undo a decline (`pending` gives a fresh deadline and restores channel access), or free a duplicate account's spot. A decline or withdraw invites the next player. `name` / `pronouns` / `email` record their RSVP details in the private `S## Invitational RSVP` tab. Invites themselves are sent from the season-close checklist. See `invitational-invites.md` |
 | `/tidy-registry` | Admin | Remove blank rows from the Player Registry, refresh display names from this season's sheets, and sort by rarity tier, newest season first |
 | `/where-to-play` | Admin | Manually trigger a `#where-to-play` refresh |
-| `/seasons [reload]` | Admin | Show the season calendar as the bot reads it, what each digest resolves to, and any problems with the Seasons tab. Read-only |
+| `/seasons [reload]` | Admin | Show the current and upcoming seasons as the bot reads them (past rows stay in the tab, hidden here), what each digest resolves to, and any problems with the Seasons tab. Read-only |
 | `/set-champs` | Admin | Manually refresh and post the Set Champs digest |
 | `/ccqs` | Admin | Manually refresh and post the CCQ digest in `#ccqs`. No season involved — a rolling six-month lookahead |
 | `/prereleases` | Admin | Manually refresh and post the prerelease digest. The window comes from the **Seasons** tab — it is the incoming season's, not the current one's |

@@ -5443,14 +5443,22 @@ async def seasons_command(interaction: discord.Interaction, reload: bool = True)
 
     lines = [f"🗓️ **Season calendar** — current: **{season.CURRENT_SEASON}** "
              f"(source: `{season.CALENDAR_SOURCE}`)", ""]
-    if season.SEASONS:
-        for row in season.SEASONS:
+    # Past seasons stay in the tab (a closing season's row is still read for its
+    # invitational and checklist) but aren't worth showing here. A row whose id
+    # doesn't parse is kept in view — it's more likely a typo than history.
+    cur_num = _season_num(season.CURRENT_SEASON)
+    shown   = [r for r in season.SEASONS
+               if cur_num is None or (_season_num(r['season']) or cur_num) >= cur_num]
+    if shown:
+        for row in shown:
             marker   = " ◀ current" if row['season'] == season.CURRENT_SEASON else ""
             set_name = f" — {row['set_name']}" if row.get('set_name') else ""
             lines.append(f"**{row['season']}**{set_name}{marker}")
             lines.append(f"  Prerelease: {row.get('prerelease_start') or '—'} → {row.get('prerelease_end') or '—'}")
             lines.append(f"  Season:     {row.get('season_start') or '—'} → {row.get('season_end') or '—'}")
             lines.append(f"  Set Champs: {row.get('set_champs_start') or '—'} → {row.get('set_champs_end') or '—'}")
+    elif season.SEASONS:
+        lines.append(f"*No rows for {season.CURRENT_SEASON} or later.*")
     else:
         lines.append("*No rows loaded from the Seasons tab.*")
 
