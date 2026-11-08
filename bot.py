@@ -16,8 +16,8 @@ Features:
   - /ccqs            — manually refresh and post the CCQ update (admins only)
   - event_digests_daily — refreshes the Set Champs and prerelease digests each morning
   - season_close_daily — posts/refreshes the end-of-season checklist in the mod channel
-  - on_member_join   — Common for everyone; restores a returning member's roles,
-                       or suggests a link if they match an unlinked player
+  - on_member_join / on_member_update — once a member has accepted the rules: Common,
+                       restores a returning member's roles, or suggests a link
   - where_to_play_weekly — refreshes #where-to-play every Sunday evening
 
 Requirements:
@@ -1225,16 +1225,37 @@ async def on_thread_delete(thread: discord.Thread):
 @bot.event
 async def on_member_join(member: discord.Member):
     """
+    Welcome a new member — unless rules screening is on and they haven't accepted
+    yet. Discord counts any role given to a pending member as passing screening,
+    so Common (and any restored role) waits for on_member_update.
+    """
+    if member.bot:
+        return
+    if member.pending:
+        print(f"  ⏸ {member.display_name} joined — waiting for them to accept the rules")
+        return
+    await _welcome_member(member)
+
+
+@bot.event
+async def on_member_update(before: discord.Member, after: discord.Member):
+    """The moment a member accepts the server rules (pending → not pending)."""
+    if after.bot or not before.pending or after.pending:
+        return
+    print(f"  ✓ {after.display_name} accepted the rules")
+    await _welcome_member(after)
+
+
+async def _welcome_member(member: discord.Member) -> None:
+    """
     Common for everyone. A returning linked member gets their earned roles back;
     anyone else is checked against the unlinked players, since a player skipped
     for want of a matching member may be exactly who just joined.
     """
-    if member.bot:
-        return
     common_role = member.guild.get_role(COMMON_ROLE_ID) if COMMON_ROLE_ID else None
     if common_role and common_role not in member.roles:
         try:
-            await member.add_roles(common_role, reason="auto-assign Common on join")
+            await member.add_roles(common_role, reason="Common: accepted the rules")
             print(f"  ✦ Assigned Common role to new member {member.display_name}")
         except discord.HTTPException as e:
             print(f"  ⚠ Failed to assign Common role to {member.display_name}: {e}")
@@ -1243,7 +1264,7 @@ async def on_member_join(member: discord.Member):
         if not await _restore_roles_on_rejoin(member):
             await _suggest_for_new_member(member)
     except Exception as e:
-        print(f"  ⚠ on_member_join registry check failed for {member.display_name}: {e}")
+        print(f"  ⚠ new-member registry check failed for {member.display_name}: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -5234,6 +5255,8 @@ async def _assign_all_from_registry(guild: discord.Guild, registry: list[dict],
         if not member:
             gone.append(entry['playhub_name'])
             continue
+        if member.pending:
+            continue   # a role would skip rules screening; theirs land on accepting
 
         added, errs = await _assign_recorded_roles(
             guild, member, recorded, "assign-roles-from-registry"
