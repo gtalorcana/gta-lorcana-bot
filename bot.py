@@ -677,12 +677,34 @@ async def on_ready():
     print(f"  Watching {_ch('announcements')} for website sync")
     print(f"  Watching {_ch('results_reporting')} for results processing")
 
-    # Load Bot State: initialise season config and restore persisted message IDs
+    # Load Bot State: initialise season config and restore persisted message IDs.
+    # Retry a transient Sheets error (a 503 on 2026-11-07) before giving up: one
+    # failed read here leaves the season at the constants default with no dates,
+    # empties every restored message ID (so the next digest or where-to-play post
+    # duplicates instead of editing) and forgets open invitationals, all until
+    # the next restart.
     loop = asyncio.get_running_loop()
-    state, problems = await _reload_season(loop)
+    for delay in (5, 15, 30, 60, 120, None):
+        state, problems = await _reload_season(loop)
+        read_failed = not state and any(p.startswith("Could not read") for p in problems)
+        if not read_failed or delay is None:
+            break
+        print(f"  ↻ Season config read failed — retrying in {delay}s")
+        await asyncio.sleep(delay)
     boot_state = state   # `state` is reused as a label further down
 
-    if season.SEASON_START_DATE is None:
+    if read_failed:
+        print(f"  ✗ CRITICAL: Could not read Bot State / Seasons tab at boot — season-dependent tasks will not run.")
+        mod_ch = bot.get_channel(MOD_CHANNEL_ID)
+        if mod_ch:
+            await mod_ch.send(
+                "⚠️ **Couldn't read Bot State or the Seasons tab at startup** (Google Sheets "
+                "error, retried for about 4 minutes). The bot doesn't know the current season "
+                "and won't process results or post digests. Restart it once Sheets is back: "
+                f"`flyctl machine restart`.\n• {problems[0][:300]}"
+            )
+        problems = []
+    elif season.SEASON_START_DATE is None:
         print(f"  ✗ CRITICAL: Season dates not configured — season-dependent tasks will not run.")
         mod_ch = bot.get_channel(MOD_CHANNEL_ID)
         if mod_ch:
