@@ -1,13 +1,17 @@
-## ***Please update your Server Name to your real name so people know who you are.***
+## ***Please set your server nickname to your real name or your Play Hub name, so we can reach you if you qualify for the Invitational.***
 
 ### Server Rules
-1. ***Be Respectful***: Treat others with kindness and respect. No hate speech, harassment, or personal attacks will be tolerated.
-2. ***Keep it Clean***: Keep conversations and content appropriate for all ages. No explicit or offensive language, images, or topics.
-3. ***Stay On Topic***: Keep discussions relevant to the channels you’re in. Off-topic conversations should be taken to the appropriate channel or a designated off-topic section.
-4. ***No Spamming***: Avoid excessive posting of messages, images, or links. Spamming disrupts the flow of conversation and can be annoying to others.
-5. ***Respect Privacy***: Do not share personal information about yourself or others. Respect others’ privacy and refrain from sharing private conversations without consent.
-6. ***Follow Discord TOS***: Abide by Discord’s Terms of Service and Community Guidelines. Any content or behavior that violates these rules will result in appropriate action.
-7. ***Listen to Staff***: Follow instructions from moderators and administrators. Their decisions are final and should be respected.
-8. ***No Advertising***: Do not promote external products, services, or servers without permission from server staff. Unauthorized advertising will result in immediate removal.
-9. ***Use Channels Appropriately***: Post content in the appropriate channels. Each channel has a specific purpose, so please respect their intended use.
-10. ***Report Violations***: If you witness any violations of these rules, report them to server staff immediately. Your cooperation helps maintain a positive and welcoming community.
+1. ***Be Respectful***: Treat everyone with kindness. No hate speech, harassment, or personal attacks.
+2. ***Keep it All-Ages***: Lorcana is a family game. No explicit or offensive language, images, or topics.
+3. ***Use the Right Channel***: Keep conversations in the channel they belong to. Each channel's description says what it's for.
+4. ***No Spamming***: No flooding messages, images, or links, and no mass mentions.
+5. ***Promote in the Right Place***: Local Lorcana events go in #store-promos. Your own content (streams, videos, art, shops) goes in #self-promotion. Any other advertising needs staff permission.
+6. ***No Buying, Selling, or Trading***: This server is for the league. Take trades and sales elsewhere.
+7. ***Watch for Scam DMs***: Staff will never DM you asking for money, gift codes, or to click a link. Report DMs like that to staff.
+8. ***Respect Privacy***: Don't share anyone else's personal information, or private conversations, without their consent.
+9. ***Play Fair in the League***: Report results honestly. Falsified or fixed results, collusion, or playing on someone else's Play Hub account can get you removed from the league. See #league-rules.
+10. ***Event Conduct Counts***: Store rules apply at events, and how you treat people there counts here too.
+11. ***Follow Discord's Rules***: Abide by Discord's Terms of Service and Community Guidelines.
+12. ***Listen to Staff***: Follow instructions from staff. Their decisions are final.
+13. ***Report Problems***: DM a staff member (Enchanted role) about rule-breaking or anything that makes you uncomfortable. Keep it out of public channels.
+14. ***How Rules Are Enforced***: Usually a warning, then a timeout, then a ban. Scams, harassment, and raids go straight to a ban.

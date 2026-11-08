@@ -15,6 +15,9 @@ Run tournaments with rounds and match results recorded. Prizing and structure ar
 **What stores are participating?**
 Any store within 250 miles of Toronto, as long as someone is able to report results. Core Constructed and Infinity Constructed events count, local CCQs included — Set Championships do not.
 
+**What gets you removed from the league?**
+Falsified or fixed results, collusion, or playing on someone else's Play Hub account. Removed players are taken off the leaderboard, so they can't qualify for the Invitational.
+
 **Who organizes this?**
 <@904550642213875723> and volunteers.
 
