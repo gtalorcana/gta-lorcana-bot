@@ -18,4 +18,4 @@ The code only works once your account is approved — the bot activates it for y
 
 _The discount is attached to your enterthebattlefield.ca account (the email you enter) — you only need to apply once._
 
-Questions? Message <@361716209324130305> / <@904550642213875723>
+Questions? Ask in <#1346159732490240020>.

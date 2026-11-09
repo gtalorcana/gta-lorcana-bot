@@ -11,7 +11,13 @@ The ladder:
 @Enchanted — League Admin/Staff
 
 Getting your role:
-Roles are matched automatically at the end of each season using your Playhub username. I've done an initial pass to link accounts — if your role looks wrong or missing, message Ryan  / GTA Lorcana.
+Roles are matched automatically at the end of each season using your Playhub username. I've done an initial pass to link accounts — if your role looks wrong or missing, ask in #questions.
 To help keep things accurate going forward, try to keep your **Discord display name consistent with your Ravensburger Play Hub display name**.
 
 _Roles are never taken away — once earned, yours to keep._
+
+🔔 **Pings and regions**
+Choose what you get pinged for in <id:customize>:
+• **📣 League News**: season start and end, rule changes, Invitational qualifiers
+• **Region roles**: events in Toronto, York Region, Peel, Halton/Hamilton, Durham/Peterborough or Southwest
+Change them any time.

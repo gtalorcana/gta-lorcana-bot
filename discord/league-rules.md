@@ -68,7 +68,7 @@ Roles reflect your competitive achievements in the GTA Lorcana League. They are 
 
 Roles are awarded at the end of each season based on your final standing. Enchanted and mod-appointed roles are assigned manually by Ryan.
 
-Your Play Hub account is linked to your Discord account so your results count toward your roles. A mod confirms each link — if your role looks wrong or missing, message Ryan.
+Your Play Hub account is linked to your Discord account so your results count toward your roles. A mod confirms each link — if your role looks wrong or missing, ask in #questions.
 
 To help keep things accurate going forward, try to keep your **Discord display name consistent with your Playhub username**.
 
