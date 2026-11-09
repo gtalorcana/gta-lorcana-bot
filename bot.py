@@ -61,6 +61,7 @@ from constants import (
     DISCORD_BOT_TOKEN,
     WORKER_URL,
     WORKER_SECRET,
+    WEBSITE_SYNC_ENABLED,
     CHANNELS,
     MOD_CHANNEL_ID,
     SEASON_CLOSE_CHANNEL_ID,
@@ -343,7 +344,7 @@ def _build_where_to_play_messages(store_analysis: dict, as_of: date) -> list[str
 @tasks.loop(minutes=30)
 async def keepalive():
     """Periodic heartbeat to confirm the bot is alive and connected."""
-    print(f"  ♥ Heartbeat — bot alive, watching {_ch('announcements')} and {_ch('results_reporting')}")
+    print(f"  ♥ Heartbeat — bot alive, watching {_ch('results_reporting')}")
 
 
 # ── Where-to-Play tasks ────────────────────────────────
@@ -675,7 +676,8 @@ async def _reload_season(loop) -> tuple[dict, list[str]]:
 async def on_ready():
     global _where_to_play_msg_ids
     print(f"✦ GTA Lorcana Bot online as {bot.user}")
-    print(f"  Watching {_ch('announcements')} for website sync")
+    print(f"  Website sync from {_ch('announcements')}: "
+          + ("on" if WEBSITE_SYNC_ENABLED else "off (WEBSITE_SYNC_ENABLED)"))
     print(f"  Watching {_ch('results_reporting')} for results processing")
 
     # Load Bot State: initialise season config and restore persisted message IDs.
@@ -820,7 +822,7 @@ async def on_message(message: discord.Message):
     """Auto-sync any message posted in #announcements to the website."""
     if message.author.bot:
         return
-    if message.channel.id != CHANNELS["announcements"]:
+    if message.channel.id != CHANNELS["announcements"] or not WEBSITE_SYNC_ENABLED:
         await bot.process_commands(message)
         return
     if not message.content and not message.embeds:
@@ -1183,7 +1185,7 @@ async def on_message_delete(message: discord.Message):
     """Sync announcement deletion to the website."""
     if message.author.bot:
         return
-    if message.channel.id != CHANNELS["announcements"]:
+    if message.channel.id != CHANNELS["announcements"] or not WEBSITE_SYNC_ENABLED:
         return
 
     print(f"  🗑 Announcement deleted by {message.author.display_name}: {message.content[:60]}...")
@@ -2026,7 +2028,7 @@ async def _render_season_close(season_id: str, snap: dict, guild: discord.Guild,
         button('skip_invite', "No invitational")
     lines.append("")
 
-    # ── 3. Rollover ─────────────────────────────────────────────────
+    # ── 4. Rollover ─────────────────────────────────────────────────
     cur_num = _season_num(season.CURRENT_SEASON)
     rolled  = bool(entry.get('rolled_over')) or (cur_num is not None and cur_num > seq)
     nrow    = season.get_season(nxt) or {}
@@ -2083,27 +2085,47 @@ async def _render_season_close(season_id: str, snap: dict, guild: discord.Guild,
         button('reload', "Reload")
     lines.append("")
 
-    # ── 4. Archive ──────────────────────────────────────────────────
+    # ── 5. Announce the new season ──────────────────────────────────
+    # Its own step, not part of the rollover: it pings League News, so it gets a
+    # preview and goes out when the admin chooses, not whenever the rollover ran.
+    announced = entry.get('announced')
+    to_season = entry.get('rolled_to') or season.CURRENT_SEASON
+    if announced == 'skipped':
+        lines.append(f"**5. ✅ Announce {to_season}** — skipped")
+    elif announced:
+        link = (f" · https://discord.com/channels/{DISCORD_GUILD_ID}/{CHANNELS['announcements']}/"
+                f"{entry['announce_msg']}" if entry.get('announce_msg') else "")
+        lines.append(f"**5. ✅ Announced {to_season}** on {_short_date(announced)}{link}")
+    elif not rolled:
+        lines.append(f"**5. 🔒 Announce {nxt}** — unlocks after the rollover")
+    else:
+        lines.append(f"**5. ⏳ Announce {to_season}** — posts the season start in "
+                     f"{_ch('announcements')} and pings League News. Previews it first.")
+        button('announce', f"Announce {to_season}", discord.ButtonStyle.primary)
+        button('skip_announce', "Don't announce")
+    lines.append("")
+
+    # ── 6. Archive ──────────────────────────────────────────────────
     archived = entry.get('archived') or (_now_et().date().isoformat() if snap['archived_tab'] else None)
     if archived:
         when = f" on {_short_date(entry['archived'])}" if entry.get('archived') else ""
-        lines.append(f"**5. ✅ Archived {season_id}**{when}")
+        lines.append(f"**6. ✅ Archived {season_id}**{when}")
     elif not rolled:
-        lines.append(f"**5. 🔒 Archive {season_id}** — unlocks after the rollover")
+        lines.append(f"**6. 🔒 Archive {season_id}** — unlocks after the rollover")
     else:
-        lines.append(f"**5. ⏳ Archive {season_id}** — copies the {season_id} tabs to the Archive sheet")
+        lines.append(f"**6. ⏳ Archive {season_id}** — copies the {season_id} tabs to the Archive sheet")
         button('archive', f"Archive {season_id}", discord.ButtonStyle.success)
     lines.append("")
 
-    # ── 6. Old results threads ──────────────────────────────────────
+    # ── 7. Old results threads ──────────────────────────────────────
     threads = entry.get('threads_deleted')
     if threads:
-        lines.append(f"**6. ✅ Deleted {entry.get('threads_deleted_n', 0)} old results thread(s)** "
+        lines.append(f"**7. ✅ Deleted {entry.get('threads_deleted_n', 0)} old results thread(s)** "
                      f"on {_short_date(threads)}")
     elif not archived:
-        lines.append("**6. 🔒 Delete old results threads** — unlocks after the archive")
+        lines.append("**7. 🔒 Delete old results threads** — unlocks after the archive")
     else:
-        lines.append(f"**6. ⏳ Delete old results threads** — every {_ch('results_reporting')} "
+        lines.append(f"**7. ⏳ Delete old results threads** — every {_ch('results_reporting')} "
                      f"thread from before {season.CURRENT_SEASON} started. Previews the count first.")
         button('delete_threads', "Delete old threads", discord.ButtonStyle.danger)
 
@@ -2111,12 +2133,14 @@ async def _render_season_close(season_id: str, snap: dict, guild: discord.Guild,
         lines += ["", "⚠️ **Couldn't read:** " + "; ".join(snap['errors'])[:500]]
 
     now = _now_et()
-    if done1 and done2 and rolled and archived and threads:
+    if done1 and done2 and rolled and announced and archived and threads:
         today = now.date().isoformat()
         inv_s = "skipped" if inv == 'skipped' else str(entry.get('invitational_n', len(stamped2)))
         summary = (f"Rare/Uncommon: {n1} · Invitational: {inv_s} · "
                    f"Rolled to {entry.get('rolled_to') or season.CURRENT_SEASON}"
                    f"{' ' + _short_date(entry['rolled_over']) if entry.get('rolled_over') else ''} · "
+                   + ("Not announced · " if announced == 'skipped'
+                      else f"Announced {_short_date(announced)} · ") +
                    f"Archived {_short_date(entry.get('archived') or today)} · "
                    f"{entry.get('threads_deleted_n', 0)} threads deleted")
         embed = make_embed(title=f"🏁 {season_id} closed — {_short_date(today)}",
@@ -2327,6 +2351,11 @@ async def _sc_rollover(interaction, season_id, loop) -> str:
             + "".join(f"\n\n{w}" for w in plan.warnings))
 
 
+async def _sc_skip_announce(interaction, season_id, loop) -> str:
+    await _season_close_mark(season_id, announced='skipped')
+    return "✅ Marked the new season as not announced by the bot."
+
+
 async def _sc_archive(interaction, season_id, loop) -> str:
     archived = await loop.run_in_executor(None, archive_season_data, season_id)
     if not archived:
@@ -2341,6 +2370,7 @@ _SEASON_CLOSE_ACTIONS = {
     'skip_invite': _sc_skip_invite,
     'reload':      _sc_reload,
     'rollover':    _sc_rollover,
+    'skip_announce': _sc_skip_announce,
     'archive':     _sc_archive,
 }
 
@@ -2518,6 +2548,120 @@ async def _delete_old_threads(interaction: discord.Interaction, season_id: str,
                           allowed_mentions=discord.AllowedMentions(users=True))
 
 
+# ── Step 5: announce the new season ─────────────────────────────────
+# One post in #announcements that pings League News — the role every member gets
+# with Common and can untick, which carries what @everyone used to. A preview,
+# then Send; the `announced` marker is re-read under the lock at send time, so a
+# stale preview or a second click can't ping everyone twice.
+
+_season_announce_lock = asyncio.Lock()
+
+
+def _season_announcement(row: dict) -> str:
+    """The season-start post for a Seasons tab row. Raises ValueError without dates."""
+    if not row or not row.get('season_start') or not row.get('season_end'):
+        raise ValueError(f"{(row or {}).get('season') or '?'} has no season start/end in the Seasons tab")
+    n     = row['season'].lstrip('S')
+    title = f"Season {n}" + (f": {row['set_name']}" if row.get('set_name') else "")
+    when  = _long_date(row.get('invitational_date'), weekday=True)
+    venue = row.get('invitational_venue')
+    invit = (f"The top {_inv.INVITE_SIZE} are invited to the Season {n} Invitational"
+             + (f" at {venue}" if venue else "")
+             + (f" on {when}, {_INVITATIONAL_TIME}" if when else "") + ".")
+    sc_start = row.get('set_champs_start')
+    sc_note  = ("\n\nThis season runs into Set Champs season. Locals and weeklies during it still "
+                "count; Set Champs events themselves don't."
+                if sc_start and sc_start <= row['season_end'] else "")
+    return (f"<@&{LEAGUE_NEWS_ROLE_ID}>\n\n"
+            f"🎉 **{title} is live!**\n"
+            f"📅 {_long_date(row['season_start'])} → {_long_date(row['season_end'])}\n\n"
+            f"Play league events at your local store and report them in "
+            f"<#{CHANNELS['results_reporting']}>. 🏆 {invit}{sc_note}\n\n"
+            f"Dates, scoring and tiebreakers: <#{LEAGUE_RULES_CHANNEL_ID}>. Good luck! 💜")
+
+
+async def _season_announce_preview(interaction: discord.Interaction, season_id: str) -> None:
+    """Show the post and ask to confirm. Nothing is sent from here."""
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    loop = asyncio.get_running_loop()
+    try:
+        entry = await loop.run_in_executor(None, _season_close_entry, season_id)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Couldn't read Bot State: `{e}`", ephemeral=True)
+        return
+    if entry.get('announced'):
+        await interaction.followup.send("✅ Already announced (or skipped).", ephemeral=True)
+        return
+    new_id = entry.get('rolled_to') or season.CURRENT_SEASON
+    try:
+        text = _season_announcement(season.get_season(new_id) or {})
+    except ValueError as e:
+        await interaction.followup.send(f"❌ {e}", ephemeral=True)
+        return
+    await interaction.followup.send(
+        f"**Preview:** this goes to {_ch('announcements')} and pings League News "
+        f"(shown here without pinging).\n\n{text}"[:1990],
+        ephemeral=True, allowed_mentions=_NO_PINGS,
+        view=_SeasonAnnounceView(interaction.user.id, season_id, new_id))
+
+
+class _SeasonAnnounceView(discord.ui.View):
+    """Send/Cancel under the preview. In-memory like _ThreadCleanupView: after a
+    restart the admin presses Announce again. The text is rebuilt at send time,
+    so a Seasons-tab fix between preview and send goes out."""
+
+    def __init__(self, admin_id: int, season_id: str, new_id: str):
+        super().__init__(timeout=900)
+        self.admin_id, self.season_id, self.new_id = admin_id, season_id, new_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.admin_id
+
+    @discord.ui.button(label="Send and ping League News", style=discord.ButtonStyle.danger)
+    async def send(self, interaction: discord.Interaction, _b: discord.ui.Button):
+        self.stop()
+        await interaction.response.edit_message(content="📣 Posting…", view=None)
+        msg = await _send_season_announcement(interaction.guild, self.season_id, self.new_id)
+        await _refresh_season_close_quietly(self.season_id)
+        await interaction.edit_original_response(content=msg[:1990])
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, _b: discord.ui.Button):
+        self.stop()
+        await interaction.response.edit_message(content="✖ Nothing posted.", view=None)
+
+
+async def _send_season_announcement(guild: discord.Guild, season_id: str, new_id: str) -> str:
+    """Post it once. Returns the outcome line for the admin."""
+    loop = asyncio.get_running_loop()
+    async with _season_announce_lock:
+        try:
+            entry = await loop.run_in_executor(None, _season_close_entry, season_id)
+        except Exception as e:
+            return f"❌ Couldn't read Bot State, so nothing was posted: `{e}`"
+        if entry.get('announced'):
+            return "✅ Already announced (or skipped). Nothing posted."
+        channel = guild.get_channel(CHANNELS['announcements'])
+        if channel is None:
+            return f"❌ Can't find {_ch('announcements')}."
+        try:
+            text = _season_announcement(season.get_season(new_id) or {})
+            msg  = await channel.send(text, allowed_mentions=discord.AllowedMentions(
+                everyone=False, users=False, roles=[discord.Object(LEAGUE_NEWS_ROLE_ID)]))
+        except ValueError as e:
+            return f"❌ {e}"
+        except discord.Forbidden as e:
+            return (f"❌ The bot can't post in {_ch('announcements')} (`{e.text}`). It needs View "
+                    f"Channel, Send Messages and Mention All Roles there — League News isn't "
+                    f"mentionable by everyone.")
+        print(f"  📣 Announced {new_id} in #{channel.name} ({msg.id})")
+        if not await _season_close_mark(season_id, announced=_now_et().date().isoformat(),
+                                        announce_msg=str(msg.id)):
+            return (f"⚠️ Posted {msg.jump_url}, but couldn't save that it was — **don't press "
+                    f"Announce again**; press **Don't announce** to tick the step instead.")
+        return f"✅ Announced {new_id}: {msg.jump_url}"
+
+
 async def _season_close_action(interaction: discord.Interaction, season_id: str, action: str) -> None:
     if interaction.user.id not in ADMIN_USER_IDS:
         await interaction.response.send_message("⚠️ Admins only.", ephemeral=True)
@@ -2530,6 +2674,9 @@ async def _season_close_action(interaction: discord.Interaction, season_id: str,
         return
     if action == 'delete_threads':
         await _thread_cleanup_preview(interaction, season_id)
+        return
+    if action == 'announce':
+        await _season_announce_preview(interaction, season_id)
         return
     handler = _SEASON_CLOSE_ACTIONS.get(action)
     if not handler:

@@ -3,7 +3,7 @@
 Discord bot for the Greater Toronto Area Lorcana community.
 
 - Processes tournament results submitted by organizers and syncs standings to Google Sheets
-- Auto-syncs `#announcements` posts to the community website via Cloudflare Worker
+- Can sync `#announcements` posts to the community website via Cloudflare Worker (off unless `WEBSITE_SYNC_ENABLED=1`)
 - Classifies Ontario stores by how regularly they run events and posts a weekly `#where-to-play` digest
 - DMs subscribers when a spot opens at a full RPH event
 - Assigns league rarity roles (Common → Uncommon → Rare → Super Rare → Legendary) based on participation and standings

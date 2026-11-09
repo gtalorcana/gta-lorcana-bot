@@ -12,11 +12,19 @@ edited in place, refreshed on every button click and daily at `DIGEST_HOUR_ET`:2
 | 2. Rare / Uncommon | **Record & assign roles** — previews the final leaderboard's earners first | marker `rare_uncommon`, or registry I/J carry the season — *and* every linked member holds those roles |
 | 3. Invitational | **Submit invitational URL** (opens a box → the usual ✅/❌ preview; ✅ also grants roles) or **No invitational** | marker `invitational`, or registry G/H carry the season — and the roles are on Discord |
 | 4. Rollover | **Roll over to S##** — appears only once step 2 is recorded and the next row is complete; re-validated at click time | marker `rolled_over`, or the pointer is past the season |
-| 5. Archive | **Archive S##** — after the rollover | marker `archived`, or the Archive sheet has `S## Leaderboard` |
-| 6. Old threads | **Delete old threads** — after the archive; previews the count, nothing is deleted until confirmed | marker `threads_deleted` |
+| 5. Announce | **Announce S##** — after the rollover; previews the post, then **Send and ping League News** posts it in #announcements. **Don't announce** ticks it without posting | marker `announced` (a date, or `skipped`) |
+| 6. Archive | **Archive S##** — after the rollover | marker `archived`, or the Archive sheet has `S## Leaderboard` |
+| 7. Old threads | **Delete old threads** — after the archive; previews the count, nothing is deleted until confirmed | marker `threads_deleted` |
 
-Step 1 is done at season end; steps 2–5 are for after the invitational. That order is shown, not
+Step 1 is done at season end; steps 2–6 are for after the invitational. That order is shown, not
 enforced — the invites read `S## Leaderboard` by name, so nothing later in the list can break them.
+
+The announcement is a separate step from the rollover, not part of it, because it pings League News (the
+opt-out role that replaced @everyone for league news): it gets a preview, and it goes out when
+the admin chooses rather than whenever the rollover ran. The text is built from the new season's
+Seasons tab row (`_season_announcement`); the marker is re-read under a lock at send time, so a
+second click can't ping twice. The bot needs **View Channel, Send Messages and Mention All Roles**
+in #announcements: @everyone's Send is denied there, and League News isn't mentionable.
 
 Steps 2 and 3 show each player's progression — highest rarity before → after, e.g.
 `Common → Rare (+Uncommon)` — split into **Moving up**, **Already hold theirs** (nothing new to

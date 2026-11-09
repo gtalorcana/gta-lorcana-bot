@@ -6,6 +6,9 @@ load_dotenv()
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 WORKER_URL        = os.getenv("WORKER_URL")
 WORKER_SECRET     = os.getenv("WORKER_SECRET")
+# Copy #announcements posts to gtalorcana.ca. Off while we see whether anyone misses it
+# (issue #7); the handlers stay so turning it back on is this one line.
+WEBSITE_SYNC_ENABLED = os.getenv("WEBSITE_SYNC_ENABLED", "0") == "1"
 
 # Discord IDs
 DISCORD_GUILD_ID = os.getenv("DISCORD_GUILD_ID", "1253915141716578314")

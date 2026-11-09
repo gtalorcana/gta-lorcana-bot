@@ -14,7 +14,7 @@ New here? Read #community-rules and #league-rules, then pick your regions and pi
 Server rules. Breaking them gets a warning, then a timeout, then a ban.
 
 **#announcements** (read-only)
-League and server news. Pings @League News. Posts here also appear on gtalorcana.ca.
+League and server news. Pings @League News.
 
 ---
 
