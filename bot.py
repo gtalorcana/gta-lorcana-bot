@@ -2572,10 +2572,15 @@ def _season_announcement(row: dict) -> str:
     sc_note  = ("\n\nThis season runs into Set Champs season. Locals and weeklies during it still "
                 "count; Set Champs events themselves don't."
                 if sc_start and sc_start <= row['season_end'] else "")
+    # The rollover often runs before the next season starts (S14 ends Jan 13, S15
+    # starts Feb 7), so the headline follows the date, not the click.
+    started = _now_et().date() >= date.fromisoformat(row['season_start'])
+    head    = (f"🎉 **{title} is live!**" if started
+               else f"🎉 **{title} starts {_long_date(row['season_start'], weekday=True)}!**")
     return (f"<@&{LEAGUE_NEWS_ROLE_ID}>\n\n"
-            f"🎉 **{title} is live!**\n"
+            f"{head}\n"
             f"📅 {_long_date(row['season_start'])} → {_long_date(row['season_end'])}\n\n"
-            f"Play league events at your local store and report them in "
+            f"Play league events at your local store{'' if started else ' once it starts'}, and report them in "
             f"<#{CHANNELS['results_reporting']}>. 🏆 {invit}{sc_note}\n\n"
             f"Dates, scoring and tiebreakers: <#{LEAGUE_RULES_CHANNEL_ID}>. Good luck! 💜")
 
