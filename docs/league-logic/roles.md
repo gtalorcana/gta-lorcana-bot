@@ -5,6 +5,7 @@ Members earn rarity roles based on league participation. Roles are additive — 
 | Role | How earned |
 |------|------------|
 | Common | Assigned automatically once a member has accepted the server rules (on join if rules screening is off). Discord treats any role given to a pending member as passing screening, so no role — Common, restored, or from the registry sweep — goes to a member who has not accepted |
+| League News | Ping role, not a rarity. Granted with Common when a member accepts the rules, so it's opt-out: members untick it in Channels & Roles (it's an Onboarding answer). Granted only then, so an untick sticks until they rejoin. Not touched by the registry or season close |
 | Uncommon | 10+ distinct events played in the season |
 | Rare | Finished top 32 on the season leaderboard |
 | Super Rare | Top 8 finisher at an invitational event |

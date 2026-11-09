@@ -61,6 +61,9 @@ RARE_ROLE_ID       = int(os.getenv("RARE_ROLE_ID",       1347683773256568964))
 SUPER_RARE_ROLE_ID = int(os.getenv("SUPER_RARE_ROLE_ID", 1347683770815479819))
 LEGENDARY_ROLE_ID  = int(os.getenv("LEGENDARY_ROLE_ID",  1347683767367503953))
 
+# Ping role granted alongside Common; members untick it in Channels & Roles (an Onboarding answer)
+LEAGUE_NEWS_ROLE_ID = int(os.getenv("LEAGUE_NEWS_ROLE_ID", 1569168573975371941))
+
 # All accounts authorised to run admin/mod bot commands: the GTA Lorcana account, then Ryan's own
 ADMIN_USER_IDS = [904550642213875723, 361716209324130305]
 # Who players are told to message, and who the bot DMs, about bot issues — Ryan's personal account

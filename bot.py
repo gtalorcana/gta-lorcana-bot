@@ -81,6 +81,7 @@ from constants import (
     WHERE_TO_PLAY_POST_DAY,
     WHERE_TO_PLAY_POST_HOUR_ET,
     COMMON_ROLE_ID,
+    LEAGUE_NEWS_ROLE_ID,
     UNCOMMON_ROLE_ID,
     RARE_ROLE_ID,
     LEGENDARY_ROLE_ID,
@@ -1248,17 +1249,22 @@ async def on_member_update(before: discord.Member, after: discord.Member):
 
 async def _welcome_member(member: discord.Member) -> None:
     """
-    Common for everyone. A returning linked member gets their earned roles back;
-    anyone else is checked against the unlinked players, since a player skipped
-    for want of a matching member may be exactly who just joined.
+    Common and League News for everyone. A returning linked member gets their earned
+    roles back; anyone else is checked against the unlinked players, since a player
+    skipped for want of a matching member may be exactly who just joined.
+
+    League News is opt-out: @everyone is kept for emergencies, so a member who skipped
+    the Onboarding question would otherwise never hear a season start. They untick it
+    in Channels & Roles. It's granted only here, so an untick sticks until they rejoin.
     """
-    common_role = member.guild.get_role(COMMON_ROLE_ID) if COMMON_ROLE_ID else None
-    if common_role and common_role not in member.roles:
+    give = [r for r in (member.guild.get_role(i) for i in (COMMON_ROLE_ID, LEAGUE_NEWS_ROLE_ID) if i)
+            if r and r not in member.roles]
+    if give:
         try:
-            await member.add_roles(common_role, reason="Common: accepted the rules")
-            print(f"  ✦ Assigned Common role to new member {member.display_name}")
+            await member.add_roles(*give, reason="Accepted the rules")
+            print(f"  ✦ Assigned {', '.join(r.name for r in give)} to new member {member.display_name}")
         except discord.HTTPException as e:
-            print(f"  ⚠ Failed to assign Common role to {member.display_name}: {e}")
+            print(f"  ⚠ Failed to assign {', '.join(r.name for r in give)} to {member.display_name}: {e}")
 
     try:
         if not await _restore_roles_on_rejoin(member):
