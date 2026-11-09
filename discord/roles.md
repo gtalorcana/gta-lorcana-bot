@@ -1,23 +1,21 @@
-:star: League Roles
-Roles reflect your competitive achievements in the GTA Lorcana League. They are assigned automatically based on your results — the higher you climb, the rarer your role.
+⭐ **League Roles**
+Roles reflect your results in the GTA Lorcana League. They're assigned automatically at the end of each season, and the higher you climb, the rarer your role.
 
-The ladder:
-@Common — League member
-@Uncommon — Attended 10+ events in a Season
-@Rare — Top 32 on the Season Leaderboard
-@Super Rare — Top 8 at a Season Invitational
-@Legendary — Champion of an Season Invitational
+**The ladder**
+<@&1347683977040891966>: league member
+<@&1347683778318827656>: 10+ events in a season
+<@&1347683773256568964>: top 32 on the season leaderboard
+<@&1347683770815479819>: top 8 at a season Invitational
+<@&1347683767367503953>: Invitational champion
+<@&1346139045624811631>: league staff
 
-@Enchanted — League Admin/Staff
+**How your role is matched**
+Your results are linked to your Discord account through your Play Hub ID, and a mod confirms each link. Keep your server nickname the same as your Play Hub name to make that easy. Role wrong or missing? Ask in <#1346159732490240020>.
 
-Getting your role:
-Roles are matched automatically at the end of each season using your Playhub username. I've done an initial pass to link accounts — if your role looks wrong or missing, ask in #questions.
-To help keep things accurate going forward, try to keep your **Discord display name consistent with your Ravensburger Play Hub display name**.
-
-_Roles are never taken away — once earned, yours to keep._
+*Roles are never taken away. Leave and rejoin, and they come back automatically.*
 
 🔔 **Pings and regions**
 Choose what you get pinged for in <id:customize>:
-• **📣 League News**: season start and end, rule changes, Invitational qualifiers
-• **Region roles**: events in Toronto, York Region, Peel, Halton/Hamilton, Durham/Peterborough or Southwest
+• **📣 League News**: season news and Invitational qualifiers. You get it by default.
+• **📍 Region roles**: events in Toronto, York Region, Peel, Halton/Hamilton, Durham/Peterborough or Southwest. Pick as many as you like.
 Change them any time.

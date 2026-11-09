@@ -32,7 +32,7 @@ the biggest net they can reach, and it would become @everyone by another name.
 
 ### Ping role
 
-**League News**: season start and end, rule changes, qualifier announcements. Granted with
+**League News**: season start and end, and Invitational qualifiers. Granted with
 Common (opt-out); members untick it in Channels & Roles. Staff ping it instead of @everyone,
 which is kept for emergencies.
 
@@ -86,7 +86,7 @@ hide channels, which the defaults already settle.
 
 | Title | Description | Role |
 |---|---|---|
-| 📣 League News | Season start and end, rule changes, Invitational qualifiers | League News |
+| 📣 League News | Season news and Invitational qualifiers | League News |
 
 One answer for now; a future ping role is another answer here.
 
@@ -117,16 +117,26 @@ Onboarding runs only on join, so the ~240 members already here never see it.
 2. **One @everyone announcement** in #discord-announcements (`<id:customize>` renders as a
    link to Channels & Roles):
 
-> 📍 **New: region roles**
-> Want to hear about events near you without everyone getting pinged? Pick your regions in
-> <id:customize>: Toronto, York Region, Peel, Halton/Hamilton, Durham/Peterborough, Southwest.
-> Pick as many as you like, and change them any time.
+> @everyone
 >
-> From now on, league announcements ping **@League News** instead of @everyone. You have it
-> already; turn it off in <id:customize> if you don't want it.
+> 📣 **Server update: pings, regions and #questions**
 >
-> Run a store or organize events? DM a staff member for **Event Organizer**, so you can ping
-> region roles in #store-promos.
+> **This is one of the last @everyone pings.** From now on, league announcements ping
+> **League News**: season news and Invitational qualifiers. You already have it,
+> so you won't miss anything. Don't want it? Untick it in <id:customize>. @everyone is now for
+> emergencies only.
+>
+> 📍 **New: region roles.** Want to hear about events near you? Pick your areas in
+> <id:customize>: Toronto, York Region, Peel, Halton/Hamilton, Durham/Peterborough and
+> Southwest. Pick as many as you like, and change them any time.
+>
+> 🏪 **Run a store or organize events?** DM me for the **Event Organizer** role, so you can
+> ping region roles in #store-promos.
+>
+> ❓ **Got a question?** Ask in #questions: the league, results, roles or the bot.
+>
+> I've also tidied the channels into **League**, **Find Events** and **Community**. Thanks for
+> playing! 💜
 
 3. **#start-here and the #league-rules FAQ** carry the `<id:customize>` link, for anyone who
    missed the announcement.
