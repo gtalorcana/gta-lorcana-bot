@@ -326,7 +326,7 @@ def _build_where_to_play_messages(store_analysis: dict, as_of: date) -> list[str
         "\u200b",
         "🏪 Don't see your store?",
         "Ask them to run the same event (same day, same time) two weeks in a row and it'll appear here automatically!",
-        "*If something looks off, DM <@904550642213875723> and we'll manually fix it.*",
+        "*If something looks off, ask in <#1346159732490240020> and we'll fix it.*",
         "",
         "ℹ️ How this works",
         "Ratings are based on historical RPH event data and update every Sunday.",

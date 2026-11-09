@@ -38,7 +38,7 @@ which is kept for emergencies.
 
 ### Event Organizer
 
-For store owners and event organizers. Granted by staff on request (DM a staff member). It
+For store owners and event organizers. Granted by Ryan on request (DM). It
 carries a #local-store-events channel override with **Mention @everyone, @here, and All Roles**, so
 organizers can ping region roles there and nowhere else. That permission also covers
 @everyone, which is why the role is staff-granted and not self-assigned, and why AutoMod
@@ -119,28 +119,30 @@ Onboarding runs only on join, so the ~240 members already here never see it.
 
 > @everyone
 >
-> 📍 **Action needed: pick your region**
+> 📢 **Discord updates**
 >
-> The league covers a lot of ground, and an event on the other side of it isn't much use to
-> you. So local event pings now go to **region roles** instead of @everyone, and you only hear
-> about events near you.
+> 📍 **Action needed: pick your region(s)**
+> Local event pings now go to region roles instead of @everyone, so you only hear about
+> events near you. **No region, no local event pings.**
+> 👉 Pick as many as you like in <id:customize>:
+> <@&1569166089718603846> · <@&1569166183301644388> · <@&1569166215161847991> · <@&1569166239262187642> · <@&1569166283784724571> · <@&1569166334137204847>
 >
-> **If you don't pick a region, you won't be pinged about local events.**
->
-> 👉 Open <id:customize> and pick every area you want to hear about:
-> Toronto · York Region · Peel · Halton/Hamilton · Durham/Peterborough · Southwest
->
-> Pick as many as you like, and change them any time.
->
-> 🏪 **Running a store or an event?** DM me for the **Event Organizer** role, so you can ping
-> these regions when you post in #local-store-events.
+> 🏪 **Running a store or an event?** DM me for the <@&1529167918041141441> role, so you can ping
+> regions in <#1555056444343197726>.
 >
 > 📣 **League News**
-> Season news and Invitational qualifiers now ping **League News** instead of @everyone. You
+> Season news and Invitational qualifiers now ping <@&1569168573975371941> instead of @everyone. You
 > already have it, so you won't miss anything. Don't want it? Untick it in the same place.
 > @everyone is now for emergencies only.
 >
-> ❓ **Got a question?** Ask in #questions: the league, results, roles or the bot.
+> 📋 **This season**
+> This season's dates and Invitational info are updated in <#1253923057828102175>.
+>
+> 💸 **Easier way to get ETB discount**
+> Played 3+ league events this season? Press the button in <#1255205802944233483> for the Enter the
+> Battlefield community discount.
+>
+> ❓ **Got a question?** Ask in <#1346159732490240020>: the league, results, roles or the bot.
 >
 > I've also tidied the channels into **League**, **Find Events** and **Community**. Thanks for
 > reading! 💜
@@ -212,7 +214,7 @@ Rules, scoring and the Invitational: #league-rules.
 
 **Getting pinged**
 Pick your regions and **League News** in <id:customize>. Choose as many regions as you like.
-Run a store or organize events? DM a staff member for the **Event Organizer** role, so you can
+Run a store or organize events? DM Ryan for the **Event Organizer** role, so you can
 ping region roles in #local-store-events.
 
 **Roles**

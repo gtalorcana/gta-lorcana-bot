@@ -40,7 +40,10 @@ Invitational champions and top 8s, season by season.
 ## Events
 
 **#local-store-events**
-Local Lorcana events only, one post per event. Event Organizers can ping the event's region role, plus a neighbouring one. Want the role? DM staff.
+Local Lorcana events only, one post per event. Event Organizers can ping the event's region role, plus a neighbouring one. Want the role? DM Ryan.
+
+**#organizers** (Event Organizer and staff only; in Community, after #local-store-events)
+For Event Organizers and staff: posting guidelines, questions and planning dates.
 
 **#gta-prereleases** (read-only)
 Local prereleases for the upcoming set, as stores list them on Play Hub. Refreshed daily.
