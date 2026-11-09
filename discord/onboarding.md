@@ -39,7 +39,7 @@ which is kept for emergencies.
 ### Event Organizer
 
 For store owners and event organizers. Granted by staff on request (DM a staff member). It
-carries a #store-promos channel override with **Mention @everyone, @here, and All Roles**, so
+carries a #local-store-events channel override with **Mention @everyone, @here, and All Roles**, so
 organizers can ping region roles there and nowhere else. That permission also covers
 @everyone, which is why the role is staff-granted and not self-assigned, and why AutoMod
 blocks @everyone and @here for everyone but staff (below).
@@ -114,29 +114,40 @@ Onboarding runs only on join, so the ~240 members already here never see it.
 1. **Give League News to every member with Common.** A one-off run, so existing members keep
    getting announcements now that they no longer go to @everyone. Anyone can drop it in
    Channels & Roles.
-2. **One @everyone announcement** in #discord-announcements (`<id:customize>` renders as a
+2. **One @everyone announcement** in #announcements (`<id:customize>` renders as a
    link to Channels & Roles):
 
 > @everyone
 >
-> 📣 **Server update: pings, regions and #questions**
+> 📍 **Action needed: pick your region**
 >
-> **This is one of the last @everyone pings.** From now on, league announcements ping
-> **League News**: season news and Invitational qualifiers. You already have it,
-> so you won't miss anything. Don't want it? Untick it in <id:customize>. @everyone is now for
-> emergencies only.
+> The league covers a lot of ground, and an event on the other side of it isn't much use to
+> you. So local event pings now go to **region roles** instead of @everyone, and you only hear
+> about events near you.
 >
-> 📍 **New: region roles.** Want to hear about events near you? Pick your areas in
-> <id:customize>: Toronto, York Region, Peel, Halton/Hamilton, Durham/Peterborough and
-> Southwest. Pick as many as you like, and change them any time.
+> **If you don't pick a region, you won't be pinged about local events.**
 >
-> 🏪 **Run a store or organize events?** DM me for the **Event Organizer** role, so you can
-> ping region roles in #store-promos.
+> 👉 Open <id:customize> and pick every area you want to hear about:
+> Toronto · York Region · Peel · Halton/Hamilton · Durham/Peterborough · Southwest
+>
+> Pick as many as you like, and change them any time.
+>
+> 🏪 **Running a store or an event?** DM me for the **Event Organizer** role, so you can ping
+> these regions when you post in #local-store-events.
+>
+> 📣 **League News**
+> Season news and Invitational qualifiers now ping **League News** instead of @everyone. You
+> already have it, so you won't miss anything. Don't want it? Untick it in the same place.
+> @everyone is now for emergencies only.
 >
 > ❓ **Got a question?** Ask in #questions: the league, results, roles or the bot.
 >
 > I've also tidied the channels into **League**, **Find Events** and **Community**. Thanks for
-> playing! 💜
+> reading! 💜
+
+Existing members never see the Onboarding question, so region roles lead the announcement as an
+action. Pin it. After the first few region pings go out, a short unpinged follow-up
+("Missed a local event ping? Pick your region in <id:customize>.") reaches whoever skipped it.
 
 3. **#start-here and the #league-rules FAQ** carry the `<id:customize>` link, for anyone who
    missed the announcement.
@@ -197,12 +208,12 @@ Rules, scoring and the Invitational: #league-rules.
 #gta-prereleases: prereleases for the next set
 #gta-set-championships: Set Championships in the area
 #ccqs: CCQs within 600 km
-#store-promos: events posted by stores and players
+#local-store-events: events posted by stores and players
 
 **Getting pinged**
 Pick your regions and **League News** in <id:customize>. Choose as many regions as you like.
 Run a store or organize events? DM a staff member for the **Event Organizer** role, so you can
-ping region roles in #store-promos.
+ping region roles in #local-store-events.
 
 **Roles**
 Rarity roles are earned from league results each season and never taken away. See #roles.
@@ -213,8 +224,8 @@ Rarity roles are earned from league results each season and never taken away. Se
 
 ## Setup checklist
 
-Done: region roles and League News (unmentionable), Event Organizer role with its #store-promos
-override, #store-promos slowmode and topic, Enchanted can mention all roles.
+Done: region roles and League News (unmentionable), Event Organizer role with its #local-store-events
+override, #local-store-events slowmode and topic, Enchanted can mention all roles.
 
 - [ ] AutoMod: @everyone/@here keyword block, mention limit 3 (both exempt Enchanted and GTA Lorcana Bot)
 - [ ] Onboarding: every public channel as a default; the pings question, then the region question; turn it on

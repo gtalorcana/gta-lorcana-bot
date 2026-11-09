@@ -5,7 +5,7 @@
 2. ***Keep it All-Ages***: Lorcana is a family game. No explicit or offensive language, images, or topics.
 3. ***Use the Right Channel***: Keep conversations in the channel they belong to. Each channel's description says what it's for.
 4. ***No Spamming***: No flooding messages, images, or links, and no mass mentions.
-5. ***Promote in the Right Place***: Local Lorcana events go in #store-promos. Your own content (streams, videos, art, shops) goes in #self-promotion. Any other advertising needs staff permission. Run a store or organize events? DM staff for the Event Organizer role, so you can ping region roles in #store-promos: your event's region, plus a neighbouring one if you're near the border, once per event.
+5. ***Promote in the Right Place***: Local Lorcana events go in #local-store-events. Your own content (streams, videos, art, shops) goes in #self-promotion. Any other advertising needs staff permission. Run a store or organize events? DM staff for the Event Organizer role, so you can ping region roles in #local-store-events: your event's region, plus a neighbouring one if you're near the border, once per event.
 6. ***No Buying, Selling, or Trading***: This server is for the league. Take trades and sales elsewhere.
 7. ***Watch for Scam DMs***: Staff will never DM you asking for money, gift codes, or to click a link. Report DMs like that to staff.
 8. ***Respect Privacy***: Don't share anyone else's personal information, or private conversations, without their consent.

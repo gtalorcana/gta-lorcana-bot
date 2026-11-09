@@ -13,11 +13,8 @@ New here? Read #community-rules and #league-rules, then pick your regions and pi
 **#community-rules** (read-only)
 Server rules. Breaking them gets a warning, then a timeout, then a ban.
 
-**#discord-announcements** (read-only)
+**#announcements** (read-only)
 League and server news. Pings @League News. Posts here also appear on gtalorcana.ca.
-
-**#events-announcements** (read-only)
-Big events across the GTA: prereleases, Set Championships and special events, posted by staff.
 
 ---
 
@@ -42,7 +39,7 @@ Invitational champions and top 8s, season by season.
 
 ## Events
 
-**#store-promos**
+**#local-store-events**
 Local Lorcana events only, one post per event. Event Organizers can ping the event's region role, plus a neighbouring one. Want the role? DM staff.
 
 **#gta-prereleases** (read-only)
@@ -59,7 +56,7 @@ CCQs within 600 km, six months ahead. Refreshed daily.
 ## Community
 
 **#general**
-Talk Lorcana with GTA players. Events go in #store-promos, your own content in #self-promotion.
+Talk Lorcana with GTA players. Events go in #local-store-events, your own content in #self-promotion.
 
 **#self-promotion**
 Your Lorcana streams, videos, art and shops. One post at a time; no spam.
